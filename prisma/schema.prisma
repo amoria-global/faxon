@@ -1,0 +1,525 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id                Int      @id @default(autoincrement())
+  email             String   @unique
+  firstName         String
+  lastName          String
+  password          String?
+  
+  // OAuth
+  provider          String   @default("manual") // manual, google, apple
+  providerId        String?
+  
+  // Profile
+  phone             String?
+  phoneCountryCode  String?
+  profileImage      String?  // profile field from UserInfo
+  
+  // Address (flexible international support)
+  country           String?
+  state             String?
+  province          String?
+  city              String?
+  street            String?
+  zipCode           String?
+  postalCode        String?
+  postcode          String?
+  pinCode           String?
+  eircode           String?
+  cep               String?
+  
+  // User Management
+  status            String   @default("pending") // active, inactive, pending, suspended, unverified
+  userType          String   @default("guest")   // guest, agent, tourguide, host
+  
+  // Activity Tracking
+  totalSessions     Int      @default(0)
+  twoFactorEnabled  Boolean  @default(false)
+  
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  lastLogin         DateTime?
+  
+  // Relations
+  sessions          UserSession[]
+
+   properties            Property[]
+  bookingsAsGuest       Booking[]           @relation("GuestBookings")
+  reviews               Review[]
+  wishlists             Wishlist[]
+
+  // Payment Relations
+  wallet                Wallet?
+  paymentTransactions   PaymentTransaction[]
+  bankAccounts          BankAccount[]
+  mobileMoneyAccounts   MobileMoneyAccount[]
+  paymentSettings       PaymentSettings?
+  
+  @@map("users")
+}
+
+model UserSession {
+  id            String   @id @default(cuid())
+  userId        Int
+  sessionToken  String   @unique
+  refreshToken  String   @unique
+  
+  // Device Info
+  device        String?
+  browser       String?
+  location      String?
+  ipAddress     String?
+  
+  // Session Status
+  isActive      Boolean  @default(true)
+  lastActivity  DateTime @default(now())
+  expiresAt     DateTime
+  
+  // Timestamps
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([sessionToken])
+  @@map("user_sessions")
+}
+
+model Property {
+  id                Int      @id @default(autoincrement())
+  
+  // Basic Information
+  name              String
+  location          String
+  type              String   // apartment, house, villa, condo, townhouse, studio, loft
+  category          String   // entire_place, private_room, shared_room
+  description       String?
+  
+  // Pricing
+  pricePerNight     Float
+  pricePerTwoNights Float?
+  
+  // Capacity
+  beds              Int
+  baths             Int
+  maxGuests         Int
+  
+  // Features & Amenities (JSON string for SQLite compatibility)
+  features          String   // JSON array: ["WiFi", "Pool", "Kitchen"]
+  
+  // Media (JSON string for SQLite compatibility)
+  images            String   // JSON object: {"livingRoom": ["url1"], "kitchen": ["url2"]}
+  video3D           String?  // URL to 3D tour video
+  
+  // Host Information
+  hostId            Int
+  host              User     @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  ownerDetails      String?  // JSON string of owner details (if different from host)
+  
+  // Availability
+  availableFrom     DateTime?
+  availableTo       DateTime?
+  minStay           Int      @default(1)
+  maxStay           Int?
+  
+  // Status & Verification
+  status            String   @default("pending") // active, inactive, pending, suspended, draft
+  isVerified        Boolean  @default(false)
+  isInstantBook     Boolean  @default(false)
+  
+  // Analytics
+  views             Int      @default(0)
+  totalBookings     Int      @default(0)
+  averageRating     Float    @default(0)
+  reviewsCount      Int      @default(0)
+  
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Relations
+  bookings          Booking[]
+  reviews           Review[]
+  blockedDates      BlockedDate[]
+  pricingRules      PricingRule[]
+  wishlistedBy      Wishlist[]
+  
+  @@index([hostId])
+  @@index([status])
+  @@index([location])
+  @@index([type])
+  @@index([category])
+  @@index([pricePerNight])
+  @@index([averageRating])
+  @@map("properties")
+}
+
+model Booking {
+  id            String   @id @default(cuid())
+  
+  // Property & Guest
+  propertyId    Int
+  property      Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  guestId       Int
+  guest         User     @relation("GuestBookings", fields: [guestId], references: [id], onDelete: Cascade)
+  
+  // Booking Details
+  checkIn       DateTime
+  checkOut      DateTime
+  guests        Int
+  totalPrice    Float
+  
+  // Communication
+  message       String?
+  hostResponse  String?
+  
+  // Status
+  status        String   @default("pending") // pending, confirmed, cancelled, completed, refunded
+  
+  // Payment
+  paymentStatus String   @default("pending") // pending, paid, refunded
+  paymentMethod String?
+  transactionId String?
+  
+  // Timestamps
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  reviews       Review[]
+  
+  @@index([propertyId])
+  @@index([guestId])
+  @@index([status])
+  @@index([checkIn, checkOut])
+  @@map("bookings")
+}
+
+model Review {
+  id           String   @id @default(cuid())
+  
+  // Relations
+  propertyId   Int
+  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookingId    String?
+  booking      Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  
+  // Review Content
+  rating       Int      // 1-5 stars
+  comment      String
+  images       String?  // JSON array of image URLs: ["url1", "url2"]
+  
+  // Host Response
+  response     String?
+  responseDate DateTime?
+  
+  // Status
+  isVisible    Boolean  @default(true)
+  isReported   Boolean  @default(false)
+  
+  // Timestamps
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@unique([propertyId, userId]) // One review per user per property
+  @@index([propertyId])
+  @@index([userId])
+  @@index([rating])
+  @@map("reviews")
+}
+
+model BlockedDate {
+  id         String   @id @default(cuid())
+  
+  // Property
+  propertyId Int
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  
+  // Date Range
+  startDate  DateTime
+  endDate    DateTime
+  reason     String?  // "maintenance", "personal use", "blocked by host", etc.
+  
+  // Status
+  isActive   Boolean  @default(true)
+  
+  // Timestamps
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  @@index([propertyId])
+  @@index([startDate, endDate])
+  @@map("blocked_dates")
+}
+
+model PricingRule {
+  id               String   @id @default(cuid())
+  
+  // Property
+  propertyId       Int
+  property         Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  
+  // Rule Details
+  name             String
+  type             String   // "seasonal", "weekly", "monthly", "custom"
+  startDate        DateTime
+  endDate          DateTime
+  
+  // Price Modification
+  priceModifier    Float    // Amount to add/subtract or percentage
+  modifierType     String   // "percentage" or "fixed"
+  
+  // Conditions
+  minStay          Int?
+  maxStay          Int?
+  
+  // Status
+  isActive         Boolean  @default(true)
+  
+  // Timestamps
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  @@index([propertyId])
+  @@index([startDate, endDate])
+  @@map("pricing_rules")
+}
+
+model Wishlist {
+  id         String   @id @default(cuid())
+  
+  // Relations
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyId Int
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt  DateTime @default(now())
+  
+  @@unique([userId, propertyId])
+  @@index([userId])
+  @@map("wishlists")
+}
+
+model PropertyView {
+  id         String   @id @default(cuid())
+  
+  // Relations
+  propertyId Int
+  userId     Int?     // Null for anonymous views
+  
+  // View Details
+  ipAddress  String?
+  userAgent  String?
+  referer    String?
+  
+  // Timestamps
+  createdAt  DateTime @default(now())
+  
+  @@index([propertyId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("property_views")
+}
+
+// --- PAYMENT MODELS ---
+
+model Wallet {
+  id            String   @id @default(cuid())
+  userId        Int      @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Balance
+  balance       Float    @default(0)
+  currency      String   @default("KES")
+  
+  // Account Details
+  accountNumber String?
+  
+  // Status
+  isActive      Boolean  @default(true)
+  isVerified    Boolean  @default(false)
+  
+  // Timestamps
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  transactions  WalletTransaction[]
+  
+  @@index([userId])
+  @@map("wallets")
+}
+
+model PaymentTransaction {
+  id                  String   @id @default(cuid())
+  
+  // User
+  userId              Int
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Transaction Details
+  type                String   // deposit, withdrawal, transfer, refund, commission, fee
+  method              String   // mobile_money, bank_transfer, card, wallet, cash
+  amount              Float
+  currency            String   @default("KES")
+  status              String   @default("pending") // pending, processing, completed, failed, cancelled, expired
+  
+  // References
+  reference           String   @unique
+  externalId          String?  // External system reference
+  jengaTransactionId  String?  // Jenga API transaction ID
+  
+  // Details
+  description         String?
+  metadata            String?  // JSON string for additional data
+  
+  // Fees & Charges
+  charges             Float?
+  netAmount           Float?
+  
+  // Account Information
+  sourceAccount       String?
+  destinationAccount  String?
+  phoneNumber         String?
+  bankCode            String?
+  accountName         String?
+  
+  // Failure Information
+  failureReason       String?
+  
+  // Callback
+  callbackUrl         String?
+  
+  // Timestamps
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  completedAt         DateTime?
+  
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+  @@index([method])
+  @@index([reference])
+  @@index([jengaTransactionId])
+  @@index([createdAt])
+  @@map("payment_transactions")
+}
+
+model WalletTransaction {
+  id            String   @id @default(cuid())
+  
+  // Wallet
+  walletId      String
+  wallet        Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  
+  // Transaction Details
+  type          String   // credit, debit
+  amount        Float
+  balanceBefore Float
+  balanceAfter  Float
+  
+  // References
+  reference     String
+  description   String
+  transactionId String?  // Link to PaymentTransaction
+  
+  // Timestamps
+  createdAt     DateTime @default(now())
+  
+  @@index([walletId])
+  @@index([reference])
+  @@index([createdAt])
+  @@map("wallet_transactions")
+}
+
+model BankAccount {
+  id            String   @id @default(cuid())
+  
+  // User
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Account Details
+  accountNumber String
+  accountName   String
+  bankCode      String
+  bankName      String
+  branchCode    String?
+  
+  // Status
+  isDefault     Boolean  @default(false)
+  isVerified    Boolean  @default(false)
+  
+  // Timestamps
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@unique([userId, accountNumber, bankCode])
+  @@index([userId])
+  @@map("bank_accounts")
+}
+
+model MobileMoneyAccount {
+  id           String   @id @default(cuid())
+  
+  // User
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Account Details
+  phoneNumber  String
+  provider     String   // mpesa, airtel, orange, mtn, tigo
+  accountName  String
+  
+  // Status
+  isDefault    Boolean  @default(false)
+  isVerified   Boolean  @default(false)
+  
+  // Timestamps
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@unique([userId, phoneNumber])
+  @@index([userId])
+  @@map("mobile_money_accounts")
+}
+
+model PaymentSettings {
+  id                       String   @id @default(cuid())
+  
+  // User
+  userId                   Int      @unique
+  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Settings
+  defaultCurrency          String   @default("KES")
+  autoWithdrawal           Boolean  @default(false)
+  withdrawalThreshold      Float?
+  defaultBankAccount       String?
+  defaultMobileNumber      String?
+  
+  // Notifications (JSON string)
+  notificationPreferences  String   // JSON: {"email": true, "sms": false, ...}
+  
+  // Timestamps
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  
+  @@index([userId])
+  @@map("payment_settings")
+}
