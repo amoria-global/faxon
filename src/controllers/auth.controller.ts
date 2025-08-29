@@ -123,6 +123,39 @@ export class AuthController {
     }
   }
 
+
+  // --- FORGOT PASSWORD ---
+  async forgotPassword(req: Request, res: Response) {
+    try {
+      const { email } = req.body;
+      const result = await authService.forgotPassword(email);
+      res.status(200).json(result);
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
+    }
+  }
+
+  async verifyOtp(req: Request, res: Response) {
+    try {
+      const { email, otp } = req.body;
+      const result = await authService.verifyOtp(email, otp);
+      res.status(200).json(result);
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
+    }
+  }
+
+  async resetPassword(req: Request, res: Response) {
+    try {
+      const { email, otp, newPassword } = req.body;
+      await authService.resetPassword(email, otp, newPassword);
+      res.status(200).json({ message: 'Password has been reset successfully.' });
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
+    }
+  }
+
+
   // --- SESSION MANAGEMENT ---
   async getUserSessions(req: Request, res: Response, next: NextFunction) {
     try {
