@@ -11,6 +11,10 @@ router.post('/login', authController.login);
 router.post('/google', authController.googleAuth);
 router.post('/apple', authController.appleAuth);
 router.post('/refresh-token', authController.refreshToken);
+// --- FORGOT PASSWORD ROUTES ---
+router.post('/forgot-password', authController.forgotPassword);
+router.post('/verify-otp', authController.verifyOtp);
+router.post('/reset-password', authController.resetPassword);
 // --- PROTECTED USER ROUTES ---
 router.use(auth_middleware_1.authenticate); // All routes below require authentication
 // Profile Management

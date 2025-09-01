@@ -40,14 +40,12 @@ class PropertyService {
         return this.transformToPropertyInfo(property);
     }
     async updateProperty(propertyId, hostId, data) {
-        // Check if property belongs to the host
         const existingProperty = await prisma.property.findFirst({
             where: { id: propertyId, hostId }
         });
         if (!existingProperty) {
             throw new Error('Property not found or access denied');
         }
-        // Merge existing images with new ones if provided
         let updatedImages = existingProperty.images;
         if (data.images) {
             const currentImages = JSON.parse(existingProperty.images || '{}');
@@ -90,7 +88,6 @@ class PropertyService {
         if (!property) {
             throw new Error('Property not found or access denied');
         }
-        // Check for active bookings
         const activeBookings = await prisma.booking.count({
             where: {
                 propertyId,
@@ -124,13 +121,13 @@ class PropertyService {
         });
         if (!property)
             return null;
-        // Increment view count
         await prisma.property.update({
             where: { id: propertyId },
             data: { views: { increment: 1 } }
         });
         return this.transformToPropertyInfo(property);
     }
+    // --- THIS ENTIRE METHOD HAS BEEN UPDATED ---
     async searchProperties(filters, page = 1, limit = 20) {
         const skip = (page - 1) * limit;
         const whereClause = {
@@ -138,7 +135,8 @@ class PropertyService {
         };
         // Apply filters
         if (filters.location) {
-            whereClause.location = { contains: filters.location, mode: 'insensitive' };
+            // UPDATED: Removed `mode: 'insensitive'`
+            whereClause.location = { contains: filters.location };
         }
         if (filters.type) {
             whereClause.type = filters.type;
@@ -163,7 +161,6 @@ class PropertyService {
             whereClause.maxGuests = { gte: filters.maxGuests };
         }
         if (filters.features && filters.features.length > 0) {
-            // For JSON feature search - check if features JSON contains all required features
             whereClause.features = {
                 contains: filters.features
             };
@@ -177,10 +174,13 @@ class PropertyService {
         if (filters.hostId) {
             whereClause.hostId = filters.hostId;
         }
-        // Handle search filter properly to avoid overwriting existing OR conditions
+        // UPDATED: Keyword search block
         const orConditions = [];
         if (filters.search) {
-            orConditions.push({ name: { contains: filters.search, mode: 'insensitive' } }, { location: { contains: filters.search, mode: 'insensitive' } });
+            orConditions.push({ name: { contains: filters.search } }, // mode removed
+            { location: { contains: filters.search } }, // mode removed
+            { description: { contains: filters.search } } // description added
+            );
         }
         if (orConditions.length > 0) {
             if (whereClause.OR) {
@@ -190,7 +190,7 @@ class PropertyService {
                 whereClause.OR = orConditions;
             }
         }
-        // Sort options
+        // UPDATED: Sort options block
         const orderBy = {};
         if (filters.sortBy) {
             if (filters.sortBy === 'rating') {
@@ -198,6 +198,9 @@ class PropertyService {
             }
             else if (filters.sortBy === 'price') {
                 orderBy.pricePerNight = filters.sortOrder || 'asc';
+            }
+            else if (filters.sortBy === 'name') {
+                orderBy.name = filters.sortOrder || 'asc';
             }
             else {
                 orderBy[filters.sortBy] = filters.sortOrder || 'desc';
@@ -220,7 +223,7 @@ class PropertyService {
             prisma.property.count({ where: whereClause })
         ]);
         return {
-            properties: properties.map(p => this.transformToPropertySummary(p)),
+            properties: properties.map((p) => this.transformToPropertySummary(p)),
             total,
             page,
             limit,
@@ -244,7 +247,7 @@ class PropertyService {
             },
             orderBy: { createdAt: 'desc' }
         });
-        return properties.map(p => this.transformToPropertyInfo(p));
+        return properties.map((p) => this.transformToPropertyInfo(p));
     }
     // --- BOOKING MANAGEMENT ---
     async createBooking(guestId, data) {
@@ -318,7 +321,7 @@ class PropertyService {
             },
             orderBy: { createdAt: 'desc' }
         });
-        return bookings.map(b => this.transformToBookingInfo(b));
+        return bookings.map((b) => this.transformToBookingInfo(b));
     }
     // --- REVIEW MANAGEMENT ---
     async createReview(userId, data) {
@@ -371,7 +374,7 @@ class PropertyService {
             prisma.review.count({ where: { propertyId } })
         ]);
         return {
-            reviews: reviews.map(r => this.transformToPropertyReview(r)),
+            reviews: reviews.map((r) => this.transformToPropertyReview(r)),
             total,
             page,
             limit,
@@ -398,14 +401,14 @@ class PropertyService {
         ]);
         const totalBookings = bookings.length;
         const totalRevenue = bookings
-            .filter(b => b.status === 'completed')
+            .filter((b) => b.status === 'completed')
             .reduce((sum, b) => sum + b.totalPrice, 0);
         const avgRating = await prisma.property.aggregate({
             where: { hostId },
             _avg: { averageRating: true }
         });
         const upcomingCheckIns = bookings
-            .filter(b => b.status === 'confirmed' && b.checkIn > new Date())
+            .filter((b) => b.status === 'confirmed' && new Date(b.checkIn) > new Date())
             .slice(0, 5);
         return {
             totalProperties,
@@ -413,9 +416,9 @@ class PropertyService {
             totalBookings,
             totalRevenue,
             averageRating: avgRating._avg.averageRating || 0,
-            recentBookings: bookings.slice(0, 5).map(b => this.transformToBookingInfo(b)),
+            recentBookings: bookings.slice(0, 5).map((b) => this.transformToBookingInfo(b)),
             propertyPerformance: [], // Implement based on requirements
-            upcomingCheckIns: upcomingCheckIns.map(b => this.transformToBookingInfo(b)),
+            upcomingCheckIns: upcomingCheckIns.map((b) => this.transformToBookingInfo(b)),
             pendingReviews: reviews
         };
     }
@@ -711,7 +714,7 @@ class PropertyService {
             distinct: ['location'],
             take: 10
         });
-        return properties.map(p => p.location);
+        return properties.map((p) => p.location);
     }
     // --- FEATURED PROPERTIES ---
     async getFeaturedProperties(limit = 8) {
@@ -730,7 +733,7 @@ class PropertyService {
             ],
             take: limit
         });
-        return properties.map(p => this.transformToPropertySummary(p));
+        return properties.map((p) => this.transformToPropertySummary(p));
     }
     // --- SIMILAR PROPERTIES ---
     async getSimilarProperties(propertyId, limit = 6) {
@@ -756,7 +759,7 @@ class PropertyService {
             orderBy: { averageRating: 'desc' },
             take: limit
         });
-        return properties.map(p => this.transformToPropertySummary(p));
+        return properties.map((p) => this.transformToPropertySummary(p));
     }
 }
 exports.PropertyService = PropertyService;
