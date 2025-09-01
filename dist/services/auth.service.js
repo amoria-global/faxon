@@ -262,13 +262,61 @@ class AuthService {
         // Invalidate all sessions for security
         await this.logoutAllDevices(userId);
     }
+    // --- FORGOT PASSWORD ---
+    async forgotPassword(email) {
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user) {
+            // For security, don't reveal if the user exists or not
+            return { message: 'If a user with that email exists, a reset code has been sent.' };
+        }
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expires = new Date(Date.now() + 10 * 60 * 1000); // OTP expires in 10 minutes
+        await prisma.user.update({
+            where: { email },
+            data: {
+                resetPasswordOtp: otp,
+                resetPasswordExpires: expires,
+            },
+        });
+        // TODO: Implement a real email sending service here! (e.g., Nodemailer, SendGrid)
+        console.log(`Password reset OTP for ${email}: ${otp}`);
+        return { message: 'A password reset code has been sent to your email.' };
+    }
+    async verifyOtp(email, otp) {
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user || !user.resetPasswordOtp || !user.resetPasswordExpires) {
+            throw new Error('Invalid OTP or email.');
+        }
+        if (user.resetPasswordExpires < new Date()) {
+            throw new Error('OTP has expired.');
+        }
+        if (user.resetPasswordOtp !== otp) {
+            throw new Error('Invalid OTP.');
+        }
+        return { message: 'OTP verified successfully.' };
+    }
+    async resetPassword(email, otp, newPassword) {
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user || user.resetPasswordOtp !== otp || !user.resetPasswordExpires || user.resetPasswordExpires < new Date()) {
+            throw new Error('Invalid or expired OTP. Please try again.');
+        }
+        const hashedPassword = await bcryptjs_1.default.hash(newPassword, 10);
+        await prisma.user.update({
+            where: { email },
+            data: {
+                password: hashedPassword,
+                resetPasswordOtp: null,
+                resetPasswordExpires: null,
+            },
+        });
+    }
     // --- USER QUERIES ---
     async getAllUsers(filters) {
         const users = await prisma.user.findMany({
             where: filters,
             orderBy: { createdAt: 'desc' }
         });
-        return users.map(user => this.transformToUserInfo(user));
+        return users.map((user) => this.transformToUserInfo(user));
     }
     async getUserByEmail(email) {
         const user = await prisma.user.findUnique({
@@ -287,14 +335,14 @@ class AuthService {
             where: { provider },
             orderBy: { createdAt: 'desc' }
         });
-        return users.map(user => this.transformToUserInfo(user));
+        return users.map((user) => this.transformToUserInfo(user));
     }
     async getUserSessions(userId) {
         const sessions = await prisma.userSession.findMany({
             where: { userId, isActive: true },
             orderBy: { lastActivity: 'desc' }
         });
-        return sessions.map(session => ({
+        return sessions.map((session) => ({
             id: session.id,
             userId: userId.toString(),
             device: session.device || undefined,
