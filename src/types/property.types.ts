@@ -1,3 +1,6 @@
+// src/types/property.types.ts
+import { BookingStatus } from './booking.types'; // Import the complete BookingStatus
+
 // --- PROPERTY DTOs ---
 export interface CreatePropertyDto {
   name: string;
@@ -156,7 +159,7 @@ export interface BookingInfo {
   checkOut: string;
   guests: number;
   totalPrice: number;
-  status: BookingStatus;
+  status: BookingStatus; // Now uses the imported complete BookingStatus
   message?: string;
   createdAt: string;
   updatedAt: string;
@@ -222,7 +225,7 @@ export interface AnalyticsDataPoint {
 export type PropertyStatus = 'active' | 'inactive' | 'pending' | 'suspended' | 'draft';
 export type PropertyType = 'apartment' | 'house' | 'villa' | 'condo' | 'townhouse' | 'studio' | 'loft';
 export type PropertyCategory = 'entire_place' | 'private_room' | 'shared_room';
-export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'refunded';
+// BookingStatus is now imported from booking.types.ts - removed duplicate definition
 export type AmenityCategory = 'basic' | 'featured' | 'safety' | 'accessibility';
 export type FeatureCategory = 'interior' | 'exterior' | 'entertainment' | 'kitchen' | 'bathroom' | 'outdoor';
 

@@ -51,11 +51,11 @@ model User {
   
   // Relations
   sessions          UserSession[]
-
-   properties            Property[]
-  bookingsAsGuest       Booking[]           @relation("GuestBookings")
-  reviews               Review[]
-  wishlists             Wishlist[]
+  properties        Property[]
+  guestBookings     Booking[]           @relation("GuestBookings")
+  hostBookings      Booking[]           @relation("HostBookings")
+  reviews           Review[]
+  wishlists         Wishlist[]
 
   // Payment Relations
   wallet                Wallet?
@@ -166,43 +166,42 @@ model Property {
 }
 
 model Booking {
-  id            String   @id @default(cuid())
-  
-  // Property & Guest
-  propertyId    Int
-  property      Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  guestId       Int
-  guest         User     @relation("GuestBookings", fields: [guestId], references: [id], onDelete: Cascade)
-  
-  // Booking Details
-  checkIn       DateTime
-  checkOut      DateTime
-  guests        Int
-  totalPrice    Float
-  
-  // Communication
-  message       String?
-  hostResponse  String?
-  
-  // Status
-  status        String   @default("pending") // pending, confirmed, cancelled, completed, refunded
-  
-  // Payment
-  paymentStatus String   @default("pending") // pending, paid, refunded
-  paymentMethod String?
-  transactionId String?
-  
-  // Timestamps
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
-  // Relations
-  reviews       Review[]
-  
+  id               String   @id @default(uuid())
+  propertyId       Int
+  guestId          Int
+  hostId           Int
+  checkIn          DateTime
+  checkOut         DateTime
+  guests           Int
+  nights           Int
+  pricePerNight    Float
+  subtotal         Float
+  cleaningFee      Float
+  serviceFee       Float
+  taxes            Float
+  totalPrice       Float
+  status           String   @default("pending")
+  paymentMethod    String?
+  paymentTiming    String
+  message          String?
+  specialRequests  String?
+  cancellationReason String?
+  refundAmount     Float?
+  confirmationCode String   @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  guest    User     @relation("GuestBookings", fields: [guestId], references: [id])
+  host     User     @relation("HostBookings", fields: [hostId], references: [id])
+  reviews  Review[]
+
   @@index([propertyId])
   @@index([guestId])
+  @@index([hostId])
   @@index([status])
-  @@index([checkIn, checkOut])
+  @@index([checkIn])
+  @@index([checkOut])
   @@map("bookings")
 }
 

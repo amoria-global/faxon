@@ -1,3 +1,4 @@
+// src/services/property.service.ts
 import { PrismaClient } from '@prisma/client';
 import {
   CreatePropertyDto,
@@ -17,10 +18,17 @@ import {
   AvailabilityCalendar,
   CalendarDay
 } from '../types/property.types';
+import { BookingService } from './booking.service';
+import { CreateBookingDto } from '../types/booking.types';
 
 const prisma = new PrismaClient();
 
 export class PropertyService {
+  private bookingService: BookingService;
+
+  constructor() {
+    this.bookingService = new BookingService();
+  }
   
   // --- PROPERTY CRUD OPERATIONS ---
   async createProperty(hostId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
@@ -291,57 +299,19 @@ export class PropertyService {
 
   // --- BOOKING MANAGEMENT ---
   async createBooking(guestId: number, data: BookingRequest): Promise<BookingInfo> {
-    // Check property availability
-    const property = await prisma.property.findUnique({
-      where: { id: data.propertyId }
-    });
+    // Convert BookingRequest to CreateBookingDto format and delegate to BookingService
+    const createBookingDto: CreateBookingDto = {
+      propertyId: data.propertyId,
+      checkIn: data.checkIn,
+      checkOut: data.checkOut,
+      guests: data.guests,
+      totalPrice: data.totalPrice,
+      message: data.message,
+      paymentTiming: 'later' // Default to pay later for property service bookings
+    };
 
-    if (!property || property.status !== 'active') {
-      throw new Error('Property not available');
-    }
-
-    // Check date availability
-    const conflictingBooking = await prisma.booking.findFirst({
-      where: {
-        propertyId: data.propertyId,
-        status: { in: ['pending', 'confirmed'] },
-        OR: [
-          {
-            checkIn: { lte: new Date(data.checkIn) },
-            checkOut: { gt: new Date(data.checkIn) }
-          },
-          {
-            checkIn: { lt: new Date(data.checkOut) },
-            checkOut: { gte: new Date(data.checkOut) }
-          },
-          {
-            checkIn: { gte: new Date(data.checkIn) },
-            checkOut: { lte: new Date(data.checkOut) }
-          }
-        ]
-      }
-    });
-
-    if (conflictingBooking) {
-      throw new Error('Property is not available for selected dates');
-    }
-
-    const booking = await prisma.booking.create({
-      data: {
-        propertyId: data.propertyId,
-        guestId,
-        checkIn: new Date(data.checkIn),
-        checkOut: new Date(data.checkOut),
-        guests: data.guests,
-        totalPrice: data.totalPrice,
-        message: data.message,
-        status: 'pending'
-      },
-      include: {
-        property: true,
-        guest: true
-      }
-    });
+    // Delegate to BookingService which handles all required fields properly
+    const bookingInfo = await this.bookingService.createBooking(guestId, createBookingDto);
 
     // Update property total bookings
     await prisma.property.update({
@@ -349,7 +319,23 @@ export class PropertyService {
       data: { totalBookings: { increment: 1 } }
     });
 
-    return this.transformToBookingInfo(booking);
+    // Return the booking info in the expected format
+    return {
+      id: bookingInfo.id,
+      propertyId: bookingInfo.propertyId,
+      propertyName: bookingInfo.propertyName,
+      guestId: bookingInfo.guestId,
+      guestName: bookingInfo.guestName,
+      guestEmail: bookingInfo.guestEmail,
+      checkIn: bookingInfo.checkIn,
+      checkOut: bookingInfo.checkOut,
+      guests: bookingInfo.guests,
+      totalPrice: bookingInfo.totalPrice,
+      status: bookingInfo.status,
+      message: bookingInfo.message,
+      createdAt: bookingInfo.createdAt,
+      updatedAt: bookingInfo.updatedAt
+    };
   }
 
   async getBookingsByProperty(propertyId: number, hostId: number) {
