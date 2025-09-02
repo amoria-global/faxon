@@ -8,7 +8,8 @@ const cors_1 = __importDefault(require("cors"));
 const config_1 = require("./config/config");
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
 const payment_routes_1 = __importDefault(require("./routes/payment.routes"));
-const property_routes_1 = __importDefault(require("./routes/property.routes")); // ADDED: Import property routes consistently
+const property_routes_1 = __importDefault(require("./routes/property.routes"));
+const review_routes_1 = __importDefault(require("./routes/review.routes")); // ADDED: Import review routes
 const app = (0, express_1.default)();
 // Middleware
 app.use((0, cors_1.default)({
@@ -19,7 +20,8 @@ app.use(express_1.default.json());
 // Routes
 app.use('/api/auth', auth_routes_1.default);
 app.use('/api/payments', payment_routes_1.default);
-app.use('/api/properties', property_routes_1.default); // UPDATED: Use the imported property routes
+app.use('/api/properties', property_routes_1.default);
+app.use('/api', review_routes_1.default); // UPDATED: Register review routes at /api level to handle both /api/properties/:propertyId/reviews and /api/reviews/* routes
 // Health check
 app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
