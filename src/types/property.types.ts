@@ -184,6 +184,8 @@ export interface CreateReviewDto {
   images?: string[];
 }
 
+
+
 // --- AMENITIES & FEATURES ---
 export interface PropertyAmenity {
   id: string;

@@ -429,52 +429,36 @@ export class PropertyController {
   };
 
   // --- REVIEW MANAGEMENT ---
-  createReview = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      if (!req.user) {
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required'
-        });
-        return;
-      }
-
-      const userId = parseInt(req.user.userId);
-      const reviewData: CreateReviewDto = req.body;
-
-      // Validate required fields
-      if (!reviewData.propertyId || !reviewData.rating || !reviewData.comment) {
-        res.status(400).json({
-          success: false,
-          message: 'Property ID, rating, and comment are required'
-        });
-        return;
-      }
-
-      // Validate rating
-      if (reviewData.rating < 1 || reviewData.rating > 5) {
-        res.status(400).json({
-          success: false,
-          message: 'Rating must be between 1 and 5'
-        });
-        return;
-      }
-
-      const review = await this.propertyService.createReview(userId, reviewData);
-      
-      res.status(201).json({
-        success: true,
-        message: 'Review created successfully',
-        data: review
-      });
-    } catch (error: any) {
-      console.error('Error creating review:', error);
-      res.status(400).json({
-        success: false,
-        message: error.message || 'Failed to create review'
-      });
+createReview = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Authentication required' });
+      return;
     }
-  };
+
+    const userId = parseInt(req.user.userId);
+    const reviewData: CreateReviewDto = req.body;
+
+    // Validate required fields
+    if (!reviewData.propertyId || !reviewData.rating || !reviewData.comment) {
+      res.status(400).json({ success: false, message: 'Property ID, rating, and comment are required' });
+      return;
+    }
+
+    if (reviewData.rating < 1 || reviewData.rating > 5) {
+      res.status(400).json({ success: false, message: 'Rating must be between 1 and 5' });
+      return;
+    }
+
+    const review = await this.propertyService.createReview(userId, reviewData);
+
+    res.status(201).json({ success: true, message: 'Review created successfully', data: review });
+  } catch (error: any) {
+    console.error('Error creating review:', error);
+    res.status(400).json({ success: false, message: error.message || 'Failed to create review' });
+  }
+};
+
 
   getPropertyReviews = async (req: Request, res: Response): Promise<void> => {
     try {
