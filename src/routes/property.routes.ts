@@ -41,6 +41,6 @@ router.post('/bookings', propertyController.createBooking);
 router.get('/:id/bookings', propertyController.getPropertyBookings);
 
 // --- REVIEW MANAGEMENT ---
-router.post('/reviews', propertyController.createReview);
+router.post('/:id/reviews', propertyController.createReview);
 
 export default router;
