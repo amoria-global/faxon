@@ -3,7 +3,8 @@ import cors from 'cors';
 import { config } from './config/config';
 import authRoutes from './routes/auth.routes';
 import paymentRoutes from './routes/payment.routes';
-import propertyRoutes from './routes/property.routes'; // ADDED: Import property routes consistently
+import propertyRoutes from './routes/property.routes';
+import reviewRoutes from './routes/review.routes'; // ADDED: Import review routes
 
 const app = express();
 
@@ -17,7 +18,8 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/payments', paymentRoutes);
-app.use('/api/properties', propertyRoutes); // UPDATED: Use the imported property routes
+app.use('/api/properties', propertyRoutes);
+app.use('/api', reviewRoutes); // UPDATED: Register review routes at /api level to handle both /api/properties/:propertyId/reviews and /api/reviews/* routes
 
 // Health check
 app.get('/health', (req, res) => {
