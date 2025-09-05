@@ -387,3 +387,275 @@ export interface AvailabilityCalendar {
     reason: string;
   }[];
 }
+
+// Additional types for host dashboard functionality
+
+// --- GUEST MANAGEMENT TYPES ---
+export interface GuestProfile {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+  profileImage?: string;
+  verificationStatus: 'verified' | 'pending' | 'unverified';
+  joinDate: string;
+  totalBookings: number;
+  totalSpent: number;
+  averageRating: number;
+  lastBooking?: string;
+  preferredCommunication: 'email' | 'phone' | 'both';
+  notes?: string;
+}
+
+export interface GuestBookingHistory {
+  guestId: number;
+  bookings: BookingInfo[];
+  totalBookings: number;
+  totalRevenue: number;
+  averageStayDuration: number;
+  favoriteProperty?: string;
+}
+
+// --- EARNINGS & FINANCIAL TYPES ---
+export interface EarningsOverview {
+  totalEarnings: number;
+  monthlyEarnings: number;
+  yearlyEarnings: number;
+  pendingPayouts: number;
+  completedPayouts: number;
+  averageNightlyRate: number;
+  occupancyRate: number;
+  revenueGrowth: number; // percentage
+}
+
+export interface EarningsBreakdown {
+  propertyId: number;
+  propertyName: string;
+  totalEarnings: number;
+  monthlyEarnings: number;
+  bookingsCount: number;
+  averageBookingValue: number;
+  occupancyRate: number;
+  lastBooking?: string;
+}
+
+export interface PayoutHistory {
+  id: string;
+  amount: number;
+  currency: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  payoutDate: string;
+  method: 'bank_transfer' | 'paypal' | 'stripe';
+  fees: number;
+  netAmount: number;
+  period: {
+    start: string;
+    end: string;
+  };
+}
+
+export interface FinancialTransaction {
+  id: string;
+  type: 'booking' | 'cancellation' | 'refund' | 'fee' | 'payout';
+  amount: number;
+  currency: string;
+  description: string;
+  date: string;
+  bookingId?: string;
+  propertyId?: number;
+  status: 'pending' | 'completed' | 'failed';
+}
+
+// --- ANALYTICS TYPES ---
+export interface HostAnalytics {
+  overview: AnalyticsOverview;
+  propertyPerformance: PropertyPerformanceMetrics[];
+  bookingTrends: BookingTrendData[];
+  guestInsights: GuestAnalytics;
+  revenueAnalytics: RevenueAnalytics;
+  marketComparison: MarketComparisonData;
+}
+
+export interface AnalyticsOverview {
+  totalViews: number;
+  totalBookings: number;
+  totalRevenue: number;
+  averageRating: number;
+  occupancyRate: number;
+  conversionRate: number;
+  repeatGuestRate: number;
+  timeRange: 'week' | 'month' | 'quarter' | 'year';
+}
+
+export interface PropertyPerformanceMetrics {
+  propertyId: number;
+  propertyName: string;
+  views: number;
+  bookings: number;
+  revenue: number;
+  occupancyRate: number;
+  averageRating: number;
+  conversionRate: number;
+  pricePerformance: 'above_market' | 'at_market' | 'below_market';
+  recommendations: string[];
+}
+
+export interface BookingTrendData {
+  date: string;
+  bookings: number;
+  revenue: number;
+  averageBookingValue: number;
+  occupancyRate: number;
+}
+
+export interface GuestAnalytics {
+  totalGuests: number;
+  newGuests: number;
+  returningGuests: number;
+  averageStayDuration: number;
+  guestDemographics: {
+    ageGroups: { range: string; count: number }[];
+    countries: { country: string; count: number }[];
+    purposes: { purpose: string; count: number }[];
+  };
+  guestSatisfaction: {
+    averageRating: number;
+    ratingDistribution: { rating: number; count: number }[];
+    commonComplaints: string[];
+    commonPraises: string[];
+  };
+}
+
+export interface RevenueAnalytics {
+  monthlyRevenue: { month: string; revenue: number }[];
+  revenueByProperty: { propertyId: number; propertyName: string; revenue: number }[];
+  seasonalTrends: { season: string; averageRevenue: number; bookingCount: number }[];
+  pricingOptimization: {
+    currentPrice: number;
+    suggestedPrice: number;
+    potentialIncrease: number;
+    confidence: number;
+  }[];
+}
+
+export interface MarketComparisonData {
+  averagePrice: number;
+  myAveragePrice: number;
+  occupancyRate: number;
+  myOccupancyRate: number;
+  competitorCount: number;
+  marketPosition: 'premium' | 'mid_range' | 'budget';
+  opportunities: string[];
+}
+
+// --- BOOKING MANAGEMENT TYPES ---
+export interface BookingFilters {
+  status?: BookingStatus[];
+  propertyId?: number;
+  dateRange?: {
+    start: string;
+    end: string;
+  };
+  guestId?: number;
+  sortBy?: 'date' | 'amount' | 'property' | 'guest';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface BookingUpdateDto {
+  status?: BookingStatus;
+  notes?: string;
+  specialRequests?: string;
+  checkInInstructions?: string;
+  checkOutInstructions?: string;
+}
+
+export interface BookingCalendar {
+  year: number;
+  month: number;
+  days: BookingCalendarDay[];
+}
+
+export interface BookingCalendarDay {
+  date: string;
+  bookings: {
+    id: string;
+    guestName: string;
+    propertyName: string;
+    type: 'check_in' | 'check_out' | 'ongoing';
+    status: BookingStatus;
+  }[];
+  revenue: number;
+  isToday: boolean;
+}
+
+// --- DASHBOARD ENHANCEMENT TYPES ---
+export interface EnhancedHostDashboard extends HostDashboard {
+  quickStats: {
+    todayCheckIns: number;
+    todayCheckOuts: number;
+    occupiedProperties: number;
+    pendingActions: number;
+  };
+  recentActivity: DashboardActivity[];
+  alerts: DashboardAlert[];
+  weather?: WeatherInfo;
+  marketTrends: {
+    demandTrend: 'up' | 'down' | 'stable';
+    averagePrice: number;
+    competitorActivity: string;
+  };
+}
+
+export interface DashboardActivity {
+  id: string;
+  type: 'booking' | 'review' | 'payout' | 'message' | 'cancellation';
+  title: string;
+  description: string;
+  timestamp: string;
+  propertyId?: number;
+  bookingId?: string;
+  isRead: boolean;
+  priority: 'low' | 'medium' | 'high';
+}
+
+export interface DashboardAlert {
+  id: string;
+  type: 'urgent' | 'warning' | 'info';
+  title: string;
+  message: string;
+  actionRequired: boolean;
+  actionUrl?: string;
+  createdAt: string;
+  expiresAt?: string;
+}
+
+export interface WeatherInfo {
+  location: string;
+  current: {
+    temperature: number;
+    condition: string;
+    humidity: number;
+    windSpeed: number;
+  };
+  forecast: {
+    date: string;
+    highTemp: number;
+    lowTemp: number;
+    condition: string;
+    precipitationChance: number;
+  }[];
+}
+
+// --- SEARCH AND FILTER TYPES ---
+export interface GuestSearchFilters {
+  search?: string; // Name or email
+  verificationStatus?: 'verified' | 'pending' | 'unverified';
+  bookingStatus?: 'active' | 'past' | 'upcoming';
+  sortBy?: 'name' | 'bookings' | 'spending' | 'joinDate';
+  sortOrder?: 'asc' | 'desc';
+  dateRange?: {
+    start: string;
+    end: string;
+  };
+}

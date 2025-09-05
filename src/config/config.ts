@@ -7,6 +7,11 @@ export const config = {
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   appleClientId: process.env.APPLE_CLIENT_ID || '',
   clientUrl: process.env.CLIENT_URL || 'http://localhost:3000',
+
+  //brevo api
+  brevoApiKey: process.env.BREVO_API_KEY || '',
+  brevoSenderEmail: process.env.BREVO_SENDER_EMAIL || '',
+
   // Jenga API Configuration
   jenga: {
     baseUrl: process.env.JENGA_BASE_URL || 'https://sandbox.jengahq.io',
