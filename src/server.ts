@@ -14,7 +14,12 @@ app.use(cors({
   origin: [
     'http://localhost:3000',
     'http://localhost:3001',
-    'https://jambolush.com'
+    'https://jambolush.com',
+    'https://app.jambolush.com',
+    'http://jambolush.com',
+    'http://app.jambolush.com',
+    'https://www.jambolush.com',
+    'https://www.app.jambolush.com',
   ],
   credentials: true
 }));
