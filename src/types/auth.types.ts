@@ -1,13 +1,33 @@
 // --- AUTHENTICATION DTOs ---
 export interface RegisterDto {
   email: string;
-  firstName: string;
-  lastName: string;
-  password: string;
+  firstName?: string;
+  lastName?: string;
+  names?: string; // Full name from BecomeHost
+  password?: string; // Optional for service providers
   phone?: string;
   phoneCountryCode?: string;
   country?: string;
-  userType?: 'host' | 'field agent';
+  state?: string;
+  province?: string;
+  city?: string;
+  street?: string;
+  zipCode?: string;
+  postalCode?: string;
+  postcode?: string;
+  pinCode?: string;
+  eircode?: string;
+  cep?: string;
+  provider?: string; // 'manual' | 'google' | 'apple'
+  userType?: 'guest' | 'host' | 'tourguide' | 'agent' | 'admin';
+  
+  // Tour Guide specific fields (when userType = 'tourguide')
+  bio?: string;
+  experience?: number; // years
+  languages?: string[]; // Array of languages
+  specializations?: string[]; // Array of specializations
+  licenseNumber?: string;
+  certifications?: string[]; // Array of certifications
 }
 
 export interface LoginDto {
@@ -51,11 +71,11 @@ export interface UserInfo {
   id: number;
   email: string;
   name: string; // Combined firstName + lastName
-  firstName?: string; // For backward compatibility
-  lastName?: string;  // For backward compatibility
+  firstName?: string;
+  lastName?: string;
   phone?: string;
   phoneCountryCode?: string;
-  profile?: string; // Profile image URL
+  profile?: string; // Profile image URL (profileImage in DB)
   country?: string;
   state?: string;
   province?: string;
@@ -67,10 +87,28 @@ export interface UserInfo {
   pinCode?: string;
   eircode?: string;
   cep?: string;
-  status?: 'active' | 'inactive' | 'pending' | 'suspended';
-  userType?: 'host' | 'field agent';
-  provider?: 'manual' | 'google' | 'apple';
+  status?: string; // 'active' | 'inactive' | 'pending' | 'suspended' | 'unverified'
+  userType?: string; // 'guest' | 'host' | 'tourguide' | 'agent' | 'admin'
+  provider?: string; // 'manual' | 'google' | 'apple'
   providerId?: string;
+  
+  // Tour Guide specific fields
+  bio?: string;
+  experience?: number;
+  languages?: string[]; // Parsed from JSON string
+  specializations?: string[]; // Parsed from JSON string
+  rating?: number;
+  totalTours?: number;
+  isVerified?: boolean;
+  licenseNumber?: string;
+  certifications?: string[]; // Parsed from JSON string
+  
+  // Additional fields from schema
+  verificationStatus?: string;
+  preferredCommunication?: string;
+  hostNotes?: string;
+  averageRating?: number;
+  
   created_at: string;
   updated_at: string;
   last_login?: string;
@@ -95,6 +133,18 @@ export interface UpdateUserProfileDto {
   pinCode?: string;
   eircode?: string;
   cep?: string;
+  
+  // Tour Guide specific fields
+  bio?: string;
+  experience?: number;
+  languages?: string[]; // Will be converted to JSON string
+  specializations?: string[]; // Will be converted to JSON string
+  licenseNumber?: string;
+  certifications?: string[]; // Will be converted to JSON string
+  
+  // Additional fields
+  verificationStatus?: string;
+  preferredCommunication?: string;
 }
 
 export interface UploadProfileImageDto {
@@ -125,6 +175,7 @@ export interface AuthResponse {
   user: UserInfo;
   accessToken: string;
   refreshToken: string;
+  applicationId?: string; // For BecomeHost registration
 }
 
 export interface ApiResponse<T = any> {
@@ -185,17 +236,17 @@ export interface ResendVerificationDto {
 
 // --- ADMIN/MANAGEMENT TYPES ---
 export interface AdminUpdateUserDto {
-  status?: 'active' | 'inactive' | 'pending' | 'suspended';
-  userType?: 'host' | 'field agent';
+  status?: string; // 'active' | 'inactive' | 'pending' | 'suspended' | 'unverified'
+  userType?: string; // 'guest' | 'host' | 'tourguide' | 'agent' | 'admin'
   email?: string;
   name?: string;
 }
 
 export interface UserSearchFilters {
-  status?: 'active' | 'inactive' | 'pending' | 'suspended';
-  userType?: 'host' | 'field agent';
+  status?: string; // 'active' | 'inactive' | 'pending' | 'suspended' | 'unverified'
+  userType?: string; // 'guest' | 'host' | 'tourguide' | 'agent' | 'admin'
   country?: string;
-  provider?: 'manual' | 'google' | 'apple';
+  provider?: string; // 'manual' | 'google' | 'apple'
   search?: string; // Search by name or email
   dateFrom?: string;
   dateTo?: string;
@@ -215,9 +266,9 @@ export interface ValidationError {
 }
 
 // --- UTILITY TYPES ---
-export type AuthProvider = 'manual' | 'google' | 'apple';
-export type UserStatus = 'active' | 'inactive' | 'pending' | 'suspended';
-export type UserType = 'host' | 'field agent';
+export type AuthProvider = string; // 'manual' | 'google' | 'apple' - stored as string in DB
+export type UserStatus = string; // 'active' | 'inactive' | 'pending' | 'suspended' | 'unverified'
+export type UserType = string; // 'guest' | 'host' | 'tourguide' | 'agent' | 'admin'
 export type AddressField = 'street' | 'city' | 'state' | 'province' | 'zipCode' | 'postalCode' | 'postcode' | 'pinCode' | 'eircode' | 'cep';
 
 // --- FORM STATE TYPES ---

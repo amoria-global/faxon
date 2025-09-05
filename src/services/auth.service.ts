@@ -31,29 +31,81 @@ export class AuthService {
       throw new Error('User already exists');
     }
 
-    const hashedPassword = await bcrypt.hash(data.password, 10);
+    // Handle name parsing
+    let firstName = data.firstName || '';
+    let lastName = data.lastName || '';
+    
+    // If names (full name) is provided instead of firstName/lastName
+    if (data.names && (!data.firstName || !data.lastName)) {
+      const nameParts = data.names.trim().split(' ');
+      firstName = nameParts[0] || '';
+      lastName = nameParts.slice(1).join(' ') || '';
+    }
+
+    // Validate required fields for all users
+    if (!firstName || !lastName) {
+      throw new Error('First name and last name are required');
+    }
+
+    // For service providers (host, tourguide, agent), password is optional
+    const isServiceProvider = ['host', 'tourguide', 'agent'].includes(data.userType || '');
+    let hashedPassword = null;
+
+    if (data.password) {
+      hashedPassword = await bcrypt.hash(data.password, 10);
+    } else if (!isServiceProvider) {
+      // For regular users (guest), password is required
+      throw new Error('Password is required');
+    }
+    
+    // Prepare tour guide specific data
+    const tourGuideData = data.userType === 'tourguide' ? {
+      bio: data.bio,
+      experience: data.experience,
+      languages: data.languages ? JSON.stringify(data.languages) : null,
+      specializations: data.specializations ? JSON.stringify(data.specializations) : null,
+      licenseNumber: data.licenseNumber,
+      certifications: data.certifications ? JSON.stringify(data.certifications) : null,
+    } : {};
     
     const user = await prisma.user.create({
       data: {
         email: data.email,
-        firstName: data.firstName,
-        lastName: data.lastName,
+        firstName,
+        lastName,
         password: hashedPassword,
-        provider: 'manual',
+        provider: data.provider || 'manual',
         phone: data.phone,
-        phoneCountryCode: data.phoneCountryCode || 'US',
+        phoneCountryCode: data.phoneCountryCode,
         country: data.country,
-        userType: data.userType || 'guest'
+        state: data.state,
+        province: data.province,
+        city: data.city,
+        street: data.street,
+        zipCode: data.zipCode,
+        postalCode: data.postalCode,
+        postcode: data.postcode,
+        pinCode: data.pinCode,
+        eircode: data.eircode,
+        cep: data.cep,
+        userType: data.userType || 'guest',
+        status: isServiceProvider ? 'pending' : 'active', // Service providers need approval
+        verificationStatus: isServiceProvider ? 'pending' : 'unverified',
+        ...tourGuideData
       }
     });
 
-    const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email);
+    // Generate application ID for service providers
+    const applicationId = isServiceProvider ? `APP-${user.id}-${Date.now()}` : undefined;
+
+    const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email, user.userType);
     await this.createSession(user.id, refreshToken);
 
     return { 
       user: this.transformToUserInfo(user), 
       accessToken, 
-      refreshToken 
+      refreshToken,
+      applicationId
     };
   }
 
@@ -62,7 +114,16 @@ export class AuthService {
       where: { email: data.email }
     });
 
-    if (!user || !user.password) {
+    if (!user) {
+      throw new Error('Invalid credentials');
+    }
+
+    // Check if user is a service provider pending password setup
+    if (!user.password && ['host', 'tourguide', 'agent'].includes(user.userType)) {
+      throw new Error('Please set up your password first. Check your email for instructions.');
+    }
+
+    if (!user.password) {
       throw new Error('Invalid credentials');
     }
 
@@ -80,7 +141,7 @@ export class AuthService {
       }
     });
 
-    const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email);
+    const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email, user.userType);
     await this.createSession(user.id, refreshToken);
 
     return { 
@@ -140,6 +201,8 @@ export class AuthService {
           lastName: data.lastName || '',
           provider: data.provider,
           providerId: data.providerId,
+          userType: 'guest',
+          status: 'active',
           totalSessions: 1
         }
       });
@@ -154,7 +217,7 @@ export class AuthService {
       });
     }
 
-    const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email);
+    const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email, user.userType);
     await this.createSession(user.id, refreshToken);
 
     return { 
@@ -205,7 +268,7 @@ export class AuthService {
       throw new Error('Invalid or expired refresh token');
     }
 
-    const { accessToken, refreshToken } = await this.generateTokens(session.user.id, session.user.email);
+    const { accessToken, refreshToken } = await this.generateTokens(session.user.id, session.user.email, session.user.userType);
     
     // Update session with new refresh token
     await prisma.userSession.update({
@@ -251,6 +314,16 @@ export class AuthService {
   }
 
   async updateUserProfile(userId: number, data: UpdateUserProfileDto): Promise<UserInfo> {
+    // Prepare tour guide specific data
+    const tourGuideData = data.bio || data.experience || data.languages || data.specializations || data.licenseNumber || data.certifications ? {
+      bio: data.bio,
+      experience: data.experience,
+      languages: data.languages ? JSON.stringify(data.languages) : undefined,
+      specializations: data.specializations ? JSON.stringify(data.specializations) : undefined,
+      licenseNumber: data.licenseNumber,
+      certifications: data.certifications ? JSON.stringify(data.certifications) : undefined,
+    } : {};
+
     const user = await prisma.user.update({
       where: { id: userId },
       data: {
@@ -268,7 +341,10 @@ export class AuthService {
         postcode: data.postcode,
         pinCode: data.pinCode,
         eircode: data.eircode,
-        cep: data.cep
+        cep: data.cep,
+        verificationStatus: data.verificationStatus,
+        preferredCommunication: data.preferredCommunication,
+        ...tourGuideData
       }
     });
 
@@ -290,13 +366,17 @@ export class AuthService {
       where: { id: userId }
     });
 
-    if (!user || !user.password) {
-      throw new Error('User not found or invalid account type');
+    if (!user) {
+      throw new Error('User not found');
     }
 
-    const isCurrentValid = await bcrypt.compare(data.currentPassword, user.password);
-    if (!isCurrentValid) {
-      throw new Error('Current password is incorrect');
+    // If user is a service provider without password, skip current password check
+    const isServiceProvider = ['host', 'tourguide', 'agent'].includes(user.userType);
+    if (user.password && !(isServiceProvider && !user.password)) {
+      const isCurrentValid = await bcrypt.compare(data.currentPassword, user.password);
+      if (!isCurrentValid) {
+        throw new Error('Current password is incorrect');
+      }
     }
 
     if (data.newPassword !== data.confirmPassword) {
@@ -307,13 +387,38 @@ export class AuthService {
     
     await prisma.user.update({
       where: { id: userId },
-      data: { password: hashedNewPassword }
+      data: { 
+        password: hashedNewPassword
+      }
     });
-
-
 
     // Invalidate all sessions for security
     await this.logoutAllDevices(userId);
+  }
+
+  // --- PASSWORD SETUP FOR SERVICE PROVIDERS ---
+  async setupPassword(email: string, token: string, newPassword: string): Promise<void> {
+    // Verify the token and get user
+    const user = await prisma.user.findFirst({
+      where: {
+        email,
+        password: null, // User without password
+        userType: { in: ['host', 'tourguide', 'agent'] }
+      }
+    });
+
+    if (!user) {
+      throw new Error('Invalid request');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword
+      }
+    });
   }
  
   // --- FORGOT PASSWORD ---
@@ -374,7 +479,7 @@ export class AuthService {
       data: {
         password: hashedPassword,
         resetPasswordOtp: null,
-        resetPasswordExpires: null,
+        resetPasswordExpires: null
       },
     });
   }
@@ -420,7 +525,7 @@ export class AuthService {
       orderBy: { lastActivity: 'desc' }
     });
 
-    return sessions.map((session: { id: any; device: any; browser: any; location: any; ipAddress: any; isActive: any; lastActivity: { toISOString: () => any; }; createdAt: { toISOString: () => any; }; }) => ({
+    return sessions.map((session: any) => ({
       id: session.id,
       userId: userId.toString(),
       device: session.device || undefined,
@@ -434,15 +539,15 @@ export class AuthService {
   }
 
   // --- UTILITY METHODS ---
-  private async generateTokens(userId: number, email: string) {
+  private async generateTokens(userId: number, email: string, userType: string) {
     const accessToken = jwt.sign(
-      { userId: userId.toString(), email } as JwtPayload,
+      { userId: userId.toString(), email, userType } as JwtPayload,
       config.jwtSecret,
       { expiresIn: '15m' }
     );
 
     const refreshToken = jwt.sign(
-      { userId: userId.toString(), email, type: 'refresh' },
+      { userId: userId.toString(), email, userType, type: 'refresh' },
       config.jwtSecret,
       { expiresIn: '30d' }
     );
@@ -459,6 +564,19 @@ export class AuthService {
   }
 
   private transformToUserInfo(user: any): UserInfo {
+    // Parse JSON strings for tour guide fields
+    let languages, specializations, certifications;
+    try {
+      languages = user.languages ? JSON.parse(user.languages) : undefined;
+      specializations = user.specializations ? JSON.parse(user.specializations) : undefined;
+      certifications = user.certifications ? JSON.parse(user.certifications) : undefined;
+    } catch {
+      // If parsing fails, keep as is
+      languages = user.languages;
+      specializations = user.specializations;
+      certifications = user.certifications;
+    }
+
     return {
       id: user.id,
       email: user.email,
@@ -467,7 +585,7 @@ export class AuthService {
       lastName: user.lastName,
       phone: user.phone,
       phoneCountryCode: user.phoneCountryCode,
-      profile: user.profileImage,
+      profile: user.profileImage, // Map profileImage to profile
       country: user.country,
       state: user.state,
       province: user.province,
@@ -483,6 +601,21 @@ export class AuthService {
       userType: user.userType,
       provider: user.provider,
       providerId: user.providerId,
+      // Tour Guide specific fields
+      bio: user.bio,
+      experience: user.experience,
+      languages,
+      specializations,
+      rating: user.rating,
+      totalTours: user.totalTours,
+      isVerified: user.isVerified,
+      licenseNumber: user.licenseNumber,
+      certifications,
+      // Additional fields
+      verificationStatus: user.verificationStatus,
+      preferredCommunication: user.preferredCommunication,
+      hostNotes: user.hostNotes,
+      averageRating: user.averageRating,
       created_at: user.createdAt.toISOString(),
       updated_at: user.updatedAt.toISOString(),
       last_login: user.lastLogin?.toISOString(),
