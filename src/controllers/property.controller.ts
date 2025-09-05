@@ -7,7 +7,11 @@ import {
   BookingRequest,
   CreateReviewDto,
   PropertyImages,
-  PropertyStatus
+  PropertyStatus,
+  BookingFilters,
+  BookingStatus,
+  BookingUpdateDto,
+  GuestSearchFilters
 } from '../types/property.types';
 
 interface AuthenticatedRequest extends Request {
@@ -724,4 +728,597 @@ createReview = async (req: AuthenticatedRequest, res: Response): Promise<void> =
       });
     }
   };
+
+  // Additional methods to add to PropertyController class
+
+// --- GUEST MANAGEMENT ENDPOINTS ---
+getHostGuests = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const filters: GuestSearchFilters = {
+      search: req.query.search as string,
+      verificationStatus: req.query.verificationStatus as 'verified' | 'pending' | 'unverified',
+      bookingStatus: req.query.bookingStatus as 'active' | 'past' | 'upcoming',
+      sortBy: req.query.sortBy as 'name' | 'bookings' | 'spending' | 'joinDate',
+      sortOrder: req.query.sortOrder as 'asc' | 'desc',
+      dateRange: req.query.startDate && req.query.endDate ? {
+        start: req.query.startDate as string,
+        end: req.query.endDate as string
+      } : undefined
+    };
+
+    // Remove undefined values
+    Object.keys(filters).forEach(key => {
+      if (filters[key as keyof GuestSearchFilters] === undefined) {
+        delete filters[key as keyof GuestSearchFilters];
+      }
+    });
+
+    const guests = await this.propertyService.getHostGuests(hostId, filters);
+    
+    res.json({
+      success: true,
+      message: 'Guests retrieved successfully',
+      data: guests
+    });
+  } catch (error: any) {
+    console.error('Error fetching guests:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve guests'
+    });
+  }
+};
+
+getGuestDetails = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const guestId = parseInt(req.params.guestId);
+
+    if (isNaN(guestId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid guest ID'
+      });
+      return;
+    }
+
+    const guestHistory = await this.propertyService.getGuestDetails(hostId, guestId);
+    
+    res.json({
+      success: true,
+      message: 'Guest details retrieved successfully',
+      data: guestHistory
+    });
+  } catch (error: any) {
+    console.error('Error fetching guest details:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to retrieve guest details'
+    });
+  }
+};
+
+// --- BOOKING MANAGEMENT ENDPOINTS ---
+getHostBookings = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+
+    const filters: BookingFilters = {
+      status: req.query.status ? (req.query.status as string).split(',') as BookingStatus[] : undefined,
+      propertyId: req.query.propertyId ? parseInt(req.query.propertyId as string) : undefined,
+      guestId: req.query.guestId ? parseInt(req.query.guestId as string) : undefined,
+      dateRange: req.query.startDate && req.query.endDate ? {
+        start: req.query.startDate as string,
+        end: req.query.endDate as string
+      } : undefined,
+      sortBy: req.query.sortBy as 'date' | 'amount' | 'property' | 'guest',
+      sortOrder: req.query.sortOrder as 'asc' | 'desc'
+    };
+
+    // Remove undefined values
+    Object.keys(filters).forEach(key => {
+      if (filters[key as keyof BookingFilters] === undefined) {
+        delete filters[key as keyof BookingFilters];
+      }
+    });
+
+    const result = await this.propertyService.getHostBookings(hostId, filters, page, limit);
+    
+    res.json({
+      success: true,
+      message: 'Bookings retrieved successfully',
+      data: result
+    });
+  } catch (error: any) {
+    console.error('Error fetching host bookings:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve bookings'
+    });
+  }
+};
+
+updateBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const bookingId = req.params.bookingId;
+    const updateData: BookingUpdateDto = req.body;
+
+    if (!bookingId) {
+      res.status(400).json({
+        success: false,
+        message: 'Booking ID is required'
+      });
+      return;
+    }
+
+    const booking = await this.propertyService.updateBooking(hostId, bookingId, updateData);
+    
+    res.json({
+      success: true,
+      message: 'Booking updated successfully',
+      data: booking
+    });
+  } catch (error: any) {
+    console.error('Error updating booking:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to update booking'
+    });
+  }
+};
+
+getBookingCalendar = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const year = parseInt(req.query.year as string) || new Date().getFullYear();
+    const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
+
+    if (month < 1 || month > 12) {
+      res.status(400).json({
+        success: false,
+        message: 'Month must be between 1 and 12'
+      });
+      return;
+    }
+
+    const calendar = await this.propertyService.getBookingCalendar(hostId, year, month);
+    
+    res.json({
+      success: true,
+      message: 'Booking calendar retrieved successfully',
+      data: calendar
+    });
+  } catch (error: any) {
+    console.error('Error fetching booking calendar:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve booking calendar'
+    });
+  }
+};
+
+// --- EARNINGS ENDPOINTS ---
+getEarningsOverview = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const earnings = await this.propertyService.getEarningsOverview(hostId);
+    
+    res.json({
+      success: true,
+      message: 'Earnings overview retrieved successfully',
+      data: earnings
+    });
+  } catch (error: any) {
+    console.error('Error fetching earnings overview:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve earnings overview'
+    });
+  }
+};
+
+getEarningsBreakdown = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const breakdown = await this.propertyService.getEarningsBreakdown(hostId);
+    
+    res.json({
+      success: true,
+      message: 'Earnings breakdown retrieved successfully',
+      data: breakdown
+    });
+  } catch (error: any) {
+    console.error('Error fetching earnings breakdown:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve earnings breakdown'
+    });
+  }
+};
+
+// --- ANALYTICS ENDPOINTS ---
+getHostAnalytics = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const timeRange = (req.query.timeRange as 'week' | 'month' | 'quarter' | 'year') || 'month';
+
+    const analytics = await this.propertyService.getHostAnalytics(hostId, timeRange);
+    
+    res.json({
+      success: true,
+      message: 'Analytics retrieved successfully',
+      data: analytics
+    });
+  } catch (error: any) {
+    console.error('Error fetching analytics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve analytics'
+    });
+  }
+};
+
+// --- ENHANCED DASHBOARD ---
+getEnhancedDashboard = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const dashboard = await this.propertyService.getEnhancedHostDashboard(hostId);
+    
+    res.json({
+      success: true,
+      message: 'Enhanced dashboard retrieved successfully',
+      data: dashboard
+    });
+  } catch (error: any) {
+    console.error('Error fetching enhanced dashboard:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve enhanced dashboard'
+    });
+  }
+};
+
+// --- PROPERTY AVAILABILITY MANAGEMENT ---
+updatePropertyAvailability = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const propertyId = parseInt(req.params.id);
+    const hostId = parseInt(req.user.userId);
+    const { availableFrom, availableTo } = req.body;
+
+    if (isNaN(propertyId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid property ID'
+      });
+      return;
+    }
+
+    if (!availableFrom || !availableTo) {
+      res.status(400).json({
+        success: false,
+        message: 'Available from and to dates are required'
+      });
+      return;
+    }
+
+    const property = await this.propertyService.updatePropertyAvailability(
+      propertyId, 
+      hostId, 
+      availableFrom, 
+      availableTo
+    );
+    
+    res.json({
+      success: true,
+      message: 'Property availability updated successfully',
+      data: property
+    });
+  } catch (error: any) {
+    console.error('Error updating property availability:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to update property availability'
+    });
+  }
+};
+
+blockPropertyDates = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const propertyId = parseInt(req.params.id);
+    const hostId = parseInt(req.user.userId);
+    const { startDate, endDate, reason } = req.body;
+
+    if (isNaN(propertyId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid property ID'
+      });
+      return;
+    }
+
+    if (!startDate || !endDate) {
+      res.status(400).json({
+        success: false,
+        message: 'Start date and end date are required'
+      });
+      return;
+    }
+
+    await this.propertyService.blockDates(propertyId, hostId, startDate, endDate, reason);
+    
+    res.json({
+      success: true,
+      message: 'Dates blocked successfully'
+    });
+  } catch (error: any) {
+    console.error('Error blocking dates:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to block dates'
+    });
+  }
+};
+
+// --- PRICING MANAGEMENT ---
+updatePropertyPricing = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const propertyId = parseInt(req.params.id);
+    const hostId = parseInt(req.user.userId);
+    const { pricePerNight, pricePerTwoNights } = req.body;
+
+    if (isNaN(propertyId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid property ID'
+      });
+      return;
+    }
+
+    if (!pricePerNight || pricePerNight <= 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Valid price per night is required'
+      });
+      return;
+    }
+
+    const property = await this.propertyService.updatePropertyPricing(
+      propertyId, 
+      hostId, 
+      pricePerNight, 
+      pricePerTwoNights
+    );
+    
+    res.json({
+      success: true,
+      message: 'Property pricing updated successfully',
+      data: property
+    });
+  } catch (error: any) {
+    console.error('Error updating property pricing:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to update property pricing'
+    });
+  }
+};
+
+// --- BULK OPERATIONS ---
+bulkUpdateBookings = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const { bookingIds, updates } = req.body;
+
+    if (!Array.isArray(bookingIds) || bookingIds.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Booking IDs array is required'
+      });
+      return;
+    }
+
+    if (!updates || Object.keys(updates).length === 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Updates object is required'
+      });
+      return;
+    }
+
+    const results = await Promise.allSettled(
+      bookingIds.map(bookingId => 
+        this.propertyService.updateBooking(hostId, bookingId, updates)
+      )
+    );
+
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.length - successful;
+
+    res.json({
+      success: true,
+      message: `Bulk update completed: ${successful} successful, ${failed} failed`,
+      data: {
+        total: results.length,
+        successful,
+        failed,
+        results: results.map((result, index) => ({
+          bookingId: bookingIds[index],
+          status: result.status,
+          error: result.status === 'rejected' ? result.reason?.message : undefined
+        }))
+      }
+    });
+  } catch (error: any) {
+    console.error('Error in bulk update:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to perform bulk update'
+    });
+  }
+};
+
+// --- QUICK ACTIONS ---
+getQuickStats = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const dashboard = await this.propertyService.getEnhancedHostDashboard(hostId);
+    
+    res.json({
+      success: true,
+      message: 'Quick stats retrieved successfully',
+      data: dashboard.quickStats
+    });
+  } catch (error: any) {
+    console.error('Error fetching quick stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve quick stats'
+    });
+  }
+};
+
+getRecentActivity = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const hostId = parseInt(req.user.userId);
+    const limit = parseInt(req.query.limit as string) || 10;
+    
+    const dashboard = await this.propertyService.getEnhancedHostDashboard(hostId);
+    
+    res.json({
+      success: true,
+      message: 'Recent activity retrieved successfully',
+      data: dashboard.recentActivity.slice(0, limit)
+    });
+  } catch (error: any) {
+    console.error('Error fetching recent activity:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve recent activity'
+    });
+  }
+};
 }

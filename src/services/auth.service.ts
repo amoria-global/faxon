@@ -43,7 +43,7 @@ export class AuthService {
         phone: data.phone,
         phoneCountryCode: data.phoneCountryCode || 'US',
         country: data.country,
-        userType: data.userType || 'host'
+        userType: data.userType || 'guest'
       }
     });
 

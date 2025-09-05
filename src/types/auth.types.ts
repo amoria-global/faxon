@@ -25,6 +25,7 @@ export interface OAuthDto {
 
 export interface JwtPayload {
   userId: string;
+  userType?: string;
   email: string;
 }
 

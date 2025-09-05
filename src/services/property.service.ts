@@ -15,7 +15,25 @@ import {
   MediaUploadResponse,
   DynamicPricing,
   AvailabilityCalendar,
-  CalendarDay
+  CalendarDay,
+  AnalyticsOverview,
+  BookingCalendar,
+  BookingCalendarDay,
+  BookingFilters,
+  BookingTrendData,
+  BookingUpdateDto,
+  DashboardActivity,
+  EarningsBreakdown,
+  EarningsOverview,
+  EnhancedHostDashboard,
+  GuestAnalytics,
+  GuestBookingHistory,
+  GuestProfile,
+  GuestSearchFilters,
+  HostAnalytics,
+  PropertyPerformanceMetrics,
+  RevenueAnalytics,
+  BookingStatus
 } from '../types/property.types';
 
 const prisma = new PrismaClient();
@@ -270,24 +288,29 @@ export class PropertyService {
     const whereClause: any = { hostId };
     
     if (filters?.status) {
-      whereClause.status = filters.status;
+        whereClause.status = filters.status;
     }
 
     const properties = await prisma.property.findMany({
-      where: whereClause,
-      include: {
-        host: true,
-        reviews: { select: { rating: true } },
-        bookings: {
-          where: { status: 'confirmed' },
-          select: { id: true }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
+        where: whereClause,
+        include: {
+            host: true,
+            reviews: { select: { rating: true } },
+            bookings: {
+                where: { status: 'confirmed' },
+                select: { id: true }
+            }
+        },
+        orderBy: { createdAt: 'desc' }
     });
 
-    return properties.map((p: any) => this.transformToPropertyInfo(p));
-  }
+    // ✅ Use Promise.all to handle async transformations
+    const transformedProperties = await Promise.all(
+        properties.map((p: any) => this.transformToPropertyInfo(p))
+    );
+    
+    return transformedProperties;
+}
 
   // --- BOOKING MANAGEMENT ---
   async createBooking(guestId: number, data: BookingRequest): Promise<BookingInfo> {
@@ -510,19 +533,18 @@ export class PropertyService {
     });
   }
 
-  private async getBlockedDates(propertyId: number): Promise<string[]> {
-    // If you have a BlockedDate model, uncomment this:
-    // const blockedDates = await prisma.blockedDate.findMany({
-    //   where: { 
-    //     propertyId,
-    //     endDate: { gte: new Date() }
-    //   }
-    // });
-    // return blockedDates.flatMap(bd => this.getDateRange(bd.startDate, bd.endDate));
-    
-    // For now, return empty array
-    return [];
-  }
+ private async getBlockedDates(propertyId: number): Promise<string[]> {
+  const blockedDates = await prisma.blockedDate.findMany({
+    where: { 
+      propertyId,
+      endDate: { gte: new Date() },
+      isActive: true
+    }
+  });
+  
+  return blockedDates.flatMap(bd => this.getDateRange(bd.startDate, bd.endDate));
+}
+
 
   private getDateRange(start: Date, end: Date): string[] {
     const dates = [];
@@ -731,37 +753,24 @@ export class PropertyService {
   }
 
   async blockDates(propertyId: number, hostId: number, startDate: string, endDate: string, reason?: string): Promise<void> {
-    const property = await prisma.property.findFirst({
-      where: { id: propertyId, hostId }
-    });
+  const property = await prisma.property.findFirst({
+    where: { id: propertyId, hostId }
+  });
 
-    if (!property) {
-      throw new Error('Property not found or access denied');
-    }
-
-    // Note: You'll need to create a BlockedDate model in your Prisma schema:
-    // model BlockedDate {
-    //   id         Int      @id @default(autoincrement())
-    //   propertyId Int
-    //   startDate  DateTime
-    //   endDate    DateTime
-    //   reason     String?
-    //   property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-    //   createdAt  DateTime @default(now())
-    // }
-    
-    // Uncomment this when you add the BlockedDate model:
-    // await prisma.blockedDate.create({
-    //   data: {
-    //     propertyId,
-    //     startDate: new Date(startDate),
-    //     endDate: new Date(endDate),
-    //     reason: reason || 'Blocked by host'
-    //   }
-    // });
-    
-    console.warn('BlockedDate functionality not implemented - add BlockedDate model to Prisma schema');
+  if (!property) {
+    throw new Error('Property not found or access denied');
   }
+
+  await prisma.blockedDate.create({
+    data: {
+      propertyId,
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      reason: reason || 'Blocked by host',
+      isActive: true
+    }
+  });
+}
 
   // --- PRICING MANAGEMENT ---
   async updatePropertyPricing(propertyId: number, hostId: number, pricePerNight: number, pricePerTwoNights?: number): Promise<PropertyInfo> {
@@ -884,4 +893,745 @@ export class PropertyService {
 
     return properties.map((p: any) => this.transformToPropertySummary(p));
   }
+
+  // Additional methods to add to PropertyService class
+
+// --- GUEST MANAGEMENT METHODS ---
+async getHostGuests(hostId: number, filters?: GuestSearchFilters) {
+  const whereClause: any = {
+    bookingsAsGuest: {
+      some: {
+        property: {
+          hostId: hostId
+        }
+      }
+    }
+  };
+
+  // Apply search filters
+  if (filters?.search) {
+    whereClause.OR = [
+      { firstName: { contains: filters.search } },
+      { lastName: { contains: filters.search } },
+      { email: { contains: filters.search } }
+    ];
+  }
+
+  if (filters?.verificationStatus) {
+    whereClause.verificationStatus = filters.verificationStatus;
+  }
+
+  // Date range filter for bookings
+  if (filters?.dateRange) {
+    whereClause.bookingsAsGuest.some.createdAt = {
+      gte: new Date(filters.dateRange.start),
+      lte: new Date(filters.dateRange.end)
+    };
+  }
+
+  const orderBy: any = {};
+  if (filters?.sortBy) {
+    switch (filters.sortBy) {
+      case 'name':
+        orderBy.firstName = filters.sortOrder || 'asc';
+        break;
+      case 'joinDate':
+        orderBy.createdAt = filters.sortOrder || 'desc';
+        break;
+      default:
+        orderBy[filters.sortBy] = filters.sortOrder || 'desc';
+    }
+  } else {
+    orderBy.createdAt = 'desc';
+  }
+
+  const guests = await prisma.user.findMany({
+    where: whereClause,
+    include: {
+      bookingsAsGuest: {
+        where: {
+          property: { hostId }
+        },
+        include: {
+          property: { select: { name: true } }
+        },
+        orderBy: { createdAt: 'desc' }
+      },
+      reviews: {
+        where: {
+          property: { hostId }
+        }
+      }
+    },
+    orderBy
+  });
+
+  return guests.map((guest: any) => this.transformToGuestProfile(guest));
+}
+
+async getGuestDetails(hostId: number, guestId: number): Promise<GuestBookingHistory> {
+  const guest = await prisma.user.findFirst({
+    where: {
+      id: guestId,
+      bookingsAsGuest: {
+        some: {
+          property: { hostId }
+        }
+      }
+    },
+    include: {
+      bookingsAsGuest: {
+        where: {
+          property: { hostId }
+        },
+        include: {
+          property: { select: { name: true } }
+        },
+        orderBy: { createdAt: 'desc' }
+      }
+    }
+  });
+
+  if (!guest) {
+    throw new Error('Guest not found or no booking history with your properties');
+  }
+
+  const bookings = guest.bookingsAsGuest.map((b: any) => this.transformToBookingInfo(b));
+  const totalRevenue = bookings
+    .filter(b => b.status === 'completed')
+    .reduce((sum, b) => sum + b.totalPrice, 0);
+
+  const avgStayDuration = bookings.length > 0 
+    ? bookings.reduce((sum, b) => {
+        const checkIn = new Date(b.checkIn);
+        const checkOut = new Date(b.checkOut);
+        return sum + Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
+      }, 0) / bookings.length
+    : 0;
+
+  // Find most booked property
+  const propertyBookings = bookings.reduce((acc: any, b) => {
+    acc[b.propertyName] = (acc[b.propertyName] || 0) + 1;
+    return acc;
+  }, {});
+  
+  const favoriteProperty = Object.keys(propertyBookings).length > 0 
+    ? Object.keys(propertyBookings).reduce((a, b) => propertyBookings[a] > propertyBookings[b] ? a : b)
+    : undefined;
+
+  return {
+    guestId: guest.id,
+    bookings,
+    totalBookings: bookings.length,
+    totalRevenue,
+    averageStayDuration: avgStayDuration,
+    favoriteProperty
+  };
+}
+
+async getHostBookings(hostId: number, filters?: BookingFilters, page: number = 1, limit: number = 20) {
+  const skip = (page - 1) * limit;
+  
+  const whereClause: any = {
+    property: { hostId }
+  };
+
+  if (filters?.status) {
+    whereClause.status = { in: filters.status };
+  }
+
+  if (filters?.propertyId) {
+    whereClause.propertyId = filters.propertyId;
+  }
+
+  if (filters?.guestId) {
+    whereClause.guestId = filters.guestId;
+  }
+
+  if (filters?.dateRange) {
+    whereClause.createdAt = {
+      gte: new Date(filters.dateRange.start),
+      lte: new Date(filters.dateRange.end)
+    };
+  }
+
+  const orderBy: any = {};
+  if (filters?.sortBy) {
+    switch (filters.sortBy) {
+      case 'date':
+        orderBy.checkIn = filters.sortOrder || 'desc';
+        break;
+      case 'amount':
+        orderBy.totalPrice = filters.sortOrder || 'desc';
+        break;
+      case 'property':
+        orderBy.property = { name: filters.sortOrder || 'asc' };
+        break;
+      case 'guest':
+        orderBy.guest = { firstName: filters.sortOrder || 'asc' };
+        break;
+      default:
+        orderBy.createdAt = 'desc';
+    }
+  } else {
+    orderBy.createdAt = 'desc';
+  }
+
+  const [bookings, total] = await Promise.all([
+    prisma.booking.findMany({
+      where: whereClause,
+      include: {
+        property: { select: { name: true, location: true } },
+        guest: { select: { firstName: true, lastName: true, email: true, profileImage: true } }
+      },
+      orderBy,
+      skip,
+      take: limit
+    }),
+    prisma.booking.count({ where: whereClause })
+  ]);
+
+  return {
+    bookings: bookings.map((b: any) => this.transformToBookingInfo(b)),
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit)
+  };
+}
+
+async updateBooking(hostId: number, bookingId: string, data: BookingUpdateDto): Promise<BookingInfo> {
+  // Verify host owns the property for this booking
+  const booking = await prisma.booking.findFirst({
+    where: {
+      id: bookingId,
+      property: { hostId }
+    },
+    include: {
+      property: true,
+      guest: true
+    }
+  });
+
+  if (!booking) {
+    throw new Error('Booking not found or access denied');
+  }
+
+  const updateData: any = {};
+  
+  if (data.status) updateData.status = data.status;
+  if (data.notes) updateData.notes = data.notes;
+  if (data.specialRequests) updateData.specialRequests = data.specialRequests;
+  if (data.checkInInstructions) updateData.checkInInstructions = data.checkInInstructions;
+  if (data.checkOutInstructions) updateData.checkOutInstructions = data.checkOutInstructions;
+
+  const updatedBooking = await prisma.booking.update({
+    where: { id: bookingId },
+    data: updateData,
+    include: {
+      property: true,
+      guest: true
+    }
+  });
+
+  return this.transformToBookingInfo(updatedBooking);
+}
+
+async getBookingCalendar(hostId: number, year: number, month: number): Promise<BookingCalendar> {
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0);
+  
+  const bookings = await prisma.booking.findMany({
+    where: {
+      property: { hostId },
+      status: { in: ['confirmed', 'completed'] },
+      OR: [
+        {
+          checkIn: { gte: startDate, lte: endDate }
+        },
+        {
+          checkOut: { gte: startDate, lte: endDate }
+        },
+        {
+          AND: [
+            { checkIn: { lte: startDate } },
+            { checkOut: { gte: endDate } }
+          ]
+        }
+      ]
+    },
+    include: {
+      property: { select: { name: true } },
+      guest: { select: { firstName: true, lastName: true } }
+    }
+  });
+
+  const days: BookingCalendarDay[] = [];
+  const today = new Date();
+
+  for (let day = 1; day <= endDate.getDate(); day++) {
+    const currentDate = new Date(year, month - 1, day);
+    const dateStr = currentDate.toISOString().split('T')[0];
+    
+    const dayBookings = bookings
+      .filter(booking => {
+        const checkIn = new Date(booking.checkIn);
+        const checkOut = new Date(booking.checkOut);
+        return currentDate >= checkIn && currentDate <= checkOut;
+      })
+      .map(booking => {
+        const checkIn = new Date(booking.checkIn);
+        const checkOut = new Date(booking.checkOut);
+        
+        let type: 'check_in' | 'check_out' | 'ongoing' = 'ongoing';
+        if (currentDate.toDateString() === checkIn.toDateString()) {
+          type = 'check_in';
+        } else if (currentDate.toDateString() === checkOut.toDateString()) {
+          type = 'check_out';
+        }
+
+        return {
+          id: booking.id,
+          guestName: `${booking.guest.firstName} ${booking.guest.lastName}`,
+          propertyName: booking.property.name,
+          type,
+          status: booking.status as BookingStatus  // Cast to BookingStatus type
+        };
+      });
+
+    const revenue = dayBookings.reduce((sum, booking) => {
+      const fullBooking = bookings.find(b => b.id === booking.id);
+      return sum + (fullBooking?.totalPrice || 0);
+    }, 0);
+
+    days.push({
+      date: dateStr,
+      bookings: dayBookings,
+      revenue,
+      isToday: currentDate.toDateString() === today.toDateString()
+    });
+  }
+
+  return {
+    year,
+    month,
+    days
+  };
+}
+
+async getEarningsOverview(hostId: number): Promise<EarningsOverview> {
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
+  const [
+    totalEarnings,
+    monthlyEarnings,
+    yearlyEarnings,
+    lastMonthEarnings,
+    totalBookings,
+    monthlyBookings,
+    occupiedNights,
+    totalNights
+  ] = await Promise.all([
+    // Total earnings from completed bookings
+    prisma.booking.aggregate({
+      where: {
+        property: { hostId },
+        status: 'completed'
+      },
+      _sum: { totalPrice: true }
+    }),
+    // This month's earnings
+    prisma.booking.aggregate({
+      where: {
+        property: { hostId },
+        status: 'completed',
+        checkOut: { gte: startOfMonth }
+      },
+      _sum: { totalPrice: true }
+    }),
+    // This year's earnings
+    prisma.booking.aggregate({
+      where: {
+        property: { hostId },
+        status: 'completed',
+        checkOut: { gte: startOfYear }
+      },
+      _sum: { totalPrice: true }
+    }),
+    // Last month's earnings for growth calculation
+    prisma.booking.aggregate({
+      where: {
+        property: { hostId },
+        status: 'completed',
+        checkOut: { gte: lastMonthStart, lte: lastMonthEnd }
+      },
+      _sum: { totalPrice: true }
+    }),
+    // Total bookings count
+    prisma.booking.count({
+      where: {
+        property: { hostId },
+        status: 'completed'
+      }
+    }),
+    // This month's bookings
+    prisma.booking.count({
+      where: {
+        property: { hostId },
+        status: 'completed',
+        checkOut: { gte: startOfMonth }
+      }
+    }),
+    // Calculate occupied nights (approximate)
+    prisma.booking.findMany({
+      where: {
+        property: { hostId },
+        status: 'completed'
+      },
+      select: { checkIn: true, checkOut: true }
+    }),
+    // Get total available nights from properties
+    prisma.property.count({
+      where: { hostId, status: 'active' }
+    })
+  ]);
+
+  // Calculate occupied nights
+  const occupiedNightsCount = occupiedNights.reduce((total, booking) => {
+    const nights = Math.ceil((new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) / (1000 * 60 * 60 * 24));
+    return total + nights;
+  }, 0);
+
+  // Approximate total available nights (365 days * active properties)
+  const totalAvailableNights = totalNights * 365;
+  const occupancyRate = totalAvailableNights > 0 ? (occupiedNightsCount / totalAvailableNights) * 100 : 0;
+
+  // Calculate average nightly rate
+  const avgNightlyRate = occupiedNightsCount > 0 ? (totalEarnings._sum.totalPrice || 0) / occupiedNightsCount : 0;
+
+  // Calculate revenue growth
+  const currentMonth = monthlyEarnings._sum.totalPrice || 0;
+  const lastMonth = lastMonthEarnings._sum.totalPrice || 0;
+  const revenueGrowth = lastMonth > 0 ? ((currentMonth - lastMonth) / lastMonth) * 100 : 0;
+
+  return {
+    totalEarnings: totalEarnings._sum.totalPrice || 0,
+    monthlyEarnings: currentMonth,
+    yearlyEarnings: yearlyEarnings._sum.totalPrice || 0,
+    pendingPayouts: 0, // TODO: Implement with Payout model
+    completedPayouts: 0, // TODO: Implement with Payout model
+    averageNightlyRate: avgNightlyRate,
+    occupancyRate: occupancyRate,
+    revenueGrowth: revenueGrowth
+  };
+}
+
+async getEarningsBreakdown(hostId: number): Promise<EarningsBreakdown[]> {
+  const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+  const properties = await prisma.property.findMany({
+    where: { hostId },
+    include: {
+      bookings: {
+        where: { status: 'completed' },
+        select: {
+          totalPrice: true,
+          checkIn: true,
+          checkOut: true,
+          createdAt: true
+        }
+      }
+    }
+  });
+
+  return properties.map(property => {
+    const allBookings = property.bookings;
+    const monthlyBookings = allBookings.filter(b => new Date(b.checkOut) >= startOfMonth);
+    
+    const totalEarnings = allBookings.reduce((sum, b) => sum + b.totalPrice, 0);
+    const monthlyEarnings = monthlyBookings.reduce((sum, b) => sum + b.totalPrice, 0);
+    
+    const totalNights = allBookings.reduce((sum, b) => {
+      const nights = Math.ceil((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / (1000 * 60 * 60 * 24));
+      return sum + nights;
+    }, 0);
+
+    const avgBookingValue = allBookings.length > 0 ? totalEarnings / allBookings.length : 0;
+    const occupancyRate = totalNights > 0 ? (totalNights / (365 * (new Date().getFullYear() - new Date(property.createdAt).getFullYear() + 1))) * 100 : 0;
+    
+    const lastBooking = allBookings.length > 0 
+      ? allBookings.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
+      : null;
+
+    return {
+      propertyId: property.id,
+      propertyName: property.name,
+      totalEarnings,
+      monthlyEarnings,
+      bookingsCount: allBookings.length,
+      averageBookingValue: avgBookingValue,
+      occupancyRate: Math.min(occupancyRate, 100), // Cap at 100%
+      lastBooking: lastBooking?.createdAt.toISOString()
+    };
+  });
+}
+
+// --- ANALYTICS METHODS ---
+async getHostAnalytics(hostId: number, timeRange: 'week' | 'month' | 'quarter' | 'year' = 'month'): Promise<HostAnalytics> {
+  const now = new Date();
+  let startDate: Date;
+
+  switch (timeRange) {
+    case 'week':
+      startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      break;
+    case 'quarter':
+      startDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+      break;
+    case 'year':
+      startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+      break;
+    default: // month
+      startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+  }
+
+  const [overview, propertyPerformance, bookingTrends, guestInsights, revenueAnalytics] = await Promise.all([
+    this.getAnalyticsOverview(hostId, timeRange),
+    this.getPropertyPerformanceMetrics(hostId, timeRange),
+    this.getBookingTrendData(hostId, startDate),
+    this.getGuestAnalytics(hostId),
+    this.getRevenueAnalytics(hostId)
+  ]);
+
+  return {
+    overview,
+    propertyPerformance,
+    bookingTrends,
+    guestInsights,
+    revenueAnalytics,
+    marketComparison: {
+      averagePrice: 0, // TODO: Implement market data
+      myAveragePrice: revenueAnalytics.monthlyRevenue.reduce((sum, m) => sum + m.revenue, 0) / Math.max(revenueAnalytics.monthlyRevenue.length, 1),
+      occupancyRate: 0, // TODO: Implement market data
+      myOccupancyRate: overview.occupancyRate,
+      competitorCount: 0, // TODO: Implement market data
+      marketPosition: 'mid_range', // TODO: Implement market analysis
+      opportunities: [] // TODO: Implement opportunity analysis
+    }
+  };
+}
+
+// --- ENHANCED DASHBOARD ---
+async getEnhancedHostDashboard(hostId: number): Promise<EnhancedHostDashboard> {
+  const basicDashboard = await this.getHostDashboard(hostId);
+  
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+
+  const [todayCheckIns, todayCheckOuts, occupiedProperties, pendingActions, recentActivity] = await Promise.all([
+    // Today's check-ins
+    prisma.booking.count({
+      where: {
+        property: { hostId },
+        status: 'confirmed',
+        checkIn: {
+          gte: new Date(todayStr),
+          lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+        }
+      }
+    }),
+    // Today's check-outs
+    prisma.booking.count({
+      where: {
+        property: { hostId },
+        status: 'confirmed',
+        checkOut: {
+          gte: new Date(todayStr),
+          lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+        }
+      }
+    }),
+    // Currently occupied properties
+    prisma.booking.count({
+      where: {
+        property: { hostId },
+        status: 'confirmed',
+        checkIn: { lte: today },
+        checkOut: { gt: today }
+      }
+    }),
+    // Pending actions (bookings, reviews, etc.)
+    prisma.booking.count({
+      where: {
+        property: { hostId },
+        status: 'pending'
+      }
+    }),
+    // Recent activity
+    this.getRecentActivity(hostId)
+  ]);
+
+  return {
+    ...basicDashboard,
+    quickStats: {
+      todayCheckIns,
+      todayCheckOuts,
+      occupiedProperties,
+      pendingActions
+    },
+    recentActivity,
+    alerts: [], // TODO: Implement alert system
+    marketTrends: {
+      demandTrend: 'stable', // TODO: Implement market analysis
+      averagePrice: 0, // TODO: Implement market data
+      competitorActivity: 'Normal activity in your area' // TODO: Implement competitor tracking
+    }
+  };
+}
+
+// --- HELPER METHODS ---
+private transformToGuestProfile(guest: any): GuestProfile {
+  const bookings = guest.bookingsAsGuest || [];
+  const completedBookings = bookings.filter((b: any) => b.status === 'completed');
+  
+  return {
+    id: guest.id,
+    firstName: guest.firstName,
+    lastName: guest.lastName,
+    email: guest.email,
+    phone: guest.phone,
+    profileImage: guest.profileImage,
+    verificationStatus: guest.verificationStatus || 'unverified',
+    joinDate: guest.createdAt.toISOString(),
+    totalBookings: bookings.length,
+    totalSpent: completedBookings.reduce((sum: number, b: any) => sum + b.totalPrice, 0),
+    averageRating: guest.averageRating || 0,
+    lastBooking: bookings.length > 0 ? bookings[0].createdAt.toISOString() : undefined,
+    preferredCommunication: guest.preferredCommunication || 'email',
+    notes: guest.hostNotes
+  };
+}
+
+
+private async getAnalyticsOverview(hostId: number, timeRange: 'week' | 'month' | 'quarter' | 'year'): Promise<AnalyticsOverview> {
+  // Implementation would depend on having view tracking and other metrics
+  return {
+    totalViews: 0, // TODO: Implement view tracking
+    totalBookings: 0,
+    totalRevenue: 0,
+    averageRating: 0,
+    occupancyRate: 0,
+    conversionRate: 0,
+    repeatGuestRate: 0,
+    timeRange
+  };
+}
+
+private async getPropertyPerformanceMetrics(hostId: number, timeRange: string): Promise<PropertyPerformanceMetrics[]> {
+  // Simplified implementation - expand based on needs
+  return [];
+}
+
+private async getBookingTrendData(hostId: number, startDate: Date): Promise<BookingTrendData[]> {
+  // Simplified implementation - expand based on needs
+  return [];
+}
+
+private async getGuestAnalytics(hostId: number): Promise<GuestAnalytics> {
+  // Simplified implementation - expand based on needs
+  return {
+    totalGuests: 0,
+    newGuests: 0,
+    returningGuests: 0,
+    averageStayDuration: 0,
+    guestDemographics: {
+      ageGroups: [],
+      countries: [],
+      purposes: []
+    },
+    guestSatisfaction: {
+      averageRating: 0,
+      ratingDistribution: [],
+      commonComplaints: [],
+      commonPraises: []
+    }
+  };
+}
+ 
+private async getRevenueAnalytics(hostId: number): Promise<RevenueAnalytics> {
+  // Simplified implementation - expand based on needs
+  return {
+    monthlyRevenue: [],
+    revenueByProperty: [],
+    seasonalTrends: [],
+    pricingOptimization: []
+  };
+}
+
+private async getRecentActivity(hostId: number): Promise<DashboardActivity[]> {
+  // Get recent bookings, reviews, etc. and combine into activity feed
+  const [recentBookings, recentReviews] = await Promise.all([
+    prisma.booking.findMany({
+      where: { property: { hostId } },
+      include: {
+        property: { select: { name: true } },
+        guest: { select: { firstName: true, lastName: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 5
+    }),
+    prisma.review.findMany({
+      where: { property: { hostId } },
+      include: {
+        property: { select: { name: true } },
+        user: { select: { firstName: true, lastName: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 5
+    })
+  ]);
+
+  const activities: DashboardActivity[] = [];
+
+  // Add booking activities
+  recentBookings.forEach(booking => {
+    activities.push({
+      id: `booking-${booking.id}`,
+      type: 'booking',
+      title: 'New Booking',
+      description: `${booking.guest.firstName} ${booking.guest.lastName} booked ${booking.property.name}`,
+      timestamp: booking.createdAt.toISOString(),
+      propertyId: booking.propertyId,
+      bookingId: booking.id,
+      isRead: false,
+      priority: booking.status === 'pending' ? 'high' : 'medium'
+    });
+  });
+
+  // Add review activities
+  recentReviews.forEach(review => {
+    activities.push({
+      id: `review-${review.id}`,
+      type: 'review',
+      title: 'New Review',
+      description: `${review.user.firstName} ${review.user.lastName} reviewed ${review.property.name} (${review.rating} stars)`,
+      timestamp: review.createdAt.toISOString(),
+      propertyId: review.propertyId,
+      isRead: false,
+      priority: review.rating < 3 ? 'high' : 'low'
+    });
+  });
+
+  // Sort by timestamp and return most recent
+  return activities
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 10);
+}
+
+
+
 }
