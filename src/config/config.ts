@@ -6,7 +6,7 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'default-secret',
   googleClientId: process.env.GOOGLE_CLIENT_ID || '739960680632-g75378et3hgeu5qmukdqp8085369gh1t.apps.googleusercontent.com',
   appleClientId: process.env.APPLE_CLIENT_ID || '',
-  clientUrl: process.env.CLIENT_URL || 'http://localhost:3000',
+  clientUrl: process.env.CLIENT_URL || 'https://jambolush.com',
 
   //brevo api
   brevoApiKey: process.env.BREVO_API_KEY || '',

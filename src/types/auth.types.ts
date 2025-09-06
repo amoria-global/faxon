@@ -284,3 +284,107 @@ export interface ProfileFormState {
   errors: { [key: string]: string };
   uploadProgress?: number;
 }
+
+// Add these types to your auth.types.ts file
+
+// --- ADMIN CRUD TYPES ---
+
+// Admin-specific update DTO with additional fields
+export interface AdminUpdateUserDto {
+  status?: string; // 'active' | 'inactive' | 'pending' | 'suspended' | 'unverified'
+  userType?: string; // 'guest' | 'host' | 'tourguide' | 'agent' | 'admin'
+  email?: string;
+  name?: string; // Full name that will be split into firstName/lastName
+  firstName?: string;
+  lastName?: string;
+}
+
+// Admin create user DTO (extends RegisterDto with admin-specific fields)
+export interface AdminCreateUserDto extends RegisterDto {
+  status?: string; // Admin can set initial status
+  verificationStatus?: string;
+  isVerified?: boolean;
+}
+
+// Admin suspend user DTO
+export interface AdminSuspendUserDto {
+  reason?: string;
+}
+
+// Admin password reset response
+export interface AdminPasswordResetResponse {
+  temporaryPassword: string;
+}
+
+// User statistics response
+export interface UserStatistics {
+  totalUsers: number;
+  usersByType: Array<{
+    type: string;
+    count: number;
+  }>;
+  usersByStatus: Array<{
+    status: string;
+    count: number;
+  }>;
+  recentRegistrations: number;
+}
+
+// Admin action log (for future audit trail)
+export interface AdminActionLog {
+  id: string;
+  adminId: number;
+  adminEmail: string;
+  action: 'create' | 'update' | 'delete' | 'suspend' | 'activate' | 'reset_password';
+  targetUserId: number;
+  targetUserEmail: string;
+  details?: string;
+  timestamp: string;
+}
+
+// Bulk operations (for future enhancement)
+export interface BulkUserOperation {
+  userIds: number[];
+  action: 'suspend' | 'activate' | 'delete';
+  reason?: string;
+}
+
+export interface BulkOperationResult {
+  successful: number[];
+  failed: Array<{
+    userId: number;
+    error: string;
+  }>;
+}
+
+// Enhanced user search/filter options for admin
+export interface AdminUserSearchFilters extends UserSearchFilters {
+  id?: number;
+  emailContains?: string;
+  nameContains?: string;
+  phoneContains?: string;
+  registeredAfter?: string;
+  registeredBefore?: string;
+  lastLoginAfter?: string;
+  lastLoginBefore?: string;
+  hasPassword?: boolean;
+  isVerified?: boolean;
+  sortBy?: 'createdAt' | 'lastLogin' | 'email' | 'name' | 'userType' | 'status';
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  limit?: number;
+}
+
+// Admin dashboard summary
+export interface AdminDashboardSummary {
+  statistics: UserStatistics;
+  recentActions: AdminActionLog[];
+  pendingApprovals: number;
+  suspendedAccounts: number;
+  unverifiedAccounts: number;
+  activeServiceProviders: {
+    hosts: number;
+    tourGuides: number;
+    agents: number;
+  };
+}

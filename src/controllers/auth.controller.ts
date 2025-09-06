@@ -391,4 +391,182 @@ export class AuthController {
       res.status(500).json({ message: error.message });
     }
   }
+
+    // Add these methods to the AuthController class in auth.controller.ts
+
+  // --- ADMIN CRUD OPERATIONS ---
+
+  async adminCreateUser(req: Request, res: Response, next: NextFunction) {
+    try {
+      // Validate required fields
+      if (!req.body.email) {
+        return res.status(400).json({ message: 'Email is required' });
+      }
+
+      // Validate user type if provided
+      const validUserTypes = ['guest', 'host', 'tourguide', 'agent', 'admin'];
+      if (req.body.userType && !validUserTypes.includes(req.body.userType)) {
+        return res.status(400).json({ message: 'Invalid user type' });
+      }
+
+      // Validate status if provided
+      const validStatuses = ['active', 'inactive', 'pending', 'suspended', 'unverified'];
+      if (req.body.status && !validStatuses.includes(req.body.status)) {
+        return res.status(400).json({ message: 'Invalid status' });
+      }
+
+      const user = await authService.adminCreateUser(req.body);
+      res.status(201).json({
+        message: 'User created successfully',
+        user
+      });
+    } catch (error: any) {
+      if (error.message.includes('already exists')) {
+        res.status(409).json({ message: error.message });
+      } else {
+        res.status(400).json({ message: error.message });
+      }
+    }
+  }
+
+  async adminUpdateUser(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: 'Invalid user ID' });
+      }
+
+      // Validate user type if provided
+      if (req.body.userType) {
+        const validUserTypes = ['guest', 'host', 'tourguide', 'agent', 'admin'];
+        if (!validUserTypes.includes(req.body.userType)) {
+          return res.status(400).json({ message: 'Invalid user type' });
+        }
+      }
+
+      // Validate status if provided
+      if (req.body.status) {
+        const validStatuses = ['active', 'inactive', 'pending', 'suspended', 'unverified'];
+        if (!validStatuses.includes(req.body.status)) {
+          return res.status(400).json({ message: 'Invalid status' });
+        }
+      }
+
+      const user = await authService.adminUpdateUser(userId, req.body);
+      res.json({
+        message: 'User updated successfully',
+        user
+      });
+    } catch (error: any) {
+      if (error.message === 'User not found') {
+        res.status(404).json({ message: error.message });
+      } else {
+        res.status(400).json({ message: error.message });
+      }
+    }
+  }
+
+  async adminDeleteUser(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: 'Invalid user ID' });
+      }
+
+      // Prevent self-deletion
+      const requestingUserId = parseInt(req.user?.userId || '0');
+      if (userId === requestingUserId) {
+        return res.status(400).json({ message: 'Cannot delete your own account' });
+      }
+
+      const result = await authService.adminDeleteUser(userId);
+      res.json(result);
+    } catch (error: any) {
+      if (error.message === 'User not found') {
+        res.status(404).json({ message: error.message });
+      } else {
+        res.status(400).json({ message: error.message });
+      }
+    }
+  }
+
+  async adminSuspendUser(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: 'Invalid user ID' });
+      }
+
+      // Prevent self-suspension
+      const requestingUserId = parseInt(req.user?.userId || '0');
+      if (userId === requestingUserId) {
+        return res.status(400).json({ message: 'Cannot suspend your own account' });
+      }
+
+      const { reason } = req.body;
+      const user = await authService.adminSuspendUser(userId, reason);
+      res.json({
+        message: 'User suspended successfully',
+        user
+      });
+    } catch (error: any) {
+      if (error.message === 'User not found') {
+        res.status(404).json({ message: error.message });
+      } else {
+        res.status(400).json({ message: error.message });
+      }
+    }
+  }
+
+  async adminActivateUser(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: 'Invalid user ID' });
+      }
+
+      const user = await authService.adminActivateUser(userId);
+      res.json({
+        message: 'User activated successfully',
+        user
+      });
+    } catch (error: any) {
+      if (error.message === 'User not found') {
+        res.status(404).json({ message: error.message });
+      } else {
+        res.status(400).json({ message: error.message });
+      }
+    }
+  }
+
+  async adminResetUserPassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: 'Invalid user ID' });
+      }
+
+      const result = await authService.adminResetUserPassword(userId);
+      res.json({
+        message: 'Password reset successfully',
+        temporaryPassword: result.temporaryPassword,
+        note: 'Please share this temporary password securely with the user'
+      });
+    } catch (error: any) {
+      if (error.message === 'User not found') {
+        res.status(404).json({ message: error.message });
+      } else {
+        res.status(400).json({ message: error.message });
+      }
+    }
+  }
+
+  async getUserStatistics(req: Request, res: Response, next: NextFunction) {
+    try {
+      const stats = await authService.getUserStatistics();
+      res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
 }
