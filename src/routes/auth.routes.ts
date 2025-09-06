@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { AuthController } from '../controllers/auth.controller';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate, authorize, adminOnly } from '../middleware/auth.middleware';
 
 const router = Router();
 const authController = new AuthController();
@@ -16,6 +16,7 @@ router.post('/refresh-token', authController.refreshToken);
 router.post('/forgot-password', authController.forgotPassword);
 router.post('/verify-otp', authController.verifyOtp);
 router.post('/reset-password', authController.resetPassword);
+router.post('/setup-password', authController.setupPassword); // New route for service providers
 
 // --- PROTECTED USER ROUTES ---
 router.use(authenticate); // All routes below require authentication
@@ -31,10 +32,28 @@ router.post('/logout', authController.logout);
 router.post('/logout-all', authController.logoutAllDevices);
 router.get('/sessions', authController.getUserSessions);
 
-// --- ADMIN ROUTES (might need additional admin middleware) ---
-router.get('/users', authController.getAllUsers);
-router.get('/users/email/:email', authController.getUserByEmail);
-router.get('/users/id/:id', authController.getUserById);
-router.get('/users/provider/:provider', authController.getUsersByProvider);
+// --- ADMIN ROUTES ---
+// Apply admin middleware to all admin routes
+router.get('/users', adminOnly, authController.getAllUsers);
+router.get('/users/email/:email', adminOnly, authController.getUserByEmail);
+router.get('/users/id/:id', adminOnly, authController.getUserById);
+router.get('/users/provider/:provider', adminOnly, authController.getUsersByProvider);
+router.get('/users/type/:userType', adminOnly, authController.getUsersByType); // New route
+
+// --- ROLE-BASED ROUTES (Optional - for future use) ---
+// Example: Host-specific endpoints
+router.get('/host/properties', authorize('host', 'admin'), (req, res) => {
+  res.json({ message: 'Host properties endpoint - implement in property controller' });
+});
+
+// Example: Tour guide-specific endpoints  
+router.get('/tourguide/tours', authorize('tourguide', 'admin'), (req, res) => {
+  res.json({ message: 'Tour guide tours endpoint - implement in tour controller' });
+});
+
+// Example: Agent-specific endpoints
+router.get('/agent/clients', authorize('agent', 'admin'), (req, res) => {
+  res.json({ message: 'Agent clients endpoint - implement in agent controller' });
+});
 
 export default router;
