@@ -172,7 +172,7 @@ export class AuthService {
 
       return this.handleOAuth(oauthData);
     } catch (error) {
-      throw new Error('Google authentication failed');
+      throw new Error('Google authentication failed: '+error);
     }
   }
 
