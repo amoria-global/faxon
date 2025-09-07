@@ -16,7 +16,7 @@ router.post('/refresh-token', authController.refreshToken);
 router.post('/forgot-password', authController.forgotPassword);
 router.post('/verify-otp', authController.verifyOtp);
 router.post('/reset-password', authController.resetPassword);
-router.post('/setup-password', authController.setupPassword); // New route for service providers
+router.post('/setup-password', authController.setupPassword); // For service providers
 
 // --- PROTECTED USER ROUTES ---
 router.use(authenticate); // All routes below require authentication
@@ -33,14 +33,27 @@ router.post('/logout-all', authController.logoutAllDevices);
 router.get('/sessions', authController.getUserSessions);
 
 // --- ADMIN ROUTES ---
-// Apply admin middleware to all admin routes
-router.get('/users', adminOnly, authController.getAllUsers);
-router.get('/users/email/:email', adminOnly, authController.getUserByEmail);
-router.get('/users/id/:id', adminOnly, authController.getUserById);
-router.get('/users/provider/:provider', adminOnly, authController.getUsersByProvider);
-router.get('/users/type/:userType', adminOnly, authController.getUsersByType); // New route
+// Statistics
+router.get('/admin/statistics', adminOnly, authController.getUserStatistics);
 
-// --- ROLE-BASED ROUTES (Optional - for future use) ---
+// User Management - CRUD Operations
+router.get('/admin/users', adminOnly, authController.getAllUsers);
+router.post('/admin/users', adminOnly, authController.adminCreateUser);
+router.get('/admin/users/email/:email', adminOnly, authController.getUserByEmail);
+router.get('/admin/users/provider/:provider', adminOnly, authController.getUsersByProvider);
+router.get('/admin/users/type/:userType', adminOnly, authController.getUsersByType);
+
+// Single User Operations
+router.get('/admin/users/:id', adminOnly, authController.getUserById);
+router.put('/admin/users/:id', adminOnly, authController.adminUpdateUser);
+router.delete('/admin/users/:id', adminOnly, authController.adminDeleteUser);
+
+// User Actions
+router.post('/admin/users/:id/suspend', adminOnly, authController.adminSuspendUser);
+router.post('/admin/users/:id/activate', adminOnly, authController.adminActivateUser);
+router.post('/admin/users/:id/reset-password', adminOnly, authController.adminResetUserPassword);
+
+// --- ROLE-BASED ROUTES (for future use) ---
 // Example: Host-specific endpoints
 router.get('/host/properties', authorize('host', 'admin'), (req, res) => {
   res.json({ message: 'Host properties endpoint - implement in property controller' });

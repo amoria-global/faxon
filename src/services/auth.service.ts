@@ -13,7 +13,8 @@ import {
   ChangePasswordDto,
   UpdateUserProfileDto,
   UserSession,
-  RefreshTokenDto
+  RefreshTokenDto,
+  AdminUpdateUserDto
 } from '../types/auth.types';
 
 const prisma = new PrismaClient();
@@ -628,4 +629,303 @@ export class AuthService {
     const { password, ...sanitized } = user;
     return sanitized;
   }
+
+  // Add these methods to the AuthService class in auth.service.ts
+
+// --- ADMIN CRUD OPERATIONS ---
+
+async adminCreateUser(data: RegisterDto & { status?: string }): Promise<UserInfo> {
+  // Check if user already exists
+  const existingUser = await prisma.user.findUnique({
+    where: { email: data.email }
+  });
+
+  if (existingUser) {
+    throw new Error('User with this email already exists');
+  }
+
+  // Handle name parsing
+  let firstName = data.firstName || '';
+  let lastName = data.lastName || '';
+  
+  if (data.names && (!data.firstName || !data.lastName)) {
+    const nameParts = data.names.trim().split(' ');
+    firstName = nameParts[0] || '';
+    lastName = nameParts.slice(1).join(' ') || '';
+  }
+
+  if (!firstName || !lastName) {
+    throw new Error('First name and last name are required');
+  }
+
+  // Hash password if provided
+  let hashedPassword = null;
+  if (data.password) {
+    hashedPassword = await bcrypt.hash(data.password, 10);
+  }
+
+  // Prepare tour guide specific data
+  const tourGuideData = data.userType === 'tourguide' ? {
+    bio: data.bio,
+    experience: data.experience,
+    languages: data.languages ? JSON.stringify(data.languages) : null,
+    specializations: data.specializations ? JSON.stringify(data.specializations) : null,
+    licenseNumber: data.licenseNumber,
+    certifications: data.certifications ? JSON.stringify(data.certifications) : null,
+  } : {};
+
+  const user = await prisma.user.create({
+    data: {
+      email: data.email,
+      firstName,
+      lastName,
+      password: hashedPassword,
+      provider: data.provider || 'manual',
+      phone: data.phone,
+      phoneCountryCode: data.phoneCountryCode,
+      country: data.country,
+      state: data.state,
+      province: data.province,
+      city: data.city,
+      street: data.street,
+      zipCode: data.zipCode,
+      postalCode: data.postalCode,
+      postcode: data.postcode,
+      pinCode: data.pinCode,
+      eircode: data.eircode,
+      cep: data.cep,
+      userType: data.userType || 'guest',
+      status: data.status || 'active',
+      verificationStatus: data.status === 'active' ? 'verified' : 'unverified',
+      ...tourGuideData
+    }
+  });
+
+  return this.transformToUserInfo(user);
+}
+
+async adminUpdateUser(userId: number, data: AdminUpdateUserDto & UpdateUserProfileDto): Promise<UserInfo> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Prepare update data
+  const updateData: any = {};
+
+  // Admin-specific fields
+  if (data.status !== undefined) updateData.status = data.status;
+  if (data.userType !== undefined) updateData.userType = data.userType;
+  if (data.email !== undefined) {
+    // Check if new email is already taken
+    const emailExists = await prisma.user.findUnique({
+      where: { email: data.email }
+    });
+    if (emailExists && emailExists.id !== userId) {
+      throw new Error('Email already in use');
+    }
+    updateData.email = data.email;
+  }
+
+  // Handle name update
+  if (data.name) {
+    const nameParts = data.name.trim().split(' ');
+    updateData.firstName = nameParts[0] || '';
+    updateData.lastName = nameParts.slice(1).join(' ') || '';
+  } else {
+    if (data.firstName !== undefined) updateData.firstName = data.firstName;
+    if (data.lastName !== undefined) updateData.lastName = data.lastName;
+  }
+
+  // Profile fields
+  if (data.phone !== undefined) updateData.phone = data.phone;
+  if (data.phoneCountryCode !== undefined) updateData.phoneCountryCode = data.phoneCountryCode;
+  if (data.country !== undefined) updateData.country = data.country;
+  if (data.state !== undefined) updateData.state = data.state;
+  if (data.province !== undefined) updateData.province = data.province;
+  if (data.city !== undefined) updateData.city = data.city;
+  if (data.street !== undefined) updateData.street = data.street;
+  if (data.zipCode !== undefined) updateData.zipCode = data.zipCode;
+  if (data.postalCode !== undefined) updateData.postalCode = data.postalCode;
+  if (data.postcode !== undefined) updateData.postcode = data.postcode;
+  if (data.pinCode !== undefined) updateData.pinCode = data.pinCode;
+  if (data.eircode !== undefined) updateData.eircode = data.eircode;
+  if (data.cep !== undefined) updateData.cep = data.cep;
+  if (data.verificationStatus !== undefined) updateData.verificationStatus = data.verificationStatus;
+  if (data.preferredCommunication !== undefined) updateData.preferredCommunication = data.preferredCommunication;
+
+  // Tour guide specific fields
+  if (data.bio !== undefined) updateData.bio = data.bio;
+  if (data.experience !== undefined) updateData.experience = data.experience;
+  if (data.languages !== undefined) updateData.languages = JSON.stringify(data.languages);
+  if (data.specializations !== undefined) updateData.specializations = JSON.stringify(data.specializations);
+  if (data.licenseNumber !== undefined) updateData.licenseNumber = data.licenseNumber;
+  if (data.certifications !== undefined) updateData.certifications = JSON.stringify(data.certifications);
+
+  const updatedUser = await prisma.user.update({
+    where: { id: userId },
+    data: updateData
+  });
+
+  return this.transformToUserInfo(updatedUser);
+}
+
+async adminDeleteUser(userId: number): Promise<{ message: string }> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Prevent deleting the last admin
+  if (user.userType === 'admin') {
+    const adminCount = await prisma.user.count({
+      where: { userType: 'admin' }
+    });
+    if (adminCount <= 1) {
+      throw new Error('Cannot delete the last admin user');
+    }
+  }
+
+  // Delete related data in a transaction
+  await prisma.$transaction([
+    // Delete user sessions
+    prisma.userSession.deleteMany({
+      where: { userId }
+    }),
+    // Delete the user
+    prisma.user.delete({
+      where: { id: userId }
+    })
+  ]);
+
+  return { message: 'User deleted successfully' };
+}
+
+async adminSuspendUser(userId: number, reason?: string): Promise<UserInfo> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  if (user.userType === 'admin') {
+    throw new Error('Cannot suspend admin users');
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      status: 'suspended',
+      hostNotes: reason ? `Suspended: ${reason}` : 'Account suspended by admin'
+    }
+  });
+
+  // Invalidate all user sessions
+  await prisma.userSession.updateMany({
+    where: { userId },
+    data: { isActive: false }
+  });
+
+  return this.transformToUserInfo(updatedUser);
+}
+
+async adminActivateUser(userId: number): Promise<UserInfo> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      status: 'active',
+      verificationStatus: 'verified'
+    }
+  });
+
+  return this.transformToUserInfo(updatedUser);
+}
+
+async adminResetUserPassword(userId: number): Promise<{ temporaryPassword: string }> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Generate temporary password
+  const temporaryPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
+  const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      password: hashedPassword,
+      // Set a flag that forces password change on next login
+      hostNotes: 'Password reset by admin - temporary password assigned'
+    }
+  });
+
+  // Invalidate all sessions
+  await prisma.userSession.updateMany({
+    where: { userId },
+    data: { isActive: false }
+  });
+
+  return { temporaryPassword };
+}
+
+async getUserStatistics(): Promise<any> {
+  const [totalUsers, usersByType, usersByStatus, recentRegistrations] = await Promise.all([
+    // Total users
+    prisma.user.count(),
+    
+    // Users by type
+    prisma.user.groupBy({
+      by: ['userType'],
+      _count: true
+    }),
+    
+    // Users by status
+    prisma.user.groupBy({
+      by: ['status'],
+      _count: true
+    }),
+    
+    // Recent registrations (last 30 days)
+    prisma.user.count({
+      where: {
+        createdAt: {
+          gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+        }
+      }
+    })
+  ]);
+
+  return {
+    totalUsers,
+    usersByType: usersByType.map(item => ({
+      type: item.userType,
+      count: item._count
+    })),
+    usersByStatus: usersByStatus.map(item => ({
+      status: item.status,
+      count: item._count
+    })),
+    recentRegistrations
+  };
+}
 }
