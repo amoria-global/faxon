@@ -35,7 +35,7 @@ export class AuthController {
         }
       }
 
-      const result = await authService.register(req.body);
+      const result = await authService.register(req.body, req);
       res.status(201).json(result);
     } catch (error: any) {
       if (error.message === 'User already exists') {
@@ -54,7 +54,7 @@ export class AuthController {
         });
       }
 
-      const result = await authService.login(req.body);
+      const result = await authService.login(req.body, req);
       res.json(result);
     } catch (error: any) {
       res.status(401).json({ message: error.message });
@@ -70,7 +70,7 @@ export class AuthController {
         });
       }
 
-      const result = await authService.googleAuth(token);
+      const result = await authService.googleAuth(token, req);
       res.json(result);
     } catch (error: any) {
       res.status(401).json({ message: error.message });
@@ -85,7 +85,7 @@ export class AuthController {
         });
       }
 
-      const result = await authService.appleAuth(req.body);
+      const result = await authService.appleAuth(req.body, req);
       res.json(result);
     } catch (error: any) {
       res.status(401).json({ message: error.message });
@@ -154,7 +154,7 @@ export class AuthController {
       if (!req.user?.userId) {
         return res.status(401).json({ message: 'User not authenticated' });
       }
-      const user = await authService.updateUserProfile(parseInt(req.user.userId), req.body);
+      const user = await authService.updateUserProfile(parseInt(req.user.userId), req.body, req);
       res.json(user);
     } catch (error: any) {
       res.status(400).json({ message: error.message });
@@ -191,7 +191,7 @@ export class AuthController {
         });
       }
 
-      await authService.changePassword(parseInt(req.user.userId), req.body);
+      await authService.changePassword(parseInt(req.user.userId), req.body, req);
       res.json({ message: 'Password changed successfully' });
     } catch (error: any) {
       res.status(400).json({ message: error.message });
@@ -215,7 +215,7 @@ export class AuthController {
         });
       }
 
-      await authService.setupPassword(email, token, newPassword);
+      await authService.setupPassword(email, token, newPassword, req);
       res.json({ message: 'Password set up successfully. You can now log in.' });
     } catch (error: any) {
       res.status(400).json({ message: error.message });
@@ -230,7 +230,7 @@ export class AuthController {
         return res.status(400).json({ message: 'Email is required' });
       }
 
-      const result = await authService.forgotPassword(email);
+      const result = await authService.forgotPassword(email, req);
       res.status(200).json(result);
     } catch (error: any) {
       res.status(400).json({ message: error.message });
@@ -268,7 +268,7 @@ export class AuthController {
         });
       }
 
-      await authService.resetPassword(email, otp, newPassword);
+      await authService.resetPassword(email, otp, newPassword, req);
       res.status(200).json({ message: 'Password has been reset successfully.' });
     } catch (error: any) {
       res.status(400).json({ message: error.message });
@@ -392,8 +392,6 @@ export class AuthController {
     }
   }
 
-    // Add these methods to the AuthController class in auth.controller.ts
-
   // --- ADMIN CRUD OPERATIONS ---
 
   async adminCreateUser(req: Request, res: Response, next: NextFunction) {
@@ -415,7 +413,7 @@ export class AuthController {
         return res.status(400).json({ message: 'Invalid status' });
       }
 
-      const user = await authService.adminCreateUser(req.body);
+      const user = await authService.adminCreateUser(req.body, req);
       res.status(201).json({
         message: 'User created successfully',
         user
@@ -504,7 +502,7 @@ export class AuthController {
       }
 
       const { reason } = req.body;
-      const user = await authService.adminSuspendUser(userId, reason);
+      const user = await authService.adminSuspendUser(userId, reason, req);
       res.json({
         message: 'User suspended successfully',
         user
@@ -525,7 +523,7 @@ export class AuthController {
         return res.status(400).json({ message: 'Invalid user ID' });
       }
 
-      const user = await authService.adminActivateUser(userId);
+      const user = await authService.adminActivateUser(userId, req);
       res.json({
         message: 'User activated successfully',
         user
@@ -546,7 +544,7 @@ export class AuthController {
         return res.status(400).json({ message: 'Invalid user ID' });
       }
 
-      const result = await authService.adminResetUserPassword(userId);
+      const result = await authService.adminResetUserPassword(userId, req);
       res.json({
         message: 'Password reset successfully',
         temporaryPassword: result.temporaryPassword,

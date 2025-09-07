@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaClient } from '@prisma/client';
 import { config } from '../config/config';
+import { BrevoMailingService } from '../utils/brevo.auth';
 import { 
   RegisterDto, 
   LoginDto, 
@@ -21,9 +22,56 @@ const prisma = new PrismaClient();
 const googleClient = new OAuth2Client(config.googleClientId);
 
 export class AuthService {
-  
+  private brevoService: BrevoMailingService;
+
+  constructor() {
+    this.brevoService = new BrevoMailingService();
+  }
+
+  // --- HELPER METHODS FOR EMAIL CONTEXT ---
+  private createMailingContext(user: any, security?: any, verification?: any) {
+    return {
+      user: {
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        id: user.id
+      },
+      company: {
+        name: 'Jambolush',
+        website: config.clientUrl || 'https://jambolush.com',
+        supportEmail: config.supportEmail,
+        logo: config.companyLogo
+      },
+      security,
+      verification
+    };
+  }
+
+  private extractSecurityInfo(req?: any) {
+    if (!req) return undefined;
+    
+    return {
+      device: req.headers['user-agent'] || 'Unknown Device',
+      browser: this.getBrowserFromUserAgent(req.headers['user-agent']),
+      location: req.headers['cf-ipcountry'] || req.headers['x-forwarded-for']?.split(',')[0] || 'Unknown Location',
+      ipAddress: req.ip || req.connection.remoteAddress || 'Unknown IP',
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  private getBrowserFromUserAgent(userAgent: string): string {
+    if (!userAgent) return 'Unknown Browser';
+    
+    if (userAgent.includes('Chrome')) return 'Chrome';
+    if (userAgent.includes('Firefox')) return 'Firefox';
+    if (userAgent.includes('Safari')) return 'Safari';
+    if (userAgent.includes('Edge')) return 'Edge';
+    return 'Unknown Browser';
+  }
+
   // --- REGISTRATION & LOGIN ---
-  async register(data: RegisterDto): Promise<AuthResponse> {
+  async register(data: RegisterDto, req?: any): Promise<AuthResponse> {
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email }
     });
@@ -36,30 +84,25 @@ export class AuthService {
     let firstName = data.firstName || '';
     let lastName = data.lastName || '';
     
-    // If names (full name) is provided instead of firstName/lastName
     if (data.names && (!data.firstName || !data.lastName)) {
       const nameParts = data.names.trim().split(' ');
       firstName = nameParts[0] || '';
       lastName = nameParts.slice(1).join(' ') || '';
     }
 
-    // Validate required fields for all users
     if (!firstName || !lastName) {
       throw new Error('First name and last name are required');
     }
 
-    // For service providers (host, tourguide, agent), password is optional
     const isServiceProvider = ['host', 'tourguide', 'agent'].includes(data.userType || '');
     let hashedPassword = null;
 
     if (data.password) {
       hashedPassword = await bcrypt.hash(data.password, 10);
     } else if (!isServiceProvider) {
-      // For regular users (guest), password is required
       throw new Error('Password is required');
     }
     
-    // Prepare tour guide specific data
     const tourGuideData = data.userType === 'tourguide' ? {
       bio: data.bio,
       experience: data.experience,
@@ -90,17 +133,32 @@ export class AuthService {
         eircode: data.eircode,
         cep: data.cep,
         userType: data.userType || 'guest',
-        status: isServiceProvider ? 'pending' : 'active', // Service providers need approval
+        status: isServiceProvider ? 'pending' : 'active',
         verificationStatus: isServiceProvider ? 'pending' : 'unverified',
         ...tourGuideData
       }
     });
 
-    // Generate application ID for service providers
     const applicationId = isServiceProvider ? `APP-${user.id}-${Date.now()}` : undefined;
-
     const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email, user.userType);
     await this.createSession(user.id, refreshToken);
+
+    // Send welcome email
+    try {
+      const mailingContext = this.createMailingContext(user, this.extractSecurityInfo(req));
+      
+      if (isServiceProvider) {
+        // For service providers, send email with setup instructions
+        // You might want to create a separate method for this
+        await this.brevoService.sendWelcomeEmail(mailingContext);
+      } else {
+        // For regular users, send standard welcome email
+        await this.brevoService.sendWelcomeEmail(mailingContext);
+      }
+    } catch (emailError) {
+      console.error('Failed to send welcome email:', emailError);
+      // Don't break registration if email fails
+    }
 
     return { 
       user: this.transformToUserInfo(user), 
@@ -110,7 +168,7 @@ export class AuthService {
     };
   }
 
-  async login(data: LoginDto): Promise<AuthResponse> {
+  async login(data: LoginDto, req?: any): Promise<AuthResponse> {
     const user = await prisma.user.findUnique({
       where: { email: data.email }
     });
@@ -119,7 +177,6 @@ export class AuthService {
       throw new Error('Invalid credentials');
     }
 
-    // Check if user is a service provider pending password setup
     if (!user.password && ['host', 'tourguide', 'agent'].includes(user.userType)) {
       throw new Error('Please set up your password first. Check your email for instructions.');
     }
@@ -133,7 +190,6 @@ export class AuthService {
       throw new Error('Invalid credentials');
     }
 
-    // Update last login and session count
     const updatedUser = await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -145,6 +201,18 @@ export class AuthService {
     const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email, user.userType);
     await this.createSession(user.id, refreshToken);
 
+    // Send login notification (optional, can be enabled/disabled)
+    try {
+      const securityInfo = this.extractSecurityInfo(req);
+      if (securityInfo) {
+        const mailingContext = this.createMailingContext(updatedUser, securityInfo);
+        await this.brevoService.sendLoginNotification(mailingContext);
+      }
+    } catch (emailError) {
+      console.error('Failed to send login notification:', emailError);
+      // Don't break login if email fails
+    }
+
     return { 
       user: this.transformToUserInfo(updatedUser), 
       accessToken, 
@@ -153,7 +221,7 @@ export class AuthService {
   }
 
   // --- OAUTH AUTHENTICATION ---
-  async googleAuth(token: string): Promise<AuthResponse> {
+  async googleAuth(token: string, req?: any): Promise<AuthResponse> {
     try {
       const ticket = await googleClient.verifyIdToken({
         idToken: token,
@@ -171,13 +239,13 @@ export class AuthService {
         providerId: payload.sub
       };
 
-      return this.handleOAuth(oauthData);
+      return this.handleOAuth(oauthData, req);
     } catch (error) {
       throw new Error('Google authentication failed: '+error);
     }
   }
 
-  async appleAuth(data: any): Promise<AuthResponse> {
+  async appleAuth(data: any, req?: any): Promise<AuthResponse> {
     const oauthData: OAuthDto = {
       email: data.email,
       firstName: data.firstName || '',
@@ -186,15 +254,17 @@ export class AuthService {
       providerId: data.providerId
     };
 
-    return this.handleOAuth(oauthData);
+    return this.handleOAuth(oauthData, req);
   }
 
-  private async handleOAuth(data: OAuthDto): Promise<AuthResponse> {
+  private async handleOAuth(data: OAuthDto, req?: any): Promise<AuthResponse> {
     let user = await prisma.user.findUnique({
       where: { email: data.email }
     });
 
+    let isNewUser = false;
     if (!user) {
+      isNewUser = true;
       user = await prisma.user.create({
         data: {
           email: data.email,
@@ -208,7 +278,6 @@ export class AuthService {
         }
       });
     } else {
-      // Update login info for existing OAuth user
       user = await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -221,6 +290,20 @@ export class AuthService {
     const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email, user.userType);
     await this.createSession(user.id, refreshToken);
 
+    // Send appropriate email notification
+    try {
+      const securityInfo = this.extractSecurityInfo(req);
+      const mailingContext = this.createMailingContext(user, securityInfo);
+      
+      if (isNewUser) {
+        await this.brevoService.sendWelcomeEmail(mailingContext);
+      } else {
+        await this.brevoService.sendLoginNotification(mailingContext);
+      }
+    } catch (emailError) {
+      console.error('Failed to send OAuth email notification:', emailError);
+    }
+
     return { 
       user: this.transformToUserInfo(user), 
       accessToken, 
@@ -231,7 +314,7 @@ export class AuthService {
   // --- SESSION MANAGEMENT ---
   private async createSession(userId: number, refreshToken: string, deviceInfo?: any): Promise<UserSession> {
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30); // 30 days
+    expiresAt.setDate(expiresAt.getDate() + 30);
 
     const session = await prisma.userSession.create({
       data: {
@@ -271,7 +354,6 @@ export class AuthService {
 
     const { accessToken, refreshToken } = await this.generateTokens(session.user.id, session.user.email, session.user.userType);
     
-    // Update session with new refresh token
     await prisma.userSession.update({
       where: { id: session.id },
       data: { 
@@ -314,8 +396,7 @@ export class AuthService {
     return this.transformToUserInfo(user);
   }
 
-  async updateUserProfile(userId: number, data: UpdateUserProfileDto): Promise<UserInfo> {
-    // Prepare tour guide specific data
+  async updateUserProfile(userId: number, data: UpdateUserProfileDto, req?: any): Promise<UserInfo> {
     const tourGuideData = data.bio || data.experience || data.languages || data.specializations || data.licenseNumber || data.certifications ? {
       bio: data.bio,
       experience: data.experience,
@@ -349,6 +430,15 @@ export class AuthService {
       }
     });
 
+    // Send profile update notification
+    try {
+      const securityInfo = this.extractSecurityInfo(req);
+      const mailingContext = this.createMailingContext(user, securityInfo);
+      await this.brevoService.sendProfileUpdateNotification(mailingContext);
+    } catch (emailError) {
+      console.error('Failed to send profile update notification:', emailError);
+    }
+
     return this.transformToUserInfo(user);
   }
 
@@ -362,7 +452,7 @@ export class AuthService {
   }
 
   // --- PASSWORD MANAGEMENT ---
-  async changePassword(userId: number, data: ChangePasswordDto): Promise<void> {
+  async changePassword(userId: number, data: ChangePasswordDto, req?: any): Promise<void> {
     const user = await prisma.user.findUnique({
       where: { id: userId }
     });
@@ -371,7 +461,6 @@ export class AuthService {
       throw new Error('User not found');
     }
 
-    // If user is a service provider without password, skip current password check
     const isServiceProvider = ['host', 'tourguide', 'agent'].includes(user.userType);
     if (user.password && !(isServiceProvider && !user.password)) {
       const isCurrentValid = await bcrypt.compare(data.currentPassword, user.password);
@@ -393,17 +482,24 @@ export class AuthService {
       }
     });
 
-    // Invalidate all sessions for security
+    // Send password changed notification
+    try {
+      const securityInfo = this.extractSecurityInfo(req);
+      const mailingContext = this.createMailingContext(user, securityInfo);
+      await this.brevoService.sendPasswordChangedNotification(mailingContext);
+    } catch (emailError) {
+      console.error('Failed to send password changed notification:', emailError);
+    }
+
     await this.logoutAllDevices(userId);
   }
 
   // --- PASSWORD SETUP FOR SERVICE PROVIDERS ---
-  async setupPassword(email: string, token: string, newPassword: string): Promise<void> {
-    // Verify the token and get user
+  async setupPassword(email: string, token: string, newPassword: string, req?: any): Promise<void> {
     const user = await prisma.user.findFirst({
       where: {
         email,
-        password: null, // User without password
+        password: null,
         userType: { in: ['host', 'tourguide', 'agent'] }
       }
     });
@@ -414,25 +510,33 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { id: user.id },
       data: {
         password: hashedPassword
       }
     });
+
+    // Send password setup confirmation
+    try {
+      const securityInfo = this.extractSecurityInfo(req);
+      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
+      await this.brevoService.sendPasswordChangedNotification(mailingContext);
+    } catch (emailError) {
+      console.error('Failed to send password setup notification:', emailError);
+    }
   }
  
   // --- FORGOT PASSWORD ---
-  async forgotPassword(email: string): Promise<{ message: string }> {
+  async forgotPassword(email: string, req?: any): Promise<{ message: string }> {
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {
-      // For security, don't reveal if the user exists or not
       return { message: 'If a user with that email exists, a reset code has been sent.' };
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expires = new Date(Date.now() + 10 * 60 * 1000); // OTP expires in 10 minutes
+    const expires = new Date(Date.now() + 10 * 60 * 1000);
 
     await prisma.user.update({
       where: { email },
@@ -442,8 +546,19 @@ export class AuthService {
       },
     });
 
-    // TODO: Implement a real email sending service here! (e.g., Nodemailer, SendGrid)
-    console.log(`Password reset OTP for ${email}: ${otp}`);
+    // Send password reset OTP
+    try {
+      const securityInfo = this.extractSecurityInfo(req);
+      const verificationInfo = {
+        code: otp,
+        expiresIn: '10 minutes'
+      };
+      const mailingContext = this.createMailingContext(user, securityInfo, verificationInfo);
+      await this.brevoService.sendPasswordResetOTP(mailingContext);
+    } catch (emailError) {
+      console.error('Failed to send password reset OTP:', emailError);
+      throw new Error('Failed to send reset code. Please try again.');
+    }
     
     return { message: 'A password reset code has been sent to your email.' };
   }
@@ -466,7 +581,7 @@ export class AuthService {
     return { message: 'OTP verified successfully.' };
   }
 
-  async resetPassword(email: string, otp: string, newPassword: string): Promise<void> {
+  async resetPassword(email: string, otp: string, newPassword: string, req?: any): Promise<void> {
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (!user || user.resetPasswordOtp !== otp || !user.resetPasswordExpires || user.resetPasswordExpires < new Date()) {
@@ -475,7 +590,7 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { email },
       data: {
         password: hashedPassword,
@@ -483,6 +598,15 @@ export class AuthService {
         resetPasswordExpires: null
       },
     });
+
+    // Send password reset confirmation
+    try {
+      const securityInfo = this.extractSecurityInfo(req);
+      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
+      await this.brevoService.sendPasswordChangedNotification(mailingContext);
+    } catch (emailError) {
+      console.error('Failed to send password reset confirmation:', emailError);
+    }
   }
 
   // --- USER QUERIES ---
@@ -539,6 +663,317 @@ export class AuthService {
     }));
   }
 
+  // --- ADMIN CRUD OPERATIONS ---
+  async adminCreateUser(data: RegisterDto & { status?: string }, req?: any): Promise<UserInfo> {
+    const existingUser = await prisma.user.findUnique({
+      where: { email: data.email }
+    });
+
+    if (existingUser) {
+      throw new Error('User with this email already exists');
+    }
+
+    let firstName = data.firstName || '';
+    let lastName = data.lastName || '';
+    
+    if (data.names && (!data.firstName || !data.lastName)) {
+      const nameParts = data.names.trim().split(' ');
+      firstName = nameParts[0] || '';
+      lastName = nameParts.slice(1).join(' ') || '';
+    }
+
+    if (!firstName || !lastName) {
+      throw new Error('First name and last name are required');
+    }
+
+    let hashedPassword = null;
+    if (data.password) {
+      hashedPassword = await bcrypt.hash(data.password, 10);
+    }
+
+    const tourGuideData = data.userType === 'tourguide' ? {
+      bio: data.bio,
+      experience: data.experience,
+      languages: data.languages ? JSON.stringify(data.languages) : null,
+      specializations: data.specializations ? JSON.stringify(data.specializations) : null,
+      licenseNumber: data.licenseNumber,
+      certifications: data.certifications ? JSON.stringify(data.certifications) : null,
+    } : {};
+
+    const user = await prisma.user.create({
+      data: {
+        email: data.email,
+        firstName,
+        lastName,
+        password: hashedPassword,
+        provider: data.provider || 'manual',
+        phone: data.phone,
+        phoneCountryCode: data.phoneCountryCode,
+        country: data.country,
+        state: data.state,
+        province: data.province,
+        city: data.city,
+        street: data.street,
+        zipCode: data.zipCode,
+        postalCode: data.postalCode,
+        postcode: data.postcode,
+        pinCode: data.pinCode,
+        eircode: data.eircode,
+        cep: data.cep,
+        userType: data.userType || 'guest',
+        status: data.status || 'active',
+        verificationStatus: data.status === 'active' ? 'verified' : 'unverified',
+        ...tourGuideData
+      }
+    });
+
+    // Send welcome email for admin-created users
+    try {
+      const mailingContext = this.createMailingContext(user, this.extractSecurityInfo(req));
+      await this.brevoService.sendWelcomeEmail(mailingContext);
+    } catch (emailError) {
+      console.error('Failed to send welcome email for admin-created user:', emailError);
+    }
+
+    return this.transformToUserInfo(user);
+  }
+
+  async adminUpdateUser(userId: number, data: AdminUpdateUserDto & UpdateUserProfileDto): Promise<UserInfo> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const updateData: any = {};
+
+    if (data.status !== undefined) updateData.status = data.status;
+    if (data.userType !== undefined) updateData.userType = data.userType;
+    if (data.email !== undefined) {
+      const emailExists = await prisma.user.findUnique({
+        where: { email: data.email }
+      });
+      if (emailExists && emailExists.id !== userId) {
+        throw new Error('Email already in use');
+      }
+      updateData.email = data.email;
+    }
+
+    if (data.name) {
+      const nameParts = data.name.trim().split(' ');
+      updateData.firstName = nameParts[0] || '';
+      updateData.lastName = nameParts.slice(1).join(' ') || '';
+    } else {
+      if (data.firstName !== undefined) updateData.firstName = data.firstName;
+      if (data.lastName !== undefined) updateData.lastName = data.lastName;
+    }
+
+    // Profile fields
+    if (data.phone !== undefined) updateData.phone = data.phone;
+    if (data.phoneCountryCode !== undefined) updateData.phoneCountryCode = data.phoneCountryCode;
+    if (data.country !== undefined) updateData.country = data.country;
+    if (data.state !== undefined) updateData.state = data.state;
+    if (data.province !== undefined) updateData.province = data.province;
+    if (data.city !== undefined) updateData.city = data.city;
+    if (data.street !== undefined) updateData.street = data.street;
+    if (data.zipCode !== undefined) updateData.zipCode = data.zipCode;
+    if (data.postalCode !== undefined) updateData.postalCode = data.postalCode;
+    if (data.postcode !== undefined) updateData.postcode = data.postcode;
+    if (data.pinCode !== undefined) updateData.pinCode = data.pinCode;
+    if (data.eircode !== undefined) updateData.eircode = data.eircode;
+    if (data.cep !== undefined) updateData.cep = data.cep;
+    if (data.verificationStatus !== undefined) updateData.verificationStatus = data.verificationStatus;
+    if (data.preferredCommunication !== undefined) updateData.preferredCommunication = data.preferredCommunication;
+
+    // Tour guide specific fields
+    if (data.bio !== undefined) updateData.bio = data.bio;
+    if (data.experience !== undefined) updateData.experience = data.experience;
+    if (data.languages !== undefined) updateData.languages = JSON.stringify(data.languages);
+    if (data.specializations !== undefined) updateData.specializations = JSON.stringify(data.specializations);
+    if (data.licenseNumber !== undefined) updateData.licenseNumber = data.licenseNumber;
+    if (data.certifications !== undefined) updateData.certifications = JSON.stringify(data.certifications);
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: updateData
+    });
+
+    return this.transformToUserInfo(updatedUser);
+  }
+
+  async adminDeleteUser(userId: number): Promise<{ message: string }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    if (user.userType === 'admin') {
+      const adminCount = await prisma.user.count({
+        where: { userType: 'admin' }
+      });
+      if (adminCount <= 1) {
+        throw new Error('Cannot delete the last admin user');
+      }
+    }
+
+    await prisma.$transaction([
+      prisma.userSession.deleteMany({
+        where: { userId }
+      }),
+      prisma.user.delete({
+        where: { id: userId }
+      })
+    ]);
+
+    return { message: 'User deleted successfully' };
+  }
+
+  async adminSuspendUser(userId: number, reason?: string, req?: any): Promise<UserInfo> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    if (user.userType === 'admin') {
+      throw new Error('Cannot suspend admin users');
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        status: 'suspended',
+        hostNotes: reason ? `Suspended: ${reason}` : 'Account suspended by admin'
+      }
+    });
+
+    await prisma.userSession.updateMany({
+      where: { userId },
+      data: { isActive: false }
+    });
+
+    // Send account suspension notification
+    try {
+      const securityInfo = this.extractSecurityInfo(req);
+      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
+      await this.brevoService.sendAccountStatusChange(mailingContext, 'suspended');
+    } catch (emailError) {
+      console.error('Failed to send suspension notification:', emailError);
+    }
+
+    return this.transformToUserInfo(updatedUser);
+  }
+
+  async adminActivateUser(userId: number, req?: any): Promise<UserInfo> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        status: 'active',
+        verificationStatus: 'verified'
+      }
+    });
+
+    // Send account reactivation notification
+    try {
+      const securityInfo = this.extractSecurityInfo(req);
+      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
+      await this.brevoService.sendAccountStatusChange(mailingContext, 'reactivated');
+    } catch (emailError) {
+      console.error('Failed to send reactivation notification:', emailError);
+    }
+
+    return this.transformToUserInfo(updatedUser);
+  }
+
+  async adminResetUserPassword(userId: number, req?: any): Promise<{ temporaryPassword: string }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const temporaryPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
+    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        password: hashedPassword,
+        hostNotes: 'Password reset by admin - temporary password assigned'
+      }
+    });
+
+    await prisma.userSession.updateMany({
+      where: { userId },
+      data: { isActive: false }
+    });
+
+    // Send password reset notification
+    try {
+      const securityInfo = this.extractSecurityInfo(req);
+      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
+      await this.brevoService.sendPasswordChangedNotification(mailingContext);
+    } catch (emailError) {
+      console.error('Failed to send admin password reset notification:', emailError);
+    }
+
+    return { temporaryPassword };
+  }
+
+  async getUserStatistics(): Promise<any> {
+    const [totalUsers, usersByType, usersByStatus, recentRegistrations] = await Promise.all([
+      prisma.user.count(),
+      
+      prisma.user.groupBy({
+        by: ['userType'],
+        _count: true
+      }),
+      
+      prisma.user.groupBy({
+        by: ['status'],
+        _count: true
+      }),
+      
+      prisma.user.count({
+        where: {
+          createdAt: {
+            gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+          }
+        }
+      })
+    ]);
+
+    return {
+      totalUsers,
+      usersByType: usersByType.map(item => ({
+        type: item.userType,
+        count: item._count
+      })),
+      usersByStatus: usersByStatus.map(item => ({
+        status: item.status,
+        count: item._count
+      })),
+      recentRegistrations
+    };
+  }
+
   // --- UTILITY METHODS ---
   private async generateTokens(userId: number, email: string, userType: string) {
     const accessToken = jwt.sign(
@@ -565,14 +1000,12 @@ export class AuthService {
   }
 
   private transformToUserInfo(user: any): UserInfo {
-    // Parse JSON strings for tour guide fields
     let languages, specializations, certifications;
     try {
       languages = user.languages ? JSON.parse(user.languages) : undefined;
       specializations = user.specializations ? JSON.parse(user.specializations) : undefined;
       certifications = user.certifications ? JSON.parse(user.certifications) : undefined;
     } catch {
-      // If parsing fails, keep as is
       languages = user.languages;
       specializations = user.specializations;
       certifications = user.certifications;
@@ -586,7 +1019,7 @@ export class AuthService {
       lastName: user.lastName,
       phone: user.phone,
       phoneCountryCode: user.phoneCountryCode,
-      profile: user.profileImage, // Map profileImage to profile
+      profile: user.profileImage,
       country: user.country,
       state: user.state,
       province: user.province,
@@ -602,7 +1035,6 @@ export class AuthService {
       userType: user.userType,
       provider: user.provider,
       providerId: user.providerId,
-      // Tour Guide specific fields
       bio: user.bio,
       experience: user.experience,
       languages,
@@ -612,7 +1044,6 @@ export class AuthService {
       isVerified: user.isVerified,
       licenseNumber: user.licenseNumber,
       certifications,
-      // Additional fields
       verificationStatus: user.verificationStatus,
       preferredCommunication: user.preferredCommunication,
       hostNotes: user.hostNotes,
@@ -629,303 +1060,4 @@ export class AuthService {
     const { password, ...sanitized } = user;
     return sanitized;
   }
-
-  // Add these methods to the AuthService class in auth.service.ts
-
-// --- ADMIN CRUD OPERATIONS ---
-
-async adminCreateUser(data: RegisterDto & { status?: string }): Promise<UserInfo> {
-  // Check if user already exists
-  const existingUser = await prisma.user.findUnique({
-    where: { email: data.email }
-  });
-
-  if (existingUser) {
-    throw new Error('User with this email already exists');
-  }
-
-  // Handle name parsing
-  let firstName = data.firstName || '';
-  let lastName = data.lastName || '';
-  
-  if (data.names && (!data.firstName || !data.lastName)) {
-    const nameParts = data.names.trim().split(' ');
-    firstName = nameParts[0] || '';
-    lastName = nameParts.slice(1).join(' ') || '';
-  }
-
-  if (!firstName || !lastName) {
-    throw new Error('First name and last name are required');
-  }
-
-  // Hash password if provided
-  let hashedPassword = null;
-  if (data.password) {
-    hashedPassword = await bcrypt.hash(data.password, 10);
-  }
-
-  // Prepare tour guide specific data
-  const tourGuideData = data.userType === 'tourguide' ? {
-    bio: data.bio,
-    experience: data.experience,
-    languages: data.languages ? JSON.stringify(data.languages) : null,
-    specializations: data.specializations ? JSON.stringify(data.specializations) : null,
-    licenseNumber: data.licenseNumber,
-    certifications: data.certifications ? JSON.stringify(data.certifications) : null,
-  } : {};
-
-  const user = await prisma.user.create({
-    data: {
-      email: data.email,
-      firstName,
-      lastName,
-      password: hashedPassword,
-      provider: data.provider || 'manual',
-      phone: data.phone,
-      phoneCountryCode: data.phoneCountryCode,
-      country: data.country,
-      state: data.state,
-      province: data.province,
-      city: data.city,
-      street: data.street,
-      zipCode: data.zipCode,
-      postalCode: data.postalCode,
-      postcode: data.postcode,
-      pinCode: data.pinCode,
-      eircode: data.eircode,
-      cep: data.cep,
-      userType: data.userType || 'guest',
-      status: data.status || 'active',
-      verificationStatus: data.status === 'active' ? 'verified' : 'unverified',
-      ...tourGuideData
-    }
-  });
-
-  return this.transformToUserInfo(user);
-}
-
-async adminUpdateUser(userId: number, data: AdminUpdateUserDto & UpdateUserProfileDto): Promise<UserInfo> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId }
-  });
-
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  // Prepare update data
-  const updateData: any = {};
-
-  // Admin-specific fields
-  if (data.status !== undefined) updateData.status = data.status;
-  if (data.userType !== undefined) updateData.userType = data.userType;
-  if (data.email !== undefined) {
-    // Check if new email is already taken
-    const emailExists = await prisma.user.findUnique({
-      where: { email: data.email }
-    });
-    if (emailExists && emailExists.id !== userId) {
-      throw new Error('Email already in use');
-    }
-    updateData.email = data.email;
-  }
-
-  // Handle name update
-  if (data.name) {
-    const nameParts = data.name.trim().split(' ');
-    updateData.firstName = nameParts[0] || '';
-    updateData.lastName = nameParts.slice(1).join(' ') || '';
-  } else {
-    if (data.firstName !== undefined) updateData.firstName = data.firstName;
-    if (data.lastName !== undefined) updateData.lastName = data.lastName;
-  }
-
-  // Profile fields
-  if (data.phone !== undefined) updateData.phone = data.phone;
-  if (data.phoneCountryCode !== undefined) updateData.phoneCountryCode = data.phoneCountryCode;
-  if (data.country !== undefined) updateData.country = data.country;
-  if (data.state !== undefined) updateData.state = data.state;
-  if (data.province !== undefined) updateData.province = data.province;
-  if (data.city !== undefined) updateData.city = data.city;
-  if (data.street !== undefined) updateData.street = data.street;
-  if (data.zipCode !== undefined) updateData.zipCode = data.zipCode;
-  if (data.postalCode !== undefined) updateData.postalCode = data.postalCode;
-  if (data.postcode !== undefined) updateData.postcode = data.postcode;
-  if (data.pinCode !== undefined) updateData.pinCode = data.pinCode;
-  if (data.eircode !== undefined) updateData.eircode = data.eircode;
-  if (data.cep !== undefined) updateData.cep = data.cep;
-  if (data.verificationStatus !== undefined) updateData.verificationStatus = data.verificationStatus;
-  if (data.preferredCommunication !== undefined) updateData.preferredCommunication = data.preferredCommunication;
-
-  // Tour guide specific fields
-  if (data.bio !== undefined) updateData.bio = data.bio;
-  if (data.experience !== undefined) updateData.experience = data.experience;
-  if (data.languages !== undefined) updateData.languages = JSON.stringify(data.languages);
-  if (data.specializations !== undefined) updateData.specializations = JSON.stringify(data.specializations);
-  if (data.licenseNumber !== undefined) updateData.licenseNumber = data.licenseNumber;
-  if (data.certifications !== undefined) updateData.certifications = JSON.stringify(data.certifications);
-
-  const updatedUser = await prisma.user.update({
-    where: { id: userId },
-    data: updateData
-  });
-
-  return this.transformToUserInfo(updatedUser);
-}
-
-async adminDeleteUser(userId: number): Promise<{ message: string }> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId }
-  });
-
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  // Prevent deleting the last admin
-  if (user.userType === 'admin') {
-    const adminCount = await prisma.user.count({
-      where: { userType: 'admin' }
-    });
-    if (adminCount <= 1) {
-      throw new Error('Cannot delete the last admin user');
-    }
-  }
-
-  // Delete related data in a transaction
-  await prisma.$transaction([
-    // Delete user sessions
-    prisma.userSession.deleteMany({
-      where: { userId }
-    }),
-    // Delete the user
-    prisma.user.delete({
-      where: { id: userId }
-    })
-  ]);
-
-  return { message: 'User deleted successfully' };
-}
-
-async adminSuspendUser(userId: number, reason?: string): Promise<UserInfo> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId }
-  });
-
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  if (user.userType === 'admin') {
-    throw new Error('Cannot suspend admin users');
-  }
-
-  const updatedUser = await prisma.user.update({
-    where: { id: userId },
-    data: {
-      status: 'suspended',
-      hostNotes: reason ? `Suspended: ${reason}` : 'Account suspended by admin'
-    }
-  });
-
-  // Invalidate all user sessions
-  await prisma.userSession.updateMany({
-    where: { userId },
-    data: { isActive: false }
-  });
-
-  return this.transformToUserInfo(updatedUser);
-}
-
-async adminActivateUser(userId: number): Promise<UserInfo> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId }
-  });
-
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  const updatedUser = await prisma.user.update({
-    where: { id: userId },
-    data: {
-      status: 'active',
-      verificationStatus: 'verified'
-    }
-  });
-
-  return this.transformToUserInfo(updatedUser);
-}
-
-async adminResetUserPassword(userId: number): Promise<{ temporaryPassword: string }> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId }
-  });
-
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  // Generate temporary password
-  const temporaryPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
-  const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      password: hashedPassword,
-      // Set a flag that forces password change on next login
-      hostNotes: 'Password reset by admin - temporary password assigned'
-    }
-  });
-
-  // Invalidate all sessions
-  await prisma.userSession.updateMany({
-    where: { userId },
-    data: { isActive: false }
-  });
-
-  return { temporaryPassword };
-}
-
-async getUserStatistics(): Promise<any> {
-  const [totalUsers, usersByType, usersByStatus, recentRegistrations] = await Promise.all([
-    // Total users
-    prisma.user.count(),
-    
-    // Users by type
-    prisma.user.groupBy({
-      by: ['userType'],
-      _count: true
-    }),
-    
-    // Users by status
-    prisma.user.groupBy({
-      by: ['status'],
-      _count: true
-    }),
-    
-    // Recent registrations (last 30 days)
-    prisma.user.count({
-      where: {
-        createdAt: {
-          gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-        }
-      }
-    })
-  ]);
-
-  return {
-    totalUsers,
-    usersByType: usersByType.map(item => ({
-      type: item.userType,
-      count: item._count
-    })),
-    usersByStatus: usersByStatus.map(item => ({
-      status: item.status,
-      count: item._count
-    })),
-    recentRegistrations
-  };
-}
 }

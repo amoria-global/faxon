@@ -7,6 +7,8 @@ export const config = {
   googleClientId: process.env.GOOGLE_CLIENT_ID || '739960680632-g75378et3hgeu5qmukdqp8085369gh1t.apps.googleusercontent.com',
   appleClientId: process.env.APPLE_CLIENT_ID || '',
   clientUrl: process.env.CLIENT_URL || 'https://jambolush.com',
+  supportEmail: process.env.SUPPORT_EMAIL || 'support@jambolush.com',
+  companyLogo: 'https://jambolush.com/favicon.ico',
 
   //brevo api
   brevoApiKey: process.env.BREVO_API_KEY || '',
