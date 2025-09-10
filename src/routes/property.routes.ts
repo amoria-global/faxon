@@ -1,7 +1,14 @@
 import { Router } from 'express';
 import { PropertyController } from '../controllers/property.controller';
 import { authenticate } from '../middleware/auth.middleware';
-import { validateProperty, validateBookingUpdate, validateHost } from '../middleware/property.middleware';
+import { 
+  validateProperty, 
+  validateBookingUpdate, 
+  validateHost,
+  validateAgent,
+  validateAgentPropertyAccess,
+  validateAgentPropertyEdit 
+} from '../middleware/property.middleware';
 
 const router = Router();
 const propertyController = new PropertyController();
@@ -24,26 +31,56 @@ router.get('/host/dashboard/enhanced', validateHost, propertyController.getEnhan
 router.get('/host/quick-stats', validateHost, propertyController.getQuickStats);
 router.get('/host/recent-activity', validateHost, propertyController.getRecentActivity);
 
-// --- PROPERTY MANAGEMENT ---
+// --- HOST PROPERTY MANAGEMENT ---
 router.post('/', validateProperty, propertyController.createProperty);
 router.put('/:id', validateHost, propertyController.updateProperty);
 router.delete('/:id', validateHost, propertyController.deleteProperty);
 router.get('/host/my-properties', validateHost, propertyController.getMyProperties);
 
-// Property status management
+// Host property status management
 router.patch('/:id/activate', validateHost, propertyController.activateProperty);
 router.patch('/:id/deactivate', validateHost, propertyController.deactivateProperty);
 
-// Property availability management
+// Host property availability management
 router.patch('/:id/availability', validateHost, propertyController.updatePropertyAvailability);
 router.post('/:id/block-dates', validateHost, propertyController.blockPropertyDates);
 
-// Property pricing management
+// Host property pricing management
 router.patch('/:id/pricing', validateHost, propertyController.updatePropertyPricing);
 
+// --- AGENT PROPERTY MANAGEMENT (Limited Access) ---
+// Agent dashboard and overview
+router.get('/agent/dashboard', validateAgent, propertyController.getAgentDashboard);
+router.get('/agent/properties', validateAgent, propertyController.getAgentProperties);
+router.get('/agent/properties/performance', validateAgent, propertyController.getAgentPropertyPerformance);
+
+// Agent property viewing and limited editing
+router.get('/agent/properties/:id', validateAgent, validateAgentPropertyAccess, propertyController.getAgentPropertyDetails);
+router.patch('/agent/properties/:id/edit', validateAgent, validateAgentPropertyAccess, validateAgentPropertyEdit, propertyController.updateAgentProperty);
+
+// Agent property booking management for clients
+router.get('/agent/properties/:id/bookings', validateAgent, validateAgentPropertyAccess, propertyController.getAgentPropertyBookings);
+router.post('/agent/properties/:id/bookings', validateAgent, validateAgentPropertyAccess, propertyController.createAgentBooking);
+
+// Agent analytics for client properties
+router.get('/agent/properties/:id/analytics', validateAgent, validateAgentPropertyAccess, propertyController.getAgentPropertyAnalytics);
+router.get('/agent/properties/analytics/summary', validateAgent, propertyController.getAgentPropertiesAnalyticsSummary);
+
+// Agent earnings from client properties
+router.get('/agent/earnings', validateAgent, propertyController.getAgentEarnings);
+router.get('/agent/earnings/breakdown', validateAgent, propertyController.getAgentEarningsBreakdown);
+
+// Agent client property management
+router.get('/agent/clients/:clientId/properties', validateAgent, propertyController.getClientProperties);
+router.post('/agent/clients/:clientId/properties', validateAgent, validateProperty, propertyController.createClientProperty);
+
 // --- MEDIA MANAGEMENT ---
+// Host media management
 router.post('/:id/images', validateHost, propertyController.uploadPropertyImages);
 router.delete('/:id/images', validateHost, propertyController.removePropertyImage);
+
+// Agent media management (limited)
+router.post('/agent/properties/:id/images', validateAgent, validateAgentPropertyAccess, propertyController.uploadAgentPropertyImages);
 
 // --- BOOKING MANAGEMENT ---
 // Create booking (for guests)
@@ -58,18 +95,38 @@ router.patch('/host/bookings/bulk-update', validateHost, propertyController.bulk
 // Property-specific bookings
 router.get('/:id/bookings', validateHost, propertyController.getPropertyBookings);
 
+// Agent booking management
+router.get('/agent/bookings', validateAgent, propertyController.getAgentBookings);
+router.get('/agent/bookings/calendar', validateAgent, propertyController.getAgentBookingCalendar);
+router.put('/agent/bookings/:bookingId', validateAgent, validateBookingUpdate, propertyController.updateAgentBooking);
+
 // --- GUEST MANAGEMENT ---
+// Host guest management
 router.get('/host/guests', validateHost, propertyController.getHostGuests);
 router.get('/host/guests/:guestId', validateHost, propertyController.getGuestDetails);
 
+// Agent guest management
+router.get('/agent/guests', validateAgent, propertyController.getAgentGuests);
+router.get('/agent/clients/:clientId/guests', validateAgent, propertyController.getClientGuests);
+
 // --- EARNINGS & FINANCIAL ---
+// Host earnings
 router.get('/host/earnings', validateHost, propertyController.getEarningsOverview);
 router.get('/host/earnings/breakdown', validateHost, propertyController.getEarningsBreakdown);
 
+// Agent earnings already defined above
+
 // --- ANALYTICS ---
+// Host analytics
 router.get('/host/analytics', validateHost, propertyController.getHostAnalytics);
+
+// Agent analytics already defined above
 
 // --- REVIEW MANAGEMENT ---
 router.post('/:id/reviews', propertyController.createReview);
+
+// Agent review management
+router.get('/agent/properties/:id/reviews', validateAgent, validateAgentPropertyAccess, propertyController.getAgentPropertyReviews);
+router.get('/agent/reviews/summary', validateAgent, propertyController.getAgentReviewsSummary);
 
 export default router;

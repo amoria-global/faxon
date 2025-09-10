@@ -27,6 +27,12 @@ router.put('/me', authController.updateProfile);
 router.put('/me/image', authController.updateProfileImage);
 router.put('/me/password', authController.changePassword);
 
+// --- ADMIN ROUTES (might need additional admin middleware) ---
+router.get('/users', authController.getAllUsers);
+router.get('/users/email/:email', authController.getUserByEmail);
+router.get('/users/id/:id', authController.getUserById);
+router.get('/users/provider/:provider', authController.getUsersByProvider);
+
 // Session Management
 router.post('/logout', authController.logout);
 router.post('/logout-all', authController.logoutAllDevices);

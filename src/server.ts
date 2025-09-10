@@ -59,6 +59,7 @@ app.use('/api/properties', propertyRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/bookings', bookingRoutes);
 
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });

@@ -489,7 +489,7 @@ export class PaymentService {
         charges: data.charges,
         netAmount: data.netAmount,
         callbackUrl: data.callbackUrl,
-        metadata: data.metadata ? JSON.stringify(data.metadata) : null
+        metadata: data.metadata ? JSON.stringify(data.metadata) : undefined // Fix: use undefined instead of null
       }
     });
 
@@ -1107,7 +1107,17 @@ export class PaymentService {
 
     return {
       ...settings,
-      notificationPreferences: JSON.parse(settings.notificationPreferences)
+      // Fix: handle potential null value
+      notificationPreferences: settings.notificationPreferences 
+        ? JSON.parse(settings.notificationPreferences as string)
+        : {
+            emailNotifications: true,
+            smsNotifications: true,
+            pushNotifications: true,
+            transactionAlerts: true,
+            lowBalanceAlerts: true,
+            largeTransactionAlerts: true
+          }
     };
   }
 
@@ -1167,7 +1177,10 @@ export class PaymentService {
         description: retryData.description
       });
     } else if (transaction.type === 'transfer') {
-      const metadata = transaction.metadata ? JSON.parse(transaction.metadata) : {};
+      // Fix: handle potential null value and parse metadata safely
+      const metadata = transaction.metadata && typeof transaction.metadata === 'string' 
+        ? JSON.parse(transaction.metadata) 
+        : {};
       return await this.transfer(userId, {
         amount: transaction.amount,
         sourceAccount: transaction.sourceAccount!,
@@ -1511,7 +1524,9 @@ export class PaymentService {
       externalId: transaction.externalId,
       jengaTransactionId: transaction.jengaTransactionId,
       description: transaction.description,
-      metadata: transaction.metadata ? JSON.parse(transaction.metadata) : undefined,
+      metadata: transaction.metadata && typeof transaction.metadata === 'string' 
+        ? JSON.parse(transaction.metadata) 
+        : undefined, // Fix: safely parse metadata
       charges: transaction.charges,
       netAmount: transaction.netAmount,
       sourceAccount: transaction.sourceAccount,

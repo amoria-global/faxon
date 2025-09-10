@@ -306,7 +306,7 @@ export class AuthController {
   async getUserByEmail(req: Request, res: Response, next: NextFunction) {
     try {
       // Check if user is admin
-      if (!req.user?.userType || req.user.userType !== 'admin') {
+      if (!req.user?.userType || req.user.userType === 'guest') {
         return res.status(403).json({ message: 'Access denied. Admin only.' });
       }
 

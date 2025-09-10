@@ -9,8 +9,10 @@ import {
   JengaCallbackData,
   PaymentResponse,
   PaymentSuccessResponse,
-  PaymentErrorResponse
+  PaymentErrorResponse,
 } from '../types/payment.types';
+import { EscrowService } from '../services/escrow.service';
+import { EscrowDepositDto, EscrowSuccessResponse, EscrowErrorResponse, EscrowWithdrawalDto, EscrowTransferDto, EscrowP2PDto, EscrowStatus, EscrowWebhookData } from '../types/escrow.types';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -21,14 +23,18 @@ interface AuthenticatedRequest extends Request {
   };
 }
 
+
 export class PaymentController {
   private paymentService: PaymentService;
+  private escrowService: EscrowService;
 
   constructor() {
     this.paymentService = new PaymentService();
+    this.escrowService = new EscrowService();
   }
 
-  // --- DEPOSIT OPERATIONS ---
+
+// === DEPOSIT OPERATIONS ===
   deposit = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = parseInt(req.user!.userId);
@@ -58,6 +64,7 @@ export class PaymentController {
       res.status(400).json(errorResponse);
     }
   };
+
 
   // --- WITHDRAWAL OPERATIONS ---
   withdraw = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -121,6 +128,7 @@ export class PaymentController {
     }
   };
 
+
   // --- BALANCE OPERATIONS ---
   getBalance = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
@@ -178,6 +186,285 @@ export class PaymentController {
       };
 
       res.status(500).json(errorResponse);
+    }
+  };
+ // --- ESCROW DEPOSIT ---
+  createEscrowDeposit = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const userId = parseInt(req.user!.userId);
+      const escrowData: EscrowDepositDto = req.body;
+
+      const escrowTransaction = await this.escrowService.createEscrowDeposit(userId, escrowData);
+
+      const response: EscrowSuccessResponse = {
+        success: true,
+        data: escrowTransaction,
+        message: 'Escrow deposit created successfully'
+      };
+
+      res.status(201).json(response);
+    } catch (error: any) {
+      console.error('Escrow deposit controller error:', error);
+      
+      const errorResponse: EscrowErrorResponse = {
+        success: false,
+        error: {
+          code: 'ESCROW_DEPOSIT_FAILED',
+          message: error.message || 'Failed to create escrow deposit',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      res.status(400).json(errorResponse);
+    }
+  };
+
+  // --- ESCROW WITHDRAWAL (Release) ---
+  processEscrowWithdrawal = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const userId = parseInt(req.user!.userId);
+      const withdrawalData: EscrowWithdrawalDto = req.body;
+
+      const escrowTransaction = await this.escrowService.processEscrowWithdrawal(userId, withdrawalData);
+
+      const response: EscrowSuccessResponse = {
+        success: true,
+        data: escrowTransaction,
+        message: 'Escrow withdrawal processed successfully'
+      };
+
+      res.status(200).json(response);
+    } catch (error: any) {
+      console.error('Escrow withdrawal controller error:', error);
+      
+      const errorResponse: EscrowErrorResponse = {
+        success: false,
+        error: {
+          code: 'ESCROW_WITHDRAWAL_FAILED',
+          message: error.message || 'Failed to process escrow withdrawal',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      res.status(400).json(errorResponse);
+    }
+  };
+
+  // --- ESCROW TRANSFER ---
+  processEscrowTransfer = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const userId = parseInt(req.user!.userId);
+      const transferData: EscrowTransferDto = req.body;
+
+      const escrowTransaction = await this.escrowService.processEscrowTransfer(userId, transferData);
+
+      const response: EscrowSuccessResponse = {
+        success: true,
+        data: escrowTransaction,
+        message: 'Escrow transfer processed successfully'
+      };
+
+      res.status(201).json(response);
+    } catch (error: any) {
+      console.error('Escrow transfer controller error:', error);
+      
+      const errorResponse: EscrowErrorResponse = {
+        success: false,
+        error: {
+          code: 'ESCROW_TRANSFER_FAILED',
+          message: error.message || 'Failed to process escrow transfer',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      res.status(400).json(errorResponse);
+    }
+  };
+
+  // --- PEER-TO-PEER ESCROW PAYMENTS ---
+  createP2PEscrowPayment = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const userId = parseInt(req.user!.userId);
+      const p2pData: EscrowP2PDto = req.body;
+
+      const escrowTransaction = await this.escrowService.createP2PEscrowPayment(userId, p2pData);
+
+      const response: EscrowSuccessResponse = {
+        success: true,
+        data: escrowTransaction,
+        message: 'P2P escrow payment created successfully'
+      };
+
+      res.status(201).json(response);
+    } catch (error: any) {
+      console.error('P2P escrow payment controller error:', error);
+      
+      const errorResponse: EscrowErrorResponse = {
+        success: false,
+        error: {
+          code: 'P2P_ESCROW_FAILED',
+          message: error.message || 'Failed to create P2P escrow payment',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      res.status(400).json(errorResponse);
+    }
+  };
+
+  // --- ESCROW TRANSACTION MANAGEMENT ---
+  getEscrowTransaction = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const userId = parseInt(req.user!.userId);
+      const transactionId = req.params.id;
+
+      if (!transactionId) {
+        const errorResponse: EscrowErrorResponse = {
+          success: false,
+          error: {
+            code: 'INVALID_TRANSACTION_ID',
+            message: 'Escrow transaction ID is required',
+            timestamp: new Date().toISOString()
+          }
+        };
+        res.status(400).json(errorResponse);
+        return;
+      }
+
+      const escrowTransaction = await this.escrowService.getEscrowTransaction(transactionId, userId);
+
+      if (!escrowTransaction) {
+        const errorResponse: EscrowErrorResponse = {
+          success: false,
+          error: {
+            code: 'ESCROW_TRANSACTION_NOT_FOUND',
+            message: 'Escrow transaction not found',
+            timestamp: new Date().toISOString()
+          }
+        };
+        res.status(404).json(errorResponse);
+        return;
+      }
+
+      const response: EscrowSuccessResponse = {
+        success: true,
+        data: escrowTransaction,
+        message: 'Escrow transaction retrieved successfully'
+      };
+
+      res.status(200).json(response);
+    } catch (error: any) {
+      console.error('Get escrow transaction controller error:', error);
+      
+      const errorResponse: EscrowErrorResponse = {
+        success: false,
+        error: {
+          code: 'ESCROW_TRANSACTION_RETRIEVAL_FAILED',
+          message: error.message || 'Failed to retrieve escrow transaction',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      res.status(500).json(errorResponse);
+    }
+  };
+
+  getUserEscrowTransactions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const userId = parseInt(req.user!.userId);
+      const status = req.query.status as EscrowStatus | undefined;
+
+      const escrowTransactions = await this.escrowService.getUserEscrowTransactions(userId, status);
+
+      const response: EscrowSuccessResponse = {
+        success: true,
+        data: escrowTransactions,
+        message: 'Escrow transactions retrieved successfully'
+      };
+
+      res.status(200).json(response);
+    } catch (error: any) {
+      console.error('Get user escrow transactions controller error:', error);
+      
+      const errorResponse: EscrowErrorResponse = {
+        success: false,
+        error: {
+          code: 'ESCROW_TRANSACTIONS_RETRIEVAL_FAILED',
+          message: error.message || 'Failed to retrieve escrow transactions',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      res.status(500).json(errorResponse);
+    }
+  };
+
+  // --- ESCROW DISPUTE MANAGEMENT ---
+  createEscrowDispute = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const userId = parseInt(req.user!.userId);
+      const { escrowTransactionId, disputeReason } = req.body;
+
+      if (!escrowTransactionId || !disputeReason) {
+        const errorResponse: EscrowErrorResponse = {
+          success: false,
+          error: {
+            code: 'INVALID_DISPUTE_DATA',
+            message: 'Escrow transaction ID and dispute reason are required',
+            timestamp: new Date().toISOString()
+          }
+        };
+        res.status(400).json(errorResponse);
+        return;
+      }
+
+      const dispute = await this.escrowService.disputeEscrowTransaction(escrowTransactionId, userId, disputeReason);
+
+      const response: EscrowSuccessResponse = {
+        success: true,
+        data: dispute,
+        message: 'Escrow dispute created successfully'
+      };
+
+      res.status(201).json(response);
+    } catch (error: any) {
+      console.error('Create escrow dispute controller error:', error);
+      
+      const errorResponse: EscrowErrorResponse = {
+        success: false,
+        error: {
+          code: 'ESCROW_DISPUTE_FAILED',
+          message: error.message || 'Failed to create escrow dispute',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      res.status(400).json(errorResponse);
+    }
+  };
+
+  // --- ESCROW WEBHOOK HANDLING ---
+  handleEscrowWebhook = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const webhookData: EscrowWebhookData = req.body;
+
+      console.log('Received Escrow webhook:', JSON.stringify(webhookData, null, 2));
+
+      await this.escrowService.handleEscrowWebhook(webhookData);
+
+      // Respond to escrow provider that we received the webhook
+      res.status(200).json({
+        success: true,
+        message: 'Escrow webhook processed successfully'
+      });
+    } catch (error: any) {
+      console.error('Escrow webhook controller error:', error);
+      
+      // Still respond with 200 to prevent escrow provider from retrying
+      res.status(200).json({
+        success: false,
+        error: 'Escrow webhook processing failed'
+      });
     }
   };
 
@@ -814,4 +1101,198 @@ export class PaymentController {
       res.status(400).json(errorResponse);
     }
   };
+
+    // --- HYBRID OPERATIONS (Traditional + Escrow) ---
+  
+  // Enhanced deposit that can optionally use escrow
+  enhancedDeposit = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const userId = parseInt(req.user!.userId);
+      const { useEscrow, ...depositData } = req.body;
+
+      let transaction;
+      
+      if (useEscrow) {
+        // Convert regular deposit to escrow deposit
+        const escrowDepositData: EscrowDepositDto = {
+          ...depositData,
+          escrowTerms: depositData.escrowTerms || {
+            type: 'manual',
+            description: 'Standard escrow deposit',
+            conditions: ['Payment confirmation required']
+          }
+        };
+        transaction = await this.escrowService.createEscrowDeposit(userId, escrowDepositData);
+      } else {
+        transaction = await this.paymentService.deposit(userId, depositData);
+      }
+
+      const response: PaymentSuccessResponse = {
+        success: true,
+        data: transaction,
+        message: `${useEscrow ? 'Escrow ' : ''}Deposit initiated successfully`
+      };
+
+      res.status(201).json(response);
+    } catch (error: any) {
+      console.error('Enhanced deposit controller error:', error);
+      
+      const errorResponse: PaymentErrorResponse = {
+        success: false,
+        error: {
+          code: 'ENHANCED_DEPOSIT_FAILED',
+          message: error.message || 'Failed to process deposit',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      res.status(400).json(errorResponse);
+    }
+  };
+
+  // Enhanced transfer that can use escrow for P2P
+  enhancedTransfer = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const userId = parseInt(req.user!.userId);
+      const { useEscrow, recipientId, ...transferData } = req.body;
+
+      let transaction;
+
+      if (useEscrow && recipientId) {
+        // Convert to P2P escrow
+        const p2pEscrowData: EscrowP2PDto = {
+          recipientId,
+          amount: transferData.amount,
+          currency: transferData.currency || 'USD',
+          reference: transferData.reference,
+          description: transferData.description,
+          escrowTerms: transferData.escrowTerms || {
+            type: 'manual',
+            description: 'P2P escrow transfer',
+            conditions: ['Recipient confirmation required']
+          }
+        };
+        transaction = await this.escrowService.createP2PEscrowPayment(userId, p2pEscrowData);
+      } else {
+        transaction = await this.paymentService.transfer(userId, transferData);
+      }
+
+      const response: PaymentSuccessResponse = {
+        success: true,
+        data: transaction,
+        message: `${useEscrow ? 'Escrow ' : ''}Transfer initiated successfully`
+      };
+
+      res.status(201).json(response);
+    } catch (error: any) {
+      console.error('Enhanced transfer controller error:', error);
+      
+      const errorResponse: PaymentErrorResponse = {
+        success: false,
+        error: {
+          code: 'ENHANCED_TRANSFER_FAILED',
+          message: error.message || 'Failed to process transfer',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      res.status(400).json(errorResponse);
+    }
+  };
+
+  // --- UNIFIED TRANSACTION HISTORY ---
+  getAllUserTransactions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const userId = parseInt(req.user!.userId);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const includeEscrow = req.query.includeEscrow !== 'false';
+
+      // Get regular transactions
+      const filters: PaymentFilters = {
+        userId,
+        type: req.query.type ? (req.query.type as string).split(',') as any[] : undefined,
+        status: req.query.status ? (req.query.status as string).split(',') as any[] : undefined,
+        dateFrom: req.query.dateFrom as string,
+        dateTo: req.query.dateTo as string
+      };
+
+      const [regularTransactions, escrowTransactions] = await Promise.all([
+        this.paymentService.getTransactionHistory(userId, filters, page, limit),
+        includeEscrow ? this.escrowService.getUserEscrowTransactions(userId) : []
+      ]);
+
+      // Combine and sort transactions
+      const allTransactions = [
+        ...regularTransactions.transactions.map((t: any) => ({ ...t, transactionType: 'regular' })),
+        ...(Array.isArray(escrowTransactions) ? escrowTransactions.map(t => ({ ...t, transactionType: 'escrow' })) : [])
+      ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      const response: PaymentSuccessResponse = {
+        success: true,
+        data: {
+          transactions: allTransactions.slice((page - 1) * limit, page * limit),
+          summary: {
+            ...regularTransactions.summary,
+            escrowCount: Array.isArray(escrowTransactions) ? escrowTransactions.length : 0
+          },
+          pagination: {
+            ...regularTransactions.pagination,
+            total: allTransactions.length,
+            totalPages: Math.ceil(allTransactions.length / limit)
+          }
+        },
+        message: 'All transactions retrieved successfully'
+      };
+
+      res.status(200).json(response);
+    } catch (error: any) {
+      console.error('Get all user transactions controller error:', error);
+      
+      const errorResponse: PaymentErrorResponse = {
+        success: false,
+        error: {
+          code: 'ALL_TRANSACTIONS_RETRIEVAL_FAILED',
+          message: error.message || 'Failed to retrieve transactions',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      res.status(500).json(errorResponse);
+    }
+  };
+
+  // --- CURRENCY SUPPORT ---
+  getSupportedCurrencies = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const currencies = [
+        { code: 'USD', name: 'US Dollar', symbol: '$', isDefault: true },
+        { code: 'RWF', name: 'Rwandan Franc', symbol: 'FRw', isDefault: false },
+        { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', isDefault: false }
+      ];
+
+      const response: PaymentSuccessResponse = {
+        success: true,
+        data: currencies,
+        message: 'Supported currencies retrieved successfully'
+      };
+
+      res.status(200).json(response);
+    } catch (error: any) {
+      console.error('Get supported currencies controller error:', error);
+      
+      const errorResponse: PaymentErrorResponse = {
+        success: false,
+        error: {
+          code: 'CURRENCIES_RETRIEVAL_FAILED',
+          message: error.message || 'Failed to retrieve supported currencies',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      res.status(500).json(errorResponse);
+    }
+  };
+
+  
 }

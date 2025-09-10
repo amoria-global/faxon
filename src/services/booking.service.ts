@@ -733,12 +733,16 @@ async getGuestBookingStats(userId: number): Promise<GuestBookingStats> {
     });
     if (!property) throw new Error('Property not found');
     
+    // Fix: Proper type casting for JSON.parse
+    const propertyImages = typeof property.images === 'string' ? property.images : JSON.stringify(property.images || {});
+    const parsedImages = JSON.parse(propertyImages);
+    
     itemDetails = {
       name: property.name,
       location: property.location,
       price: property.pricePerNight,
       rating: property.averageRating,
-      image: JSON.parse(property.images || '{}')?.exterior?.[0] || ''
+      image: parsedImages?.exterior?.[0] || ''
     };
   } else {
     const tour = await prisma.tour.findUnique({
@@ -746,12 +750,16 @@ async getGuestBookingStats(userId: number): Promise<GuestBookingStats> {
     });
     if (!tour) throw new Error('Tour not found');
     
+    // Fix: Proper type casting for JSON.parse
+    const tourImages = typeof tour.images === 'string' ? tour.images : JSON.stringify(tour.images || {});
+    const parsedImages = JSON.parse(tourImages);
+    
     itemDetails = {
       name: tour.title,
       location: tour.locationCity,
       price: tour.price,
       rating: tour.rating,
-      image: JSON.parse(tour.images || '{}')?.main?.[0] || ''
+      image: parsedImages?.main?.[0] || ''
     };
   }
 

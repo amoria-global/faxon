@@ -1321,4 +1321,792 @@ getRecentActivity = async (req: AuthenticatedRequest, res: Response): Promise<vo
     });
   }
 };
+
+// Add these methods to your PropertyController class
+
+// --- AGENT DASHBOARD & OVERVIEW ---
+getAgentDashboard = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const dashboard = await this.propertyService.getAgentDashboard(agentId);
+    
+    res.json({
+      success: true,
+      message: 'Agent dashboard retrieved successfully',
+      data: dashboard
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent dashboard:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve agent dashboard'
+    });
+  }
+};
+
+// --- AGENT PROPERTY MANAGEMENT ---
+getAgentProperties = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    
+    const filters: any = {
+      clientId: req.query.clientId ? parseInt(req.query.clientId as string) : undefined,
+      status: req.query.status as string,
+      search: req.query.search as string,
+      sortBy: req.query.sortBy as 'name' | 'location' | 'price' | 'rating' | 'created_at',
+      sortOrder: req.query.sortOrder as 'asc' | 'desc'
+    };
+
+    // Remove undefined values
+    Object.keys(filters).forEach(key => {
+      if (filters[key] === undefined) {
+        delete filters[key];
+      }
+    });
+
+    const result = await this.propertyService.getAgentProperties(agentId, filters, page, limit);
+    
+    res.json({
+      success: true,
+      message: 'Agent properties retrieved successfully',
+      data: result
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent properties:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve agent properties'
+    });
+  }
+};
+
+getAgentPropertyPerformance = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const timeRange = (req.query.timeRange as 'week' | 'month' | 'quarter' | 'year') || 'month';
+    
+    const performance = await this.propertyService.getAgentPropertyPerformance(agentId, timeRange);
+    
+    res.json({
+      success: true,
+      message: 'Agent property performance retrieved successfully',
+      data: performance
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent property performance:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve property performance'
+    });
+  }
+};
+
+getAgentPropertyDetails = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const propertyId = parseInt(req.params.id);
+    const agentId = parseInt(req.user.userId);
+
+    if (isNaN(propertyId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid property ID'
+      });
+      return;
+    }
+
+    const property = await this.propertyService.getAgentPropertyDetails(agentId, propertyId);
+    
+    res.json({
+      success: true,
+      message: 'Agent property details retrieved successfully',
+      data: property
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent property details:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to retrieve property details'
+    });
+  }
+};
+
+updateAgentProperty = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const propertyId = parseInt(req.params.id);
+    const agentId = parseInt(req.user.userId);
+    const updateData = req.body;
+
+    if (isNaN(propertyId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid property ID'
+      });
+      return;
+    }
+
+    const property = await this.propertyService.updateAgentProperty(agentId, propertyId, updateData);
+    
+    res.json({
+      success: true,
+      message: 'Property updated successfully by agent',
+      data: property
+    });
+  } catch (error: any) {
+    console.error('Error updating agent property:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to update property'
+    });
+  }
+};
+
+// --- AGENT BOOKING MANAGEMENT ---
+getAgentPropertyBookings = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const propertyId = parseInt(req.params.id);
+    const agentId = parseInt(req.user.userId);
+
+    if (isNaN(propertyId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid property ID'
+      });
+      return;
+    }
+
+    const bookings = await this.propertyService.getAgentPropertyBookings(agentId, propertyId);
+    
+    res.json({
+      success: true,
+      message: 'Agent property bookings retrieved successfully',
+      data: bookings
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent property bookings:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to retrieve bookings'
+    });
+  }
+};
+
+createAgentBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const propertyId = parseInt(req.params.id);
+    const agentId = parseInt(req.user.userId);
+    const bookingData = req.body;
+
+    if (isNaN(propertyId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid property ID'
+      });
+      return;
+    }
+
+    // Ensure propertyId in body matches URL param
+    bookingData.propertyId = propertyId;
+
+    const booking = await this.propertyService.createAgentBooking(agentId, bookingData);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Booking created successfully by agent',
+      data: booking
+    });
+  } catch (error: any) {
+    console.error('Error creating agent booking:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to create booking'
+    });
+  }
+};
+
+getAgentBookings = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+
+    const filters: BookingFilters = {
+      status: req.query.status ? (req.query.status as string).split(',') as BookingStatus[] : undefined,
+      propertyId: req.query.propertyId ? parseInt(req.query.propertyId as string) : undefined,
+      clientId: req.query.clientId ? parseInt(req.query.clientId as string) : undefined,
+      dateRange: req.query.startDate && req.query.endDate ? {
+        start: req.query.startDate as string,
+        end: req.query.endDate as string
+      } : undefined,
+      sortBy: req.query.sortBy as 'date' | 'amount' | 'property' | 'guest',
+      sortOrder: req.query.sortOrder as 'asc' | 'desc'
+    };
+
+    // Remove undefined values
+    Object.keys(filters).forEach(key => {
+      if (filters[key as keyof BookingFilters] === undefined) {
+        delete filters[key as keyof BookingFilters];
+      }
+    });
+
+    const result = await this.propertyService.getAgentBookings(agentId, filters, page, limit);
+    
+    res.json({
+      success: true,
+      message: 'Agent bookings retrieved successfully',
+      data: result
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent bookings:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve agent bookings'
+    });
+  }
+};
+
+getAgentBookingCalendar = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const year = parseInt(req.query.year as string) || new Date().getFullYear();
+    const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
+
+    if (month < 1 || month > 12) {
+      res.status(400).json({
+        success: false,
+        message: 'Month must be between 1 and 12'
+      });
+      return;
+    }
+
+    const calendar = await this.propertyService.getAgentBookingCalendar(agentId, year, month);
+    
+    res.json({
+      success: true,
+      message: 'Agent booking calendar retrieved successfully',
+      data: calendar
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent booking calendar:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve booking calendar'
+    });
+  }
+};
+
+updateAgentBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const bookingId = req.params.bookingId;
+    const updateData: BookingUpdateDto = req.body;
+
+    if (!bookingId) {
+      res.status(400).json({
+        success: false,
+        message: 'Booking ID is required'
+      });
+      return;
+    }
+
+    const booking = await this.propertyService.updateAgentBooking(agentId, bookingId, updateData);
+    
+    res.json({
+      success: true,
+      message: 'Booking updated successfully by agent',
+      data: booking
+    });
+  } catch (error: any) {
+    console.error('Error updating agent booking:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to update booking'
+    });
+  }
+};
+
+// --- AGENT ANALYTICS ---
+getAgentPropertyAnalytics = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const propertyId = parseInt(req.params.id);
+    const agentId = parseInt(req.user.userId);
+    const timeRange = (req.query.timeRange as 'week' | 'month' | 'quarter' | 'year') || 'month';
+
+    if (isNaN(propertyId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid property ID'
+      });
+      return;
+    }
+
+    const analytics = await this.propertyService.getAgentPropertyAnalytics(agentId, propertyId, timeRange);
+    
+    res.json({
+      success: true,
+      message: 'Agent property analytics retrieved successfully',
+      data: analytics
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent property analytics:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to retrieve analytics'
+    });
+  }
+};
+
+getAgentPropertiesAnalyticsSummary = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const timeRange = (req.query.timeRange as 'week' | 'month' | 'quarter' | 'year') || 'month';
+
+    const summary = await this.propertyService.getAgentPropertiesAnalyticsSummary(agentId, timeRange);
+    
+    res.json({
+      success: true,
+      message: 'Agent properties analytics summary retrieved successfully',
+      data: summary
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent properties analytics summary:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve analytics summary'
+    });
+  }
+};
+
+// --- AGENT EARNINGS ---
+getAgentEarnings = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const timeRange = (req.query.timeRange as 'week' | 'month' | 'quarter' | 'year') || 'month';
+
+    const earnings = await this.propertyService.getAgentEarnings(agentId, timeRange);
+    
+    res.json({
+      success: true,
+      message: 'Agent earnings retrieved successfully',
+      data: earnings
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent earnings:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve agent earnings'
+    });
+  }
+};
+
+getAgentEarningsBreakdown = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const breakdown = await this.propertyService.getAgentEarningsBreakdown(agentId);
+    
+    res.json({
+      success: true,
+      message: 'Agent earnings breakdown retrieved successfully',
+      data: breakdown
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent earnings breakdown:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve earnings breakdown'
+    });
+  }
+};
+
+// --- CLIENT PROPERTY MANAGEMENT ---
+getClientProperties = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const clientId = parseInt(req.params.clientId);
+
+    if (isNaN(clientId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid client ID'
+      });
+      return;
+    }
+
+    const properties = await this.propertyService.getClientProperties(agentId, clientId);
+    
+    res.json({
+      success: true,
+      message: 'Client properties retrieved successfully',
+      data: properties
+    });
+  } catch (error: any) {
+    console.error('Error fetching client properties:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to retrieve client properties'
+    });
+  }
+};
+
+createClientProperty = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const clientId = parseInt(req.params.clientId);
+    const propertyData: CreatePropertyDto = req.body;
+
+    if (isNaN(clientId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid client ID'
+      });
+      return;
+    }
+
+    const property = await this.propertyService.createClientProperty(agentId, clientId, propertyData);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Client property created successfully',
+      data: property
+    });
+  } catch (error: any) {
+    console.error('Error creating client property:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to create client property'
+    });
+  }
+};
+
+// --- AGENT MEDIA MANAGEMENT ---
+uploadAgentPropertyImages = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const propertyId = parseInt(req.params.id);
+    const agentId = parseInt(req.user.userId);
+    const { category, imageUrls } = req.body;
+
+    if (isNaN(propertyId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid property ID'
+      });
+      return;
+    }
+
+    if (!category || !imageUrls || !Array.isArray(imageUrls)) {
+      res.status(400).json({
+        success: false,
+        message: 'Category and image URLs are required'
+      });
+      return;
+    }
+
+    const property = await this.propertyService.uploadAgentPropertyImages(
+      agentId, 
+      propertyId, 
+      category as keyof PropertyImages, 
+      imageUrls
+    );
+    
+    res.json({
+      success: true,
+      message: 'Images uploaded successfully by agent',
+      data: property
+    });
+  } catch (error: any) {
+    console.error('Error uploading agent property images:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to upload images'
+    });
+  }
+};
+
+// --- AGENT GUEST MANAGEMENT ---
+getAgentGuests = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const filters: GuestSearchFilters = {
+      search: req.query.search as string,
+      verificationStatus: req.query.verificationStatus as 'verified' | 'pending' | 'unverified',
+      bookingStatus: req.query.bookingStatus as 'active' | 'past' | 'upcoming',
+      sortBy: req.query.sortBy as 'name' | 'bookings' | 'spending' | 'joinDate',
+      sortOrder: req.query.sortOrder as 'asc' | 'desc',
+      dateRange: req.query.startDate && req.query.endDate ? {
+        start: req.query.startDate as string,
+        end: req.query.endDate as string
+      } : undefined
+    };
+
+    // Remove undefined values
+    Object.keys(filters).forEach(key => {
+      if (filters[key as keyof GuestSearchFilters] === undefined) {
+        delete filters[key as keyof GuestSearchFilters];
+      }
+    });
+
+    const guests = await this.propertyService.getAgentGuests(agentId, filters);
+    
+    res.json({
+      success: true,
+      message: 'Agent guests retrieved successfully',
+      data: guests
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent guests:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve agent guests'
+    });
+  }
+};
+
+getClientGuests = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const clientId = parseInt(req.params.clientId);
+
+    if (isNaN(clientId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid client ID'
+      });
+      return;
+    }
+
+    const guests = await this.propertyService.getClientGuests(agentId, clientId);
+    
+    res.json({
+      success: true,
+      message: 'Client guests retrieved successfully',
+      data: guests
+    });
+  } catch (error: any) {
+    console.error('Error fetching client guests:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to retrieve client guests'
+    });
+  }
+};
+
+// --- AGENT REVIEW MANAGEMENT ---
+getAgentPropertyReviews = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const propertyId = parseInt(req.params.id);
+    const agentId = parseInt(req.user.userId);
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+
+    if (isNaN(propertyId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid property ID'
+      });
+      return;
+    }
+
+    const result = await this.propertyService.getAgentPropertyReviews(agentId, propertyId, page, limit);
+    
+    res.json({
+      success: true,
+      message: 'Agent property reviews retrieved successfully',
+      data: result
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent property reviews:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to retrieve reviews'
+    });
+  }
+};
+
+getAgentReviewsSummary = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const agentId = parseInt(req.user.userId);
+    const summary = await this.propertyService.getAgentReviewsSummary(agentId);
+    
+    res.json({
+      success: true,
+      message: 'Agent reviews summary retrieved successfully',
+      data: summary
+    });
+  } catch (error: any) {
+    console.error('Error fetching agent reviews summary:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve reviews summary'
+    });
+  }
+};
 }
