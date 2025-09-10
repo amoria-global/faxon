@@ -553,6 +553,7 @@ export interface MarketComparisonData {
 export interface BookingFilters {
   status?: BookingStatus[];
   propertyId?: number;
+  clientId?: number; // Added clientId to the type
   dateRange?: {
     start: string;
     end: string;
@@ -585,7 +586,7 @@ export interface BookingCalendarDay {
     type: 'check_in' | 'check_out' | 'ongoing';
     status: BookingStatus;
   }[];
-  revenue: number;
+  revenue: number; 
   isToday: boolean;
 }
 
@@ -646,7 +647,512 @@ export interface WeatherInfo {
     precipitationChance: number;
   }[];
 }
+// Updated property.types.ts - Add these types to your existing types file
 
+// --- AGENT-SPECIFIC TYPES ---
+
+export interface AgentDashboard {
+  totalClients: number;
+  activeClients: number;
+  totalCommissions: number;
+  pendingCommissions: number;
+  avgCommissionPerBooking: number;
+  recentBookings: AgentBookingInfo[];
+  monthlyCommissions: MonthlyCommissionData[];
+}
+
+export interface AgentBookingInfo {
+  id: string;
+  clientName: string;
+  bookingType: 'property' | 'tour';
+  commission: number;
+  commissionStatus: 'pending' | 'earned' | 'paid';
+  bookingDate: string;
+  createdAt: string;
+}
+
+export interface MonthlyCommissionData {
+  month: string;
+  commission: number;
+  bookings: number;
+}
+
+export interface AgentClient {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+  profileImage?: string;
+  status: string;
+  userType: string;
+  joinDate: string;
+  totalProperties: number;
+  totalBookings: number;
+  totalSpent: number;
+  totalCommissionsEarned: number;
+  lastBooking?: string;
+}
+
+export interface AgentEarnings {
+  totalEarnings: number;
+  totalBookings: number;
+  periodEarnings: number;
+  periodBookings: number;
+  commissionBreakdown: {
+    bookingType: string;
+    totalCommission: number;
+    bookingCount: number;
+  }[];
+  timeRange: 'week' | 'month' | 'quarter' | 'year';
+}
+
+export interface AgentPerformance {
+  monthlyStats: any[];
+  topClients: AgentTopClient[];
+  conversionMetrics: {
+    inquiryToBookingRate: number;
+    averageBookingValue: number;
+    clientRetentionRate: number;
+  };
+}
+
+export interface AgentTopClient {
+  clientId: number;
+  clientName: string;
+  clientEmail?: string;
+  totalCommission: number;
+  totalBookingValue: number;
+  totalBookings: number;
+}
+
+export interface AgentCommissionInfo {
+  id: string;
+  clientName: string;
+  bookingType: 'property' | 'tour';
+  bookingValue: number;
+  commission: number;
+  commissionRate: number;
+  commissionStatus: 'pending' | 'earned' | 'paid';
+  bookingDate: string;
+  commissionDueDate?: string;
+  commissionPaidDate?: string;
+  notes?: string;
+}
+
+export interface AgentFilters {
+  status?: string;
+  bookingType?: string;
+  clientId?: number;
+  startDate?: string;
+  endDate?: string;
+}
+
+// --- ADMIN-SPECIFIC TYPES ---
+
+export interface AdminPropertyInfo {
+  id: number;
+  name: string;
+  location: string;
+  type: string;
+  category: string;
+  status: PropertyStatus;
+  isVerified: boolean;
+  pricePerNight: number;
+  hostId: number;
+  hostName: string;
+  hostEmail?: string;
+  hostType?: string;
+  totalBookings: number;
+  averageRating: number;
+  reviewsCount: number;
+  views: number;
+  createdAt: string;
+  updatedAt: string;
+  totalRevenue: number;
+}
+
+export interface AdminUserInfo {
+  id: number;
+  email: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  userType: UserType;
+  status: string;
+  verificationStatus?: string;
+  phone?: string;
+  country?: string;
+  city?: string;
+  profileImage?: string;
+  createdAt: string;
+  lastLogin?: string;
+  totalProperties: number;
+  totalBookings: number;
+  isVerified: boolean;
+  // Agent-specific fields
+  agentCode?: string;
+  commissionRate?: number;
+  totalCommissions?: number;
+  // Admin-specific fields
+  adminLevel?: string;
+  adminPermissions?: string[];
+}
+
+export interface SystemAnalytics {
+  overview: {
+    totalProperties: number;
+    totalUsers: number;
+    totalBookings: number;
+    totalRevenue: number;
+    timeRange: string;
+  };
+  distributions: {
+    propertiesByStatus: { status: string; count: number }[];
+    usersByType: { userType: string; count: number }[];
+    bookingsByStatus: { status: string; count: number }[];
+  };
+  recentActivity: SystemActivity;
+}
+
+export interface SystemActivity {
+  recentProperties: {
+    id: number;
+    name: string;
+    hostName: string;
+    createdAt: string;
+  }[];
+  recentBookings: {
+    id: string;
+    propertyName: string;
+    guestName: string;
+    totalPrice: number;
+    createdAt: string;
+  }[];
+  recentUsers: {
+    id: number;
+    name: string;
+    email: string;
+    userType: string;
+    createdAt: string;
+  }[];
+}
+
+export interface AdminAction {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  adminName: string;
+  adminEmail: string;
+  reason?: string;
+  details?: any;
+  createdAt: string;
+}
+
+export interface BulkActionResult {
+  total: number;
+  successful: number;
+  failed: number;
+  results: {
+    targetId: string;
+    success: boolean;
+    result?: any;
+    error?: string;
+  }[];
+}
+
+export interface SystemReports {
+  dailyStats: {
+    today: {
+      properties: number;
+      bookings: number;
+      users: number;
+    };
+    yesterday: {
+      properties: number;
+      bookings: number;
+      users: number;
+    };
+    growth: {
+      properties: number;
+      bookings: number;
+      users: number;
+    };
+  };
+  weeklyStats: {
+    date: string;
+    properties: number;
+    bookings: number;
+    users: number;
+    revenue: number;
+  }[];
+  topHosts: {
+    id: number;
+    name: string;
+    email: string;
+    totalProperties: number;
+    totalBookings: number;
+    avgRating: number;
+    totalEarnings: number;
+    joinDate: string;
+  }[];
+  topProperties: {
+    id: number;
+    name: string;
+    location: string;
+    hostName: string;
+    totalBookings: number;
+    averageRating: number;
+    totalRevenue: number;
+    pricePerNight: number;
+  }[];
+  revenueStats: {
+    monthlyRevenue: {
+      month: string;
+      revenue: number;
+      bookings: number;
+    }[];
+    totalRevenue: number;
+    totalBookings: number;
+    averageBookingValue: number;
+    monthlyGrowth: number;
+  };
+}
+
+// --- ACCESS CONTROL TYPES ---
+
+export type UserType = 'guest' | 'host' | 'agent' | 'admin' | 'tourguide';
+
+export type AccessLevel = 'read' | 'write' | 'delete';
+
+export interface AccessControlContext {
+  userId: number;
+  userType: UserType;
+  propertyId?: number;
+  bookingId?: string;
+  targetUserId?: number;
+}
+
+export interface PermissionCheck {
+  hasAccess: boolean;
+  reason?: string;
+  suggestedAction?: string;
+}
+
+// --- FILTER AND SEARCH TYPES ---
+
+export interface AdminPropertyFilters {
+  status?: string;
+  hostId?: number;
+  search?: string;
+  verificationStatus?: 'verified' | 'pending' | 'unverified';
+  sortBy?: 'created_at' | 'updated_at' | 'name' | 'status';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface AdminUserFilters {
+  userType?: string;
+  status?: string;
+  search?: string;
+  sortBy?: 'name' | 'email' | 'createdAt' | 'lastLogin';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface AgentClientFilters {
+  search?: string;
+  status?: string;
+  sortBy?: 'name' | 'joinDate' | 'totalBookings' | 'totalSpent';
+  sortOrder?: 'asc' | 'desc';
+}
+
+// --- RESPONSE WRAPPER TYPES ---
+
+export interface ApiResponse<T> {
+  success: boolean;
+  message: string;
+  data?: T;
+  errors?: string[];
+}
+
+export interface PaginatedResponse<T> {
+  success: boolean;
+  message: string;
+  data: {
+    items: T[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+// --- COMMISSION TYPES ---
+
+export interface CommissionCalculation {
+  commission: number;
+  commissionRate: number;
+  bookingValue: number;
+  agentId: number;
+  clientId: number;
+  bookingType: 'property' | 'tour';
+}
+
+export interface CommissionPayout {
+  id: string;
+  agentId: number;
+  agentName: string;
+  totalCommission: number;
+  totalBookings: number;
+  payoutDate: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  paymentMethod: string;
+  commissions: AgentCommissionInfo[];
+}
+
+// --- NOTIFICATION TYPES ---
+
+export interface NotificationData {
+  userId: number;
+  type: string;
+  title: string;
+  message: string;
+  data?: any;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface SystemNotification {
+  id: string;
+  type: 'info' | 'warning' | 'error' | 'success';
+  title: string;
+  message: string;
+  targetUsers: UserType[];
+  isActive: boolean;
+  expiresAt?: string;
+  createdAt: string;
+}
+
+// --- AUDIT TYPES ---
+
+export interface AuditLog {
+  id: string;
+  userId: number;
+  userType: UserType;
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  oldValues?: any;
+  newValues?: any;
+  ipAddress?: string;
+  userAgent?: string;
+  createdAt: string;
+}
+
+// --- SETTINGS TYPES ---
+
+export interface SystemSettings {
+  id: string;
+  key: string;
+  value: any;
+  category: string;
+  description?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommissionSettings {
+  defaultAgentRate: number;
+  propertyCommissionRate: number;
+  tourCommissionRate: number;
+  volumeDiscountTiers: {
+    bookingCount: number;
+    bonusRate: number;
+  }[];
+  payoutSchedule: 'weekly' | 'monthly' | 'quarterly';
+  minimumPayoutAmount: number;
+}
+
+// --- VALIDATION TYPES ---
+
+export interface ValidationResult {
+  isValid: boolean;
+  errors: string[];
+  warnings?: string[];
+}
+
+export interface PropertyValidationResult extends ValidationResult {
+  missingFields: string[];
+  invalidFields: string[];
+  suggestions: string[];
+}
+
+// --- ENHANCED BOOKING TYPES ---
+
+export interface EnhancedBookingInfo extends BookingInfo {
+  agentId?: number;
+  agentName?: string;
+  commission?: number;
+  commissionStatus?: 'pending' | 'earned' | 'paid';
+  isAgentBooking: boolean;
+  propertyOwnerName: string;
+  paymentStatus: string;
+  cancellationPolicy?: string;
+  specialRequests?: string;
+  hostNotes?: string;
+}
+
+// --- DASHBOARD WIDGET TYPES ---
+
+export interface DashboardWidget {
+  id: string;
+  title: string;
+  type: 'chart' | 'stat' | 'table' | 'list';
+  data: any;
+  config: {
+    refreshInterval?: number;
+    chartType?: 'line' | 'bar' | 'pie' | 'donut';
+    showTotal?: boolean;
+    showGrowth?: boolean;
+  };
+  permissions: UserType[];
+}
+
+export interface DashboardLayout {
+  userId: number;
+  userType: UserType;
+  widgets: {
+    widgetId: string;
+    position: { x: number; y: number; w: number; h: number };
+    isVisible: boolean;
+  }[];
+  lastUpdated: string;
+}
+
+// --- EXPORT TYPES ---
+
+export interface ExportRequest {
+  type: 'properties' | 'bookings' | 'users' | 'commissions' | 'analytics';
+  format: 'csv' | 'xlsx' | 'pdf';
+  filters?: any;
+  dateRange?: {
+    start: string;
+    end: string;
+  };
+  columns?: string[];
+  userId: number;
+  userType: UserType;
+}
+
+export interface ExportResult {
+  id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  downloadUrl?: string;
+  expiresAt?: string;
+  error?: string;
+  createdAt: string;
+}
 // --- SEARCH AND FILTER TYPES ---
 export interface GuestSearchFilters {
   search?: string; // Name or email
@@ -658,4 +1164,353 @@ export interface GuestSearchFilters {
     start: string;
     end: string;
   };
+}
+
+// Add these types to your existing property.types.ts file
+
+// --- AGENT PROPERTY MANAGEMENT TYPES ---
+export interface AgentPropertyFilters {
+  clientId?: number;
+  status?: string;
+  search?: string;
+  sortBy?: 'name' | 'location' | 'price' | 'rating' | 'created_at';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface AgentPropertyInfo extends PropertyInfo {
+  hostEmail?: string;
+  totalRevenue: number;
+  agentCommission: number;
+}
+
+export interface AgentPropertyPerformance {
+  timeRange: 'week' | 'month' | 'quarter' | 'year';
+  properties: {
+    propertyId: number;
+    propertyName: string;
+    bookings: number;
+    revenue: number;
+    occupancyRate: number;
+    agentCommission: number;
+    averageRating: number;
+  }[];
+  summary: {
+    totalBookings: number;
+    totalRevenue: number;
+    totalCommission: number;
+    averageOccupancy: number;
+  };
+}
+
+// --- AGENT BOOKING TYPES ---
+export interface AgentBookingFilters extends BookingFilters {
+  clientId?: number;
+}
+
+export interface EnhancedAgentBookingInfo extends BookingInfo {
+  agentCommission: number;
+  commissionStatus: string;
+  clientName: string;
+}
+
+export interface AgentBookingRequest extends BookingRequest {
+  clientId: number;
+}
+
+// --- AGENT ANALYTICS TYPES ---
+export interface AgentPropertyAnalytics {
+  totalRevenue: number;
+  monthlyRevenue: number;
+  totalBookings: number;
+  occupancyRate: number;
+  agentCommission: {
+    rate: number;
+    totalEarned: number;
+    monthlyProjection: number;
+  };
+}
+
+export interface AgentPropertiesAnalyticsSummary {
+  timeRange: string;
+  properties: {
+    propertyId: number;
+    propertyName: string;
+    totalRevenue: number;
+    totalBookings: number;
+    occupancyRate: number;
+    agentCommission: AgentPropertyAnalytics['agentCommission'];
+  }[];
+  totals: {
+    totalRevenue: number;
+    totalCommission: number;
+    totalBookings: number;
+    averageOccupancy: number;
+  };
+}
+
+// --- AGENT COMMISSION TYPES ---
+export interface CommissionConfiguration {
+  agentId: number;
+  defaultRate: number;
+  propertyCommissionRate?: number;
+  tourCommissionRate?: number;
+  volumeDiscounts?: {
+    bookingThreshold: number;
+    bonusRate: number;
+  }[];
+  isActive: boolean;
+}
+
+export interface AgentCommissionTracking {
+  agentId: number;
+  clientId: number;
+  bookingId: string;
+  baseCommission: number;
+  bonusCommission?: number;
+  totalCommission: number;
+  status: 'pending' | 'earned' | 'paid' | 'disputed';
+  earnedDate?: string;
+  paidDate?: string;
+}
+
+// --- AGENT CLIENT MANAGEMENT TYPES ---
+export interface AgentClientRelationship {
+  agentId: number;
+  clientId: number;
+  relationshipType: 'property_management' | 'booking_assistance' | 'full_service';
+  commissionRate: number;
+  startDate: string;
+  endDate?: string;
+  status: 'active' | 'inactive' | 'suspended';
+  notes?: string;
+}
+
+export interface ClientPropertySummary extends PropertySummary {
+  totalRevenue: number;
+  agentCommission: number;
+  managementLevel: 'full' | 'limited' | 'view_only';
+}
+
+// --- AGENT REVIEW TYPES ---
+export interface AgentReviewsSummary {
+  totalReviews: number;
+  averageRating: number;
+  recentReviews: PropertyReview[];
+  ratingDistribution: {
+    rating: number;
+    count: number;
+  }[];
+  propertiesManaged: number;
+}
+
+// --- AGENT PERMISSION TYPES ---
+export interface AgentPermissions {
+  agentId: number;
+  clientId: number;
+  canEditProperties: boolean;
+  canManageBookings: boolean;
+  canViewFinancials: boolean;
+  canUploadMedia: boolean;
+  canManageAvailability: boolean;
+  canSetPricing: boolean;
+  restrictedFields?: string[];
+  permissions: {
+    [key: string]: boolean;
+  };
+}
+
+export interface AgentPropertyEditPermissions {
+  allowedFields: string[];
+  restrictedFields: string[];
+  requiresApproval: string[];
+  maxPriceChange?: number;
+  maxAvailabilityDays?: number;
+}
+
+// --- AGENT DASHBOARD ENHANCEMENT TYPES ---
+export interface EnhancedAgentDashboard extends AgentDashboard {
+  quickStats: {
+    todayBookings: number;
+    pendingCommissions: number;
+    activeProperties: number;
+    clientsWithBookings: number;
+  };
+  recentActivity: AgentActivity[];
+  upcomingEvents: AgentEvent[];
+  performanceMetrics: {
+    conversionRate: number;
+    averageBookingValue: number;
+    clientRetentionRate: number;
+    commissionGrowthRate: number;
+  };
+}
+
+export interface AgentActivity {
+  id: string;
+  type: 'booking_created' | 'commission_earned' | 'property_updated' | 'client_added' | 'review_received';
+  title: string;
+  description: string;
+  timestamp: string;
+  clientId?: number;
+  propertyId?: number;
+  bookingId?: string;
+  amount?: number;
+  isRead: boolean;
+  priority: 'low' | 'medium' | 'high';
+}
+
+export interface AgentEvent {
+  id: string;
+  type: 'check_in' | 'check_out' | 'property_inspection' | 'client_meeting' | 'commission_payout';
+  title: string;
+  description: string;
+  dateTime: string;
+  clientId?: number;
+  propertyId?: number;
+  location?: string;
+  status: 'upcoming' | 'in_progress' | 'completed' | 'cancelled';
+}
+
+// --- AGENT NOTIFICATION TYPES ---
+export interface AgentNotification {
+  id: string;
+  agentId: number;
+  type: 'new_booking' | 'commission_earned' | 'property_issue' | 'client_message' | 'review_alert' | 'payout_ready';
+  title: string;
+  message: string;
+  data?: {
+    clientId?: number;
+    propertyId?: number;
+    bookingId?: string;
+    amount?: number;
+    [key: string]: any;
+  };
+  isRead: boolean;
+  createdAt: string;
+  expiresAt?: string;
+}
+
+// --- AGENT REPORTING TYPES ---
+export interface AgentPerformanceReport {
+  agentId: number;
+  reportPeriod: {
+    start: string;
+    end: string;
+  };
+  summary: {
+    totalClients: number;
+    totalProperties: number;
+    totalBookings: number;
+    totalRevenue: number;
+    totalCommissions: number;
+  };
+  clientPerformance: {
+    clientId: number;
+    clientName: string;
+    propertiesManaged: number;
+    bookingsGenerated: number;
+    revenueGenerated: number;
+    commissionsEarned: number;
+  }[];
+  propertyPerformance: {
+    propertyId: number;
+    propertyName: string;
+    clientName: string;
+    bookings: number;
+    revenue: number;
+    occupancyRate: number;
+    averageRating: number;
+  }[];
+  trends: {
+    bookingTrend: 'increasing' | 'stable' | 'decreasing';
+    revenueTrend: 'increasing' | 'stable' | 'decreasing';
+    clientGrowth: number;
+    marketShare?: number;
+  };
+}
+
+// --- AGENT BULK OPERATIONS TYPES ---
+export interface AgentBulkPropertyUpdate {
+  propertyIds: number[];
+  updates: {
+    pricePerNight?: number;
+    pricePerTwoNights?: number;
+    features?: string[];
+    description?: string;
+    minStay?: number;
+    maxStay?: number;
+    status?: PropertyStatus;
+  };
+  reason?: string;
+  notifyClients: boolean;
+}
+
+export interface AgentBulkBookingUpdate {
+  bookingIds: string[];
+  updates: BookingUpdateDto;
+  reason?: string;
+  notifyGuests: boolean;
+  notifyClients: boolean;
+}
+
+export interface BulkOperationResult {
+  total: number;
+  successful: number;
+  failed: number;
+  results: {
+    targetId: string;
+    success: boolean;
+    result?: any;
+    error?: string;
+  }[];
+  summary: string;
+}
+
+// --- AGENT INTEGRATION TYPES ---
+export interface AgentAPIKey {
+  id: string;
+  agentId: number;
+  keyName: string;
+  apiKey: string;
+  permissions: string[];
+  isActive: boolean;
+  expiresAt?: string;
+  lastUsed?: string;
+  createdAt: string;
+}
+
+export interface AgentWebhook {
+  id: string;
+  agentId: number;
+  url: string;
+  events: string[];
+  isActive: boolean;
+  secret?: string;
+  lastTriggered?: string;
+  failureCount: number;
+  createdAt: string;
+}
+
+// --- AGENT VALIDATION TYPES ---
+export interface AgentPropertyValidation {
+  propertyId: number;
+  agentId: number;
+  hasEditAccess: boolean;
+  hasViewAccess: boolean;
+  editableFields: string[];
+  restrictions: {
+    maxPriceIncrease?: number;
+    requiresApproval?: string[];
+    blockedActions?: string[];
+  };
+  reason?: string;
+}
+
+export interface AgentClientValidation {
+  clientId: number;
+  agentId: number;
+  hasAccess: boolean;
+  relationshipType?: string;
+  permissions: AgentPermissions;
+  reason?: string;
 }

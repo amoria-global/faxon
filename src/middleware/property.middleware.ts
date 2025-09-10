@@ -6,6 +6,10 @@ import {
   BookingUpdateDto
 } from '../types/property.types';
 
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
+
 interface AuthenticatedRequest extends Request {
   user?: {
     userId: string;
@@ -384,4 +388,341 @@ export const cacheMiddleware = (duration: number = 300) => {
     res.set('Cache-Control', `public, max-age=${duration}`);
     next();
   };
+
+};
+
+
+// Validate that user is an agent
+export const validateAgent = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  if (!req.user) {
+    res.status(401).json({
+      success: false,
+      message: 'Authentication required'
+    });
+    return;
+  }
+
+  // Check if user type is agent
+  if (req.user.userType && req.user.userType !== 'agent') {
+    res.status(403).json({
+      success: false,
+      message: 'Agent access required'
+    });
+    return;
+  }
+
+  next();
+};
+
+// Validate that agent has access to the specific property
+export const validateAgentPropertyAccess = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const propertyId = parseInt(req.params.id);
+    const agentId = parseInt(req.user.userId);
+
+    if (isNaN(propertyId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid property ID'
+      });
+      return;
+    }
+
+    // Check if agent has access to this property through their clients
+    const hasAccess = await prisma.agentBooking.findFirst({
+      where: {
+        agentId,
+        bookingType: 'property'
+      },
+      include: {
+        client: {
+          include: {
+            properties: {
+              where: { id: propertyId }
+            }
+          }
+        }
+      }
+    });
+
+    // Alternative check: verify if the property belongs to one of agent's clients
+    const property = await prisma.property.findFirst({
+      where: {
+        id: propertyId,
+        host: {
+          clientBookings: {
+            some: {
+              agentId: agentId
+            }
+          }
+        }
+      }
+    });
+
+    if (!hasAccess && !property) {
+      res.status(403).json({
+        success: false,
+        message: 'Access denied. Property not associated with your clients.'
+      });
+      return;
+    }
+
+    next();
+  } catch (error: any) {
+    console.error('Error validating agent property access:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to validate property access'
+    });
+  }
+};
+
+// Validate agent property edit permissions (limited fields only)
+export const validateAgentPropertyEdit = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  const updateData = req.body;
+  const errors: string[] = [];
+
+  // Define fields that agents are allowed to edit (limited access)
+  const allowedFields = [
+    'description',
+    'features',
+    'pricePerNight',
+    'pricePerTwoNights',
+    'availabilityDates',
+    'images', // limited to adding/updating images
+    'maxStay',
+    'minStay'
+  ];
+
+  // Define fields that agents are NOT allowed to edit
+  const restrictedFields = [
+    'name',
+    'location',
+    'type',
+    'category',
+    'beds',
+    'baths',
+    'maxGuests',
+    'status',
+    'hostId',
+    'ownerDetails',
+    'isVerified',
+    'isInstantBook'
+  ];
+
+  // Check if agent is trying to edit restricted fields
+  const attemptedRestrictedFields = Object.keys(updateData).filter(field => 
+    restrictedFields.includes(field)
+  );
+
+  if (attemptedRestrictedFields.length > 0) {
+    errors.push(`Agents cannot edit these fields: ${attemptedRestrictedFields.join(', ')}`);
+  }
+
+  // Check if agent is only editing allowed fields
+  const attemptedFields = Object.keys(updateData);
+  const invalidFields = attemptedFields.filter(field => 
+    !allowedFields.includes(field) && !restrictedFields.includes(field)
+  );
+
+  if (invalidFields.length > 0) {
+    errors.push(`Invalid fields: ${invalidFields.join(', ')}`);
+  }
+
+  // Validate pricing if being updated
+  if (updateData.pricePerNight !== undefined) {
+    if (typeof updateData.pricePerNight !== 'number' || updateData.pricePerNight <= 0) {
+      errors.push('Price per night must be a positive number');
+    } else if (updateData.pricePerNight > 10000) {
+      errors.push('Price per night seems too high (max: $10,000)');
+    }
+  }
+
+  if (updateData.pricePerTwoNights !== undefined) {
+    if (typeof updateData.pricePerTwoNights !== 'number' || updateData.pricePerTwoNights <= 0) {
+      errors.push('Price per two nights must be a positive number');
+    }
+  }
+
+  // Validate availability dates if being updated
+  if (updateData.availabilityDates) {
+    const { start, end } = updateData.availabilityDates;
+    if (!start || !end) {
+      errors.push('Both start and end dates are required for availability');
+    } else {
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+      
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        errors.push('Invalid availability dates provided');
+      } else if (startDate >= endDate) {
+        errors.push('End date must be after start date');
+      } else if (startDate < new Date()) {
+        errors.push('Start date cannot be in the past');
+      }
+    }
+  }
+
+  // Validate stay duration limits
+  if (updateData.minStay !== undefined) {
+    if (typeof updateData.minStay !== 'number' || updateData.minStay < 1 || updateData.minStay > 365) {
+      errors.push('Minimum stay must be between 1 and 365 days');
+    }
+  }
+
+  if (updateData.maxStay !== undefined) {
+    if (typeof updateData.maxStay !== 'number' || updateData.maxStay < 1 || updateData.maxStay > 365) {
+      errors.push('Maximum stay must be between 1 and 365 days');
+    }
+    
+    if (updateData.minStay && updateData.maxStay < updateData.minStay) {
+      errors.push('Maximum stay cannot be less than minimum stay');
+    }
+  }
+
+  // Validate features array
+  if (updateData.features !== undefined) {
+    if (!Array.isArray(updateData.features)) {
+      errors.push('Features must be an array');
+    } else if (updateData.features.length > 20) {
+      errors.push('Maximum 20 features allowed');
+    }
+  }
+
+  // Validate description length
+  if (updateData.description !== undefined) {
+    if (typeof updateData.description !== 'string') {
+      errors.push('Description must be a string');
+    } else if (updateData.description.length > 2000) {
+      errors.push('Description must be less than 2000 characters');
+    }
+  }
+
+  if (errors.length > 0) {
+    res.status(400).json({
+      success: false,
+      message: 'Agent property edit validation failed',
+      errors: errors
+    });
+    return;
+  }
+
+  next();
+};
+
+// Validate agent booking creation
+export const validateAgentBooking = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  const bookingData = req.body;
+  const errors: string[] = [];
+
+  // Required fields for agent bookings
+  const requiredFields = ['propertyId', 'clientId', 'checkIn', 'checkOut', 'guests', 'totalPrice'];
+  const missingFields = requiredFields.filter(field => !bookingData[field]);
+  
+  if (missingFields.length > 0) {
+    errors.push(`Missing required fields: ${missingFields.join(', ')}`);
+  }
+
+  // Validate dates
+  if (bookingData.checkIn && bookingData.checkOut) {
+    const checkIn = new Date(bookingData.checkIn);
+    const checkOut = new Date(bookingData.checkOut);
+    
+    if (isNaN(checkIn.getTime()) || isNaN(checkOut.getTime())) {
+      errors.push('Invalid dates provided');
+    } else if (checkIn >= checkOut) {
+      errors.push('Check-out date must be after check-in date');
+    } else if (checkIn < new Date()) {
+      errors.push('Check-in date cannot be in the past');
+    }
+  }
+
+  // Validate guest count
+  if (bookingData.guests !== undefined) {
+    if (typeof bookingData.guests !== 'number' || bookingData.guests < 1 || bookingData.guests > 50) {
+      errors.push('Number of guests must be between 1 and 50');
+    }
+  }
+
+  // Validate total price
+  if (bookingData.totalPrice !== undefined) {
+    if (typeof bookingData.totalPrice !== 'number' || bookingData.totalPrice <= 0) {
+      errors.push('Total price must be a positive number');
+    }
+  }
+
+  // Validate client ID
+  if (bookingData.clientId !== undefined) {
+    if (typeof bookingData.clientId !== 'number' || bookingData.clientId <= 0) {
+      errors.push('Valid client ID is required');
+    }
+  }
+
+  if (errors.length > 0) {
+    res.status(400).json({
+      success: false,
+      message: 'Agent booking validation failed',
+      errors: errors
+    });
+    return;
+  }
+
+  next();
+};
+
+// Validate agent client relationship
+export const validateAgentClientAccess = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    const clientId = parseInt(req.params.clientId);
+    const agentId = parseInt(req.user.userId);
+
+    if (isNaN(clientId)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid client ID'
+      });
+      return;
+    }
+
+    // Check if agent has relationship with this client
+    const agentClientRelation = await prisma.agentBooking.findFirst({
+      where: {
+        agentId,
+        clientId,
+        status: 'active'
+      }
+    });
+
+    if (!agentClientRelation) {
+      res.status(403).json({
+        success: false,
+        message: 'Access denied. Client not associated with your account.'
+      });
+      return;
+    }
+
+    next();
+  } catch (error: any) {
+    console.error('Error validating agent client access:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to validate client access'
+    });
+  }
 };

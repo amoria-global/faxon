@@ -3,200 +3,211 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
-  id                Int      @id @default(autoincrement())
-  email             String   @unique
-  firstName         String
-  lastName          String
-  password          String?
-  
+  id        Int     @id @default(autoincrement())
+  email     String  @unique
+  firstName String
+  lastName  String
+  password  String?
+
   // OAuth
-  provider          String   @default("manual") // manual, google, apple
-  providerId        String?
-  
+  provider   String  @default("manual") // manual, google, apple
+  providerId String?
+
   // Profile
-  phone             String?
-  phoneCountryCode  String?
-  profileImage      String?  // profile field from UserInfo
-  
+  phone            String?
+  phoneCountryCode String?
+  profileImage     String?
+
   // Address (flexible international support)
-  country           String?
-  state             String?
-  province          String?
-  city              String?
-  street            String?
-  zipCode           String?
-  postalCode        String?
-  postcode          String?
-  pinCode           String?
-  eircode           String?
-  cep               String?
-  
+  country    String?
+  state      String?
+  province   String?
+  city       String?
+  street     String?
+  zipCode    String?
+  postalCode String?
+  postcode   String?
+  pinCode    String?
+  eircode    String?
+  cep        String?
+
   // User Management
-  status            String   @default("pending") // active, inactive, pending, suspended, unverified
-  userType          String   @default("guest")   // guest, agent, tourguide, host
-  
+  status   String @default("pending") // active, inactive, pending, suspended, unverified
+  userType String @default("guest") // guest, agent, tourguide, host
+
   // Tour Guide Specific Fields (when userType = "tourguide")
-  bio               String?
-  experience        Int?     // years of experience
-  languages         String?  // JSON array of languages: ["English", "Spanish"]
-  specializations   String?  // JSON array of specializations: ["Wildlife", "History"]
-  rating            Float    @default(0)
-  totalTours        Int      @default(0)
-  isVerified        Boolean  @default(false)
-  licenseNumber     String?
-  certifications    String?  // JSON array of certifications
-  
+  bio             String?
+  experience      Int? // years of experience
+  languages       Json? // Array of languages: ["English", "Spanish"]
+  specializations Json? // Array of specializations: ["Wildlife", "History"]
+  rating          Float   @default(0)
+  totalTours      Int     @default(0)
+  isVerified      Boolean @default(false)
+  licenseNumber   String?
+  certifications  Json? // Array of certifications
+
   // Activity Tracking
-  totalSessions     Int      @default(0)
-  twoFactorEnabled  Boolean  @default(false)
-  
+  totalSessions    Int     @default(0)
+  twoFactorEnabled Boolean @default(false)
+
   // Timestamps
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  lastLogin         DateTime?
-  
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  lastLogin DateTime?
+
   // Forgot Password Fields
-  resetPasswordOtp      String?
-  resetPasswordExpires  DateTime?
+  resetPasswordOtp     String?
+  resetPasswordExpires DateTime?
 
   // Relations
-  sessions          UserSession[]
+  sessions UserSession[]
 
   // Property Relations
-  properties            Property[]
-  bookingsAsGuest       Booking[]           @relation("GuestBookings")
-  reviews               Review[]
-  wishlists             Wishlist[]
+  properties      Property[]
+  bookingsAsGuest Booking[]  @relation("GuestBookings")
+  reviews         Review[]
+  wishlists       Wishlist[]
 
   // Payment Relations
-  wallet                Wallet?
-  paymentTransactions   PaymentTransaction[]
-  bankAccounts          BankAccount[]
-  mobileMoneyAccounts   MobileMoneyAccount[]
-  paymentSettings       PaymentSettings?
+  wallet              Wallet?
+  paymentTransactions PaymentTransaction[]
+  bankAccounts        BankAccount[]
+  mobileMoneyAccounts MobileMoneyAccount[]
+  paymentSettings     PaymentSettings?
 
-  // Add this relation to the User model:
-  hostPayouts          Payout[]            @relation("HostPayouts")
-  hostEarnings         HostEarning[]       @relation("HostEarnings")
+  // Add Escrow Relations
+  escrowTransactions            EscrowTransaction[]   @relation("UserEscrowTransactions")
+  escrowTransactionsAsRecipient EscrowTransaction[]   @relation("RecipientEscrowTransactions")
+  escrowDisputes                EscrowDispute[]       @relation("DisputedByUser")
+  escrowDisputesResolved        EscrowDispute[]       @relation("ResolvedByUser")
+  disputeEvidence               DisputeEvidence[]     @relation("EvidenceUploader")
+  disputeMessages               DisputeMessage[]      @relation("DisputeMessageSender")
+  escrowMilestones              EscrowMilestone[]     @relation("MilestoneCompleter")
+  escrowNotifications           EscrowNotification[]  @relation("EscrowNotificationUser")
+  escrowTemplates               EscrowTemplate[]      @relation("EscrowTemplateOwner")
+  escrowAnalytics               EscrowAnalytics[]     @relation("EscrowAnalyticsUser")
+  escrowLimits                  EscrowLimit?          @relation("UserEscrowLimits")
+  bulkEscrowOperations          BulkEscrowOperation[] @relation("BulkEscrowCreator")
 
-  
+  hostPayouts  Payout[]      @relation("HostPayouts")
+  hostEarnings HostEarning[] @relation("HostEarnings")
+
   // Tour Relations
-  toursAsGuide          Tour[]              @relation("TourGuideToTours")
-  tourBookingsAsGuest   TourBooking[]       @relation("GuestTourBookings")
-  tourReviews           TourReview[]
-  sentTourMessages      TourMessage[]       @relation("TourMessageSender")
-  receivedTourMessages  TourMessage[]       @relation("TourMessageReceiver")
-  tourNotifications     TourNotification[]
-  tourEarnings          TourEarnings[]
+  toursAsGuide         Tour[]             @relation("TourGuideToTours")
+  tourBookingsAsGuest  TourBooking[]      @relation("GuestTourBookings")
+  tourReviews          TourReview[]
+  sentTourMessages     TourMessage[]      @relation("TourMessageSender")
+  receivedTourMessages TourMessage[]      @relation("TourMessageReceiver")
+  tourNotifications    TourNotification[]
+  tourEarnings         TourEarnings[]
 
-    // Add these fields for enhanced guest management
-  verificationStatus    String?  @default("unverified") // verified, pending, unverified
-  preferredCommunication String? @default("email")      // email, phone, both
-  hostNotes            String?                          // Host's private notes about guest
-  averageRating        Float    @default(0)             // Guest's average rating from hosts
+  // Enhanced guest management
+  verificationStatus     String? @default("unverified") // verified, pending, unverified
+  preferredCommunication String? @default("email") // email, phone, both
+  hostNotes              String? // Host's private notes about guest
+  averageRating          Float   @default(0) // Guest's average rating from hosts
 
-  agentBookings         AgentBooking[]      @relation("AgentBookings")
-  clientBookings        AgentBooking[]      @relation("ClientBookings")
-  
-  
+  agentBookings  AgentBooking[] @relation("AgentBookings")
+  clientBookings AgentBooking[] @relation("ClientBookings")
+
   @@map("users")
 }
 
 model UserSession {
-  id            String   @id @default(cuid())
-  userId        Int
-  sessionToken  String   @unique
-  refreshToken  String   @unique
-  
+  id           String @id @default(cuid())
+  userId       Int
+  sessionToken String @unique
+  refreshToken String @unique
+
   // Device Info
-  device        String?
-  browser       String?
-  location      String?
-  ipAddress     String?
-  
+  device    String?
+  browser   String?
+  location  String?
+  ipAddress String?
+
   // Session Status
-  isActive      Boolean  @default(true)
-  lastActivity  DateTime @default(now())
-  expiresAt     DateTime
-  
+  isActive     Boolean  @default(true)
+  lastActivity DateTime @default(now())
+  expiresAt    DateTime
+
   // Timestamps
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@index([sessionToken])
   @@map("user_sessions")
 }
 
 model Property {
-  id                Int      @id @default(autoincrement())
-  
+  id Int @id @default(autoincrement())
+
   // Basic Information
-  name              String
-  location          String
-  type              String   // apartment, house, villa, condo, townhouse, studio, loft
-  category          String   // entire_place, private_room, shared_room
-  description       String?
-  
+  name        String
+  location    String
+  type        String // apartment, house, villa, condo, townhouse, studio, loft
+  category    String // entire_place, private_room, shared_room
+  description String?
+
   // Pricing
   pricePerNight     Float
   pricePerTwoNights Float?
-  
-  // Capacity
-  beds              Int
-  baths             Int
-  maxGuests         Int
-  
-  // Features & Amenities (JSON string for SQLite compatibility)
-  features          String   // JSON array: ["WiFi", "Pool", "Kitchen"]
-  
-  // Media (JSON string for SQLite compatibility)
-  images            String   // JSON object: {"livingRoom": ["url1"], "kitchen": ["url2"]}
-  video3D           String?  // URL to 3D tour video
-  
-  // Host Information
-  hostId            Int
-  host              User     @relation(fields: [hostId], references: [id], onDelete: Cascade)
-  ownerDetails      String?  // JSON string of owner details (if different from host)
-  
-  // Availability
-  availableFrom     DateTime?
-  availableTo       DateTime?
-  minStay           Int      @default(1)
-  maxStay           Int?
-  
-  // Status & Verification
-  status            String   @default("pending") // active, inactive, pending, suspended, draft
-  isVerified        Boolean  @default(false)
-  isInstantBook     Boolean  @default(false)
-  
-  // Analytics
-  views             Int      @default(0)
-  totalBookings     Int      @default(0)
-  averageRating     Float    @default(0)
-  reviewsCount      Int      @default(0)
-  
-  // Timestamps
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  
-  // Relations
-  bookings          Booking[]
-  reviews           Review[]
-  blockedDates      BlockedDate[]
-  pricingRules      PricingRule[]
-  wishlistedBy      Wishlist[]
 
-  hostEarnings         HostEarning[]       @relation("PropertyEarnings")
-  
+  // Capacity
+  beds      Int
+  baths     Int
+  maxGuests Int
+
+  // Features & Amenities
+  features Json // Array: ["WiFi", "Pool", "Kitchen"]
+
+  // Media
+  images  Json // Object: {"livingRoom": ["url1"], "kitchen": ["url2"]}
+  video3D String? // URL to 3D tour video
+
+  // Host Information
+  hostId       Int
+  host         User  @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  ownerDetails Json? // Owner details object (if different from host)
+
+  // Availability
+  availableFrom DateTime?
+  availableTo   DateTime?
+  minStay       Int       @default(1)
+  maxStay       Int?
+
+  // Status & Verification
+  status        String  @default("pending") // active, inactive, pending, suspended, draft
+  isVerified    Boolean @default(false)
+  isInstantBook Boolean @default(false)
+
+  // Analytics
+  views         Int   @default(0)
+  totalBookings Int   @default(0)
+  averageRating Float @default(0)
+  reviewsCount  Int   @default(0)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  bookings     Booking[]
+  reviews      Review[]
+  blockedDates BlockedDate[]
+  pricingRules PricingRule[]
+  wishlistedBy Wishlist[]
+  hostEarnings HostEarning[] @relation("PropertyEarnings")
+
   @@index([hostId])
   @@index([status])
   @@index([location])
@@ -208,49 +219,50 @@ model Property {
 }
 
 model Booking {
-  id            String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Property & Guest
-  propertyId    Int
-  property      Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  guestId       Int
-  guest         User     @relation("GuestBookings", fields: [guestId], references: [id], onDelete: Cascade)
-  
+  propertyId Int
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  guestId    Int
+  guest      User     @relation("GuestBookings", fields: [guestId], references: [id], onDelete: Cascade)
+
   // Booking Details
-  checkIn       DateTime
-  checkOut      DateTime
-  guests        Int
-  totalPrice    Float
-  
+  checkIn    DateTime
+  checkOut   DateTime
+  guests     Int
+  totalPrice Float
+
   // Communication
-  message       String?
-  hostResponse  String?
-  
+  message      String?
+  hostResponse String?
+
   // Status
-  status        String   @default("pending") // pending, confirmed, cancelled, completed, refunded
-  
+  status String @default("pending") // pending, confirmed, cancelled, completed, refunded
+
   // Payment
-  paymentStatus String   @default("pending") // pending, paid, refunded
+  paymentStatus String  @default("pending") // pending, paid, refunded
   paymentMethod String?
   transactionId String?
-  
+
+  // Enhanced booking management
+  notes                String? // Host's private notes about this booking
+  specialRequests      String? // Guest's special requests
+  checkInInstructions  String? // Host's check-in instructions
+  checkOutInstructions String? // Host's check-out instructions
+  guestNotes           String? // Internal guest notes
+
+  cancellationReason String? // Why booking was cancelled
+  cancelledAt        DateTime? // When booking was cancelled
+
   // Timestamps
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  reviews       Review[]
+  reviews     Review[]
+  hostEarning HostEarning? @relation("BookingEarning")
 
-  // Add these fields for better booking management
-  notes                String?  // Host's private notes about this booking
-  specialRequests      String?  // Guest's special requests
-  checkInInstructions  String?  // Host's check-in instructions
-  checkOutInstructions String?  // Host's check-out instructions
-  guestNotes          String?  // Internal guest notes
-
-  
-  hostEarning          HostEarning?        @relation("BookingEarning")
-  
   @@index([propertyId])
   @@index([guestId])
   @@index([status])
@@ -259,33 +271,33 @@ model Booking {
 }
 
 model Review {
-  id           String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Relations
-  propertyId   Int
-  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  userId       Int
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bookingId    String?
-  booking      Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  
+  propertyId Int
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookingId  String?
+  booking    Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
   // Review Content
-  rating       Int      // 1-5 stars
-  comment      String
-  images       String?  // JSON array of image URLs: ["url1", "url2"]
-  
+  rating  Int // 1-5 stars
+  comment String
+  images  Json? // Array of image URLs: ["url1", "url2"]
+
   // Host Response
   response     String?
   responseDate DateTime?
-  
+
   // Status
-  isVisible    Boolean  @default(true)
-  isReported   Boolean  @default(false)
-  
+  isVisible  Boolean @default(true)
+  isReported Boolean @default(false)
+
   // Timestamps
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([propertyId, userId]) // One review per user per property
   @@index([propertyId])
   @@index([userId])
@@ -294,94 +306,94 @@ model Review {
 }
 
 model BlockedDate {
-  id         String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Property
   propertyId Int
   property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  
+
   // Date Range
-  startDate  DateTime
-  endDate    DateTime
-  reason     String?  // "maintenance", "personal use", "blocked by host", etc.
-  
+  startDate DateTime
+  endDate   DateTime
+  reason    String? // "maintenance", "personal use", "blocked by host", etc.
+
   // Status
-  isActive   Boolean  @default(true)
-  
+  isActive Boolean @default(true)
+
   // Timestamps
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([propertyId])
   @@index([startDate, endDate])
   @@map("blocked_dates")
 }
 
 model PricingRule {
-  id               String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Property
-  propertyId       Int
-  property         Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  
+  propertyId Int
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
   // Rule Details
-  name             String
-  type             String   // "seasonal", "weekly", "monthly", "custom"
-  startDate        DateTime
-  endDate          DateTime
-  
+  name      String
+  type      String // "seasonal", "weekly", "monthly", "custom"
+  startDate DateTime
+  endDate   DateTime
+
   // Price Modification
-  priceModifier    Float    // Amount to add/subtract or percentage
-  modifierType     String   // "percentage" or "fixed"
-  
+  priceModifier Float // Amount to add/subtract or percentage
+  modifierType  String // "percentage" or "fixed"
+
   // Conditions
-  minStay          Int?
-  maxStay          Int?
-  
+  minStay Int?
+  maxStay Int?
+
   // Status
-  isActive         Boolean  @default(true)
-  
+  isActive Boolean @default(true)
+
   // Timestamps
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([propertyId])
   @@index([startDate, endDate])
   @@map("pricing_rules")
 }
 
 model Wishlist {
-  id         String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Relations
   userId     Int
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   propertyId Int
   property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  
+
   // Timestamps
-  createdAt  DateTime @default(now())
-  
+  createdAt DateTime @default(now())
+
   @@unique([userId, propertyId])
   @@index([userId])
   @@map("wishlists")
 }
 
 model PropertyView {
-  id         String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Relations
   propertyId Int
-  userId     Int?     // Null for anonymous views
-  
+  userId     Int? // Null for anonymous views
+
   // View Details
-  ipAddress  String?
-  userAgent  String?
-  referer    String?
-  
+  ipAddress String?
+  userAgent String?
+  referer   String?
+
   // Timestamps
-  createdAt  DateTime @default(now())
-  
+  createdAt DateTime @default(now())
+
   @@index([propertyId])
   @@index([userId])
   @@index([createdAt])
@@ -391,74 +403,74 @@ model PropertyView {
 // --- TOUR MODELS ---
 
 model Tour {
-  id                String     @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Basic Information
-  title             String
-  description       String     // Long description
-  shortDescription  String     // Short summary for listings
-  
+  title            String
+  description      String // Long description
+  shortDescription String // Short summary for listings
+
   // Tour Guide
-  tourGuideId       Int
-  tourGuide         User       @relation("TourGuideToTours", fields: [tourGuideId], references: [id], onDelete: Cascade)
-  
+  tourGuideId Int
+  tourGuide   User @relation("TourGuideToTours", fields: [tourGuideId], references: [id], onDelete: Cascade)
+
   // Categories & Types
-  category          String     // adventure, cultural, nature, food, historical, photography, wildlife, spiritual, wellness, urban, beach, mountain
-  type              String     // walking, cycling, driving, boat, helicopter, bus, train, mixed
-  
+  category String // adventure, cultural, nature, food, historical, photography, wildlife, spiritual, wellness, urban, beach, mountain
+  type     String // walking, cycling, driving, boat, helicopter, bus, train, mixed
+
   // Duration & Capacity
-  duration          Float      // in hours (can be decimal like 2.5 hours)
-  maxGroupSize      Int
-  minGroupSize      Int        @default(1)
-  
+  duration     Float // in hours (can be decimal like 2.5 hours)
+  maxGroupSize Int
+  minGroupSize Int   @default(1)
+
   // Pricing
-  price             Float
-  currency          String     @default("USD")
-  
-  // Media (JSON strings for SQLite compatibility)
-  images            String     // JSON object: {"main": ["url1"], "activity": ["url2"], "landscape": ["url3"]}
-  
-  // Itinerary (JSON string)
-  itinerary         String     // JSON array of itinerary items with order, title, description, duration
-  
-  // Details (JSON strings)
-  inclusions        String     // JSON array: ["Transportation", "Guide", "Meals"]
-  exclusions        String     // JSON array: ["Personal expenses", "Tips"]
-  requirements      String     // JSON array: ["Valid ID", "Comfortable shoes"]
-  
+  price    Float
+  currency String @default("USD")
+
+  // Media
+  images Json // Object: {"main": ["url1"], "activity": ["url2"], "landscape": ["url3"]}
+
+  // Itinerary
+  itinerary Json // Array of itinerary items with order, title, description, duration
+
+  // Details
+  inclusions   Json // Array: ["Transportation", "Guide", "Meals"]
+  exclusions   Json // Array: ["Personal expenses", "Tips"]
+  requirements Json // Array: ["Valid ID", "Comfortable shoes"]
+
   // Difficulty & Location
-  difficulty        String     // easy, moderate, challenging, extreme
-  locationCountry   String
-  locationState     String?
-  locationCity      String
-  locationAddress   String
-  latitude          Float?
-  longitude         Float?
-  locationZipCode   String?
-  meetingPoint      String
-  
+  difficulty      String // easy, moderate, challenging, extreme
+  locationCountry String
+  locationState   String?
+  locationCity    String
+  locationAddress String
+  latitude        Float?
+  longitude       Float?
+  locationZipCode String?
+  meetingPoint    String
+
   // Status & Metrics
-  isActive          Boolean    @default(true)
-  rating            Float      @default(0)
-  totalReviews      Int        @default(0)
-  totalBookings     Int        @default(0)
-  views             Int        @default(0)
-  
-  // Tags (JSON string)
-  tags              String     // JSON array: ["adventure", "family-friendly", "wildlife"]
-  
+  isActive      Boolean @default(true)
+  rating        Float   @default(0)
+  totalReviews  Int     @default(0)
+  totalBookings Int     @default(0)
+  views         Int     @default(0)
+
+  // Tags
+  tags Json // Array: ["adventure", "family-friendly", "wildlife"]
+
   // Timestamps
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  schedules         TourSchedule[]
-  bookings          TourBooking[]
-  reviews           TourReview[]
-  messages          TourMessage[]
-  earnings          TourEarnings[]
-  analytics         TourAnalytics[]
-  
+  schedules TourSchedule[]
+  bookings  TourBooking[]
+  reviews   TourReview[]
+  messages  TourMessage[]
+  earnings  TourEarnings[]
+  analytics TourAnalytics[]
+
   @@index([tourGuideId])
   @@index([category])
   @@index([type])
@@ -471,35 +483,35 @@ model Tour {
 }
 
 model TourSchedule {
-  id              String      @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Tour
-  tourId          String
-  tour            Tour        @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  tourGuideId     Int
-  
+  tourId      String
+  tour        Tour   @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  tourGuideId Int
+
   // Schedule Details
-  startDate       DateTime
-  endDate         DateTime
-  startTime       String      // HH:MM format (e.g., "09:00")
-  endTime         String      // HH:MM format (e.g., "17:00")
-  
+  startDate DateTime
+  endDate   DateTime
+  startTime String // HH:MM format (e.g., "09:00")
+  endTime   String // HH:MM format (e.g., "17:00")
+
   // Availability
-  availableSlots  Int
-  bookedSlots     Int         @default(0)
-  isAvailable     Boolean     @default(true)
-  
+  availableSlots Int
+  bookedSlots    Int     @default(0)
+  isAvailable    Boolean @default(true)
+
   // Pricing Override
-  price           Float?      // Override tour price if needed for special schedules
-  specialNotes    String?     // Special notes for this schedule
-  
+  price        Float? // Override tour price if needed for special schedules
+  specialNotes String? // Special notes for this schedule
+
   // Timestamps
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  bookings        TourBooking[]
-  
+  bookings TourBooking[]
+
   @@index([tourId])
   @@index([tourGuideId])
   @@index([startDate, endDate])
@@ -508,52 +520,53 @@ model TourSchedule {
 }
 
 model TourBooking {
-  id                    String              @id @default(cuid())
-  
-  // Relations
-  userId                Int
-  user                  User                @relation("GuestTourBookings", fields: [userId], references: [id], onDelete: Cascade)
-  tourId                String
-  tour                  Tour                @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  scheduleId            String
-  schedule              TourSchedule        @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-  tourGuideId           Int
-  
-  // Booking Details
-  numberOfParticipants  Int
-  participants          String              // JSON array of participant objects with name, age, emergency contacts
-  specialRequests       String?
-  
-  // Pricing
-  totalAmount           Float
-  currency              String              @default("USD")
-  
-  // Status
-  status                String              @default("pending") // pending, confirmed, in_progress, completed, cancelled, refunded, no_show
-  paymentStatus         String              @default("pending") // pending, paid, failed, refunded, partially_refunded
-  paymentId             String?
-  
-  // Check-in/out
-  checkInStatus         String              @default("not_checked_in") // not_checked_in, checked_in, checked_out, no_show
-  checkInTime           DateTime?
-  checkOutTime          DateTime?
-  
-  // Refund
-  refundAmount          Float?
-  refundReason          String?
-  
-  // Timestamps
-  bookingDate           DateTime            @default(now())
-  createdAt             DateTime            @default(now())
-  updatedAt             DateTime            @updatedAt
-  
-  // Relations
-  reviews               TourReview[]
-  messages              TourMessage[]
-  earnings              TourEarnings[]
+  id String @id @default(cuid())
 
-  guestNotes          String?  // Internal guest notes (add if missing)
-  
+  // Relations
+  userId      Int
+  user        User         @relation("GuestTourBookings", fields: [userId], references: [id], onDelete: Cascade)
+  tourId      String
+  tour        Tour         @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  scheduleId  String
+  schedule    TourSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  tourGuideId Int
+
+  // Booking Details
+  numberOfParticipants Int
+  participants         Json // Array of participant objects with name, age, emergency contacts
+  specialRequests      String?
+
+  // Pricing
+  totalAmount Float
+  currency    String @default("USD")
+
+  // Status
+  status        String  @default("pending") // pending, confirmed, in_progress, completed, cancelled, refunded, no_show
+  paymentStatus String  @default("pending") // pending, paid, failed, refunded, partially_refunded
+  paymentId     String?
+
+  // Check-in/out
+  checkInStatus String    @default("not_checked_in") // not_checked_in, checked_in, checked_out, no_show
+  checkInTime   DateTime?
+  checkOutTime  DateTime?
+
+  // Refund
+  refundAmount Float?
+  refundReason String?
+
+  // Internal Notes
+  guestNotes String? // Internal guest notes
+
+  // Timestamps
+  bookingDate DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  reviews  TourReview[]
+  messages TourMessage[]
+  earnings TourEarnings[]
+
   @@index([userId])
   @@index([tourId])
   @@index([scheduleId])
@@ -565,43 +578,43 @@ model TourBooking {
 }
 
 model TourReview {
-  id              String        @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Relations
-  bookingId       String
-  booking         TourBooking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  userId          Int
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tourId          String
-  tour            Tour          @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  tourGuideId     Int
-  
+  bookingId   String
+  booking     TourBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  userId      Int
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tourId      String
+  tour        Tour        @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  tourGuideId Int
+
   // Review Content
-  rating          Int           // 1-5 stars
-  comment         String
-  images          String?       // JSON array of image URLs: ["url1", "url2"]
-  pros            String        // JSON array of positive aspects: ["Great guide", "Amazing views"]
-  cons            String        // JSON array of negative aspects: ["Too long", "Expensive"]
-  wouldRecommend  Boolean
-  isAnonymous     Boolean       @default(false)
-  
+  rating         Int // 1-5 stars
+  comment        String
+  images         Json? // Array of image URLs: ["url1", "url2"]
+  pros           Json // Array of positive aspects: ["Great guide", "Amazing views"]
+  cons           Json // Array of negative aspects: ["Too long", "Expensive"]
+  wouldRecommend Boolean
+  isAnonymous    Boolean @default(false)
+
   // Verification & Status
-  isVerified      Boolean       @default(true)
-  isVisible       Boolean       @default(true)
-  isReported      Boolean       @default(false)
-  
+  isVerified Boolean @default(true)
+  isVisible  Boolean @default(true)
+  isReported Boolean @default(false)
+
   // Engagement
-  helpfulCount    Int           @default(0)
-  reportCount     Int           @default(0)
-  
+  helpfulCount Int @default(0)
+  reportCount  Int @default(0)
+
   // Guide Response
-  response        String?
-  responseDate    DateTime?
-  
+  response     String?
+  responseDate DateTime?
+
   // Timestamps
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([bookingId, userId]) // One review per user per booking
   @@index([userId])
   @@index([tourId])
@@ -613,33 +626,33 @@ model TourReview {
 }
 
 model TourMessage {
-  id            String       @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Relations
-  senderId      Int
-  sender        User         @relation("TourMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-  receiverId    Int
-  receiver      User         @relation("TourMessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
-  
+  senderId   Int
+  sender     User @relation("TourMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId Int
+  receiver   User @relation("TourMessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
   // Context
-  bookingId     String?
-  booking       TourBooking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  tourId        String?
-  tour          Tour?        @relation(fields: [tourId], references: [id], onDelete: SetNull)
-  
+  bookingId String?
+  booking   TourBooking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  tourId    String?
+  tour      Tour?        @relation(fields: [tourId], references: [id], onDelete: SetNull)
+
   // Message Content
-  subject       String?
-  message       String
-  attachments   String?      // JSON array of attachment URLs
-  messageType   String       // booking_inquiry, booking_confirmation, tour_update, general, support, system
-  
+  subject     String?
+  message     String
+  attachments Json? // Array of attachment URLs
+  messageType String // booking_inquiry, booking_confirmation, tour_update, general, support, system
+
   // Status
-  isRead        Boolean      @default(false)
-  
+  isRead Boolean @default(false)
+
   // Timestamps
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([senderId])
   @@index([receiverId])
   @@index([bookingId])
@@ -650,24 +663,24 @@ model TourMessage {
 }
 
 model TourNotification {
-  id        String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // User
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // Notification Details
-  type      String   // booking_received, booking_confirmed, booking_cancelled, tour_reminder, review_received, payment_received, message_received, schedule_reminder, system_update
-  title     String
-  message   String
-  data      String?  // JSON string for additional data (tour ID, booking ID, etc.)
-  
+  type    String // booking_received, booking_confirmed, booking_cancelled, tour_reminder, review_received, payment_received, message_received, schedule_reminder, system_update
+  title   String
+  message String
+  data    Json? // Additional data (tour ID, booking ID, etc.)
+
   // Status
-  isRead    Boolean  @default(false)
-  
+  isRead Boolean @default(false)
+
   // Timestamps
   createdAt DateTime @default(now())
-  
+
   @@index([userId])
   @@index([type])
   @@index([isRead])
@@ -676,34 +689,34 @@ model TourNotification {
 }
 
 model TourEarnings {
-  id            String      @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Relations
-  tourGuideId   Int
-  tourGuide     User        @relation(fields: [tourGuideId], references: [id], onDelete: Cascade)
-  bookingId     String
-  booking       TourBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  tourId        String
-  tour          Tour        @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  
+  tourGuideId Int
+  tourGuide   User        @relation(fields: [tourGuideId], references: [id], onDelete: Cascade)
+  bookingId   String
+  booking     TourBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  tourId      String
+  tour        Tour        @relation(fields: [tourId], references: [id], onDelete: Cascade)
+
   // Financial Details
-  amount        Float       // Gross amount from booking
-  commission    Float       // Platform commission amount
-  netAmount     Float       // Amount after commission (what guide receives)
-  currency      String      @default("USD")
-  
+  amount     Float // Gross amount from booking
+  commission Float // Platform commission amount
+  netAmount  Float // Amount after commission (what guide receives)
+  currency   String @default("USD")
+
   // Status
-  status        String      @default("pending") // pending, approved, paid, disputed
-  
+  status String @default("pending") // pending, approved, paid, disputed
+
   // Payout Details
   payoutDate    DateTime?
-  payoutMethod  String?     // bank_transfer, mobile_money, wallet
-  transactionId String?     // Reference to payment transaction
-  
+  payoutMethod  String? // bank_transfer, mobile_money, wallet
+  transactionId String? // Reference to payment transaction
+
   // Timestamps
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([tourGuideId])
   @@index([bookingId])
   @@index([tourId])
@@ -714,30 +727,30 @@ model TourEarnings {
 }
 
 model TourAnalytics {
-  id          String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Relations
-  tourId      String
-  tour        Tour     @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  userId      Int?     // Null for anonymous views
-  
+  tourId String
+  tour   Tour   @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  userId Int? // Null for anonymous views
+
   // Analytics Data
-  eventType   String   // view, click, booking_start, booking_complete, share, favorite
-  ipAddress   String?
-  userAgent   String?
-  referer     String?
-  sessionId   String?
-  
+  eventType String // view, click, booking_start, booking_complete, share, favorite
+  ipAddress String?
+  userAgent String?
+  referer   String?
+  sessionId String?
+
   // Geo Data (optional)
-  country     String?
-  city        String?
-  
+  country String?
+  city    String?
+
   // Additional Data
-  metadata    String?  // JSON string for additional event data
-  
+  metadata Json? // Additional event data
+
   // Timestamps
-  createdAt   DateTime @default(now())
-  
+  createdAt DateTime @default(now())
+
   @@index([tourId])
   @@index([userId])
   @@index([eventType])
@@ -745,39 +758,37 @@ model TourAnalytics {
   @@map("tour_analytics")
 }
 
-// Optional: Tour Categories Management (if you want predefined categories)
 model TourCategory {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  slug        String   @unique
+  id          String  @id @default(cuid())
+  name        String  @unique
+  slug        String  @unique
   description String?
-  icon        String?  // Icon class or URL
-  color       String?  // Hex color for UI
-  isActive    Boolean  @default(true)
-  sortOrder   Int      @default(0)
-  
+  icon        String? // Icon class or URL
+  color       String? // Hex color for UI
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(0)
+
   // Timestamps
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([isActive])
   @@index([sortOrder])
   @@map("tour_categories")
 }
 
-// Optional: Tour Tags Management (if you want predefined tags)
 model TourTag {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  slug      String   @unique
-  color     String?
-  isActive  Boolean  @default(true)
+  id         String  @id @default(cuid())
+  name       String  @unique
+  slug       String  @unique
+  color      String?
+  isActive   Boolean @default(true)
   usageCount Int     @default(0) // Track how often this tag is used
-  
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@index([isActive])
   @@index([usageCount])
   @@map("tour_tags")
@@ -786,77 +797,82 @@ model TourTag {
 // --- PAYMENT MODELS ---
 
 model Wallet {
-  id            String   @id @default(cuid())
-  userId        Int      @unique
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id     String @id @default(cuid())
+  userId Int    @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // Balance
-  balance       Float    @default(0)
-  currency      String   @default("KES")
-  
+  balance  Float  @default(0)
+  currency String @default("KES")
+
   // Account Details
   accountNumber String?
-  
+
   // Status
-  isActive      Boolean  @default(true)
-  isVerified    Boolean  @default(false)
-  
+  isActive   Boolean @default(true)
+  isVerified Boolean @default(false)
+
   // Timestamps
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  transactions  WalletTransaction[]
-  
+  transactions WalletTransaction[]
+
   @@index([userId])
   @@map("wallets")
 }
 
 model PaymentTransaction {
-  id                  String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // User
-  userId              Int
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // Transaction Details
-  type                String   // deposit, withdrawal, transfer, refund, commission, fee
-  method              String   // mobile_money, bank_transfer, card, wallet, cash
-  amount              Float
-  currency            String   @default("KES")
-  status              String   @default("pending") // pending, processing, completed, failed, cancelled, expired
-  
+  type     String // deposit, withdrawal, transfer, refund, commission, fee
+  method   String // mobile_money, bank_transfer, card, wallet, cash
+  amount   Float
+  currency String @default("KES")
+  status   String @default("pending") // pending, processing, completed, failed, cancelled, expired
+
   // References
-  reference           String   @unique
-  externalId          String?  // External system reference
-  jengaTransactionId  String?  // Jenga API transaction ID
-  
+  reference          String  @unique
+  externalId         String? // External system reference
+  jengaTransactionId String? // Jenga API transaction ID
+
   // Details
-  description         String?
-  metadata            String?  // JSON string for additional data
-  
+  description String?
+  metadata    Json? // Additional data
+
   // Fees & Charges
-  charges             Float?
-  netAmount           Float?
-  
+  charges   Float?
+  netAmount Float?
+
   // Account Information
-  sourceAccount       String?
-  destinationAccount  String?
-  phoneNumber         String?
-  bankCode            String?
-  accountName         String?
-  
+  sourceAccount      String?
+  destinationAccount String?
+  phoneNumber        String?
+  bankCode           String?
+  accountName        String?
+
+  escrowTransactionId String?
+  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id], onDelete: SetNull)
+  isEscrowBased       Boolean            @default(false)
+  escrowStatus        String? // Maps to EscrowStatus
+
   // Failure Information
-  failureReason       String?
-  
+  failureReason String?
+
   // Callback
-  callbackUrl         String?
-  
+  callbackUrl String?
+
   // Timestamps
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  completedAt         DateTime?
-  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
   @@index([userId])
   @@index([status])
   @@index([type])
@@ -868,26 +884,26 @@ model PaymentTransaction {
 }
 
 model WalletTransaction {
-  id            String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Wallet
-  walletId      String
-  wallet        Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  
+  walletId String
+  wallet   Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
   // Transaction Details
-  type          String   // credit, debit
+  type          String // credit, debit
   amount        Float
   balanceBefore Float
   balanceAfter  Float
-  
+
   // References
   reference     String
   description   String
-  transactionId String?  // Link to PaymentTransaction
-  
+  transactionId String? // Link to PaymentTransaction
+
   // Timestamps
-  createdAt     DateTime @default(now())
-  
+  createdAt DateTime @default(now())
+
   @@index([walletId])
   @@index([reference])
   @@index([createdAt])
@@ -895,117 +911,587 @@ model WalletTransaction {
 }
 
 model BankAccount {
-  id            String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // User
-  userId        Int
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // Account Details
   accountNumber String
   accountName   String
   bankCode      String
   bankName      String
   branchCode    String?
-  
+
   // Status
-  isDefault     Boolean  @default(false)
-  isVerified    Boolean  @default(false)
-  
+  isDefault  Boolean @default(false)
+  isVerified Boolean @default(false)
+
   // Timestamps
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([userId, accountNumber, bankCode])
   @@index([userId])
   @@map("bank_accounts")
 }
 
 model MobileMoneyAccount {
-  id           String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // User
-  userId       Int
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // Account Details
-  phoneNumber  String
-  provider     String   // mpesa, airtel, orange, mtn, tigo
-  accountName  String
-  
+  phoneNumber String
+  provider    String // mpesa, airtel, orange, mtn, tigo
+  accountName String
+
   // Status
-  isDefault    Boolean  @default(false)
-  isVerified   Boolean  @default(false)
-  
+  isDefault  Boolean @default(false)
+  isVerified Boolean @default(false)
+
   // Timestamps
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([userId, phoneNumber])
   @@index([userId])
   @@map("mobile_money_accounts")
 }
 
-model PaymentSettings {
-  id                       String   @id @default(cuid())
-  
-  // User
-  userId                   Int      @unique
-  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  // Settings
-  defaultCurrency          String   @default("KES")
-  autoWithdrawal           Boolean  @default(false)
-  withdrawalThreshold      Float?
-  defaultBankAccount       String?
-  defaultMobileNumber      String?
-  
-  // Notifications (JSON string)
-  notificationPreferences  String   // JSON: {"email": true, "sms": false, ...}
-  
+// Add these models to your existing Prisma schema
+
+// --- ESCROW TRANSACTION MODEL ---
+model EscrowTransaction {
+  id String @id @default(cuid())
+
+  // User Relations
+  userId      Int
+  user        User  @relation("UserEscrowTransactions", fields: [userId], references: [id], onDelete: Cascade)
+  recipientId Int?
+  recipient   User? @relation("RecipientEscrowTransactions", fields: [recipientId], references: [id], onDelete: SetNull)
+
+  // Transaction Details
+  type        String // escrow_deposit, escrow_withdrawal, escrow_transfer, p2p_escrow, escrow_release, escrow_refund
+  amount      Float
+  currency    String  @default("USD")
+  status      String  @default("pending") // pending, funded, released, disputed, resolved, cancelled, expired
+  reference   String  @unique
+  description String?
+
+  // Escrow Provider Details
+  escrowId   String? // External escrow provider ID
+  externalId String? // External transaction ID
+  paymentUrl String? // Payment URL for funding
+
+  // Escrow Terms and Conditions
+  escrowTerms       Json? // EscrowTerms object
+  releaseConditions Json? // Array of ReleaseCondition objects
+  disputeDeadline   DateTime?
+  autoReleaseDate   DateTime?
+
+  // Transfer specific
+  sourceEscrowId String? // For escrow transfers
+  transferType   String? // full, partial
+
+  // P2P specific
+  isP2P       Boolean @default(false)
+  notifyBySMS Boolean @default(false)
+
+  // Status Tracking
+  fundedAt           DateTime?
+  releasedAt         DateTime?
+  releasedBy         Int?
+  releaseReason      String?
+  disputedAt         DateTime?
+  disputedBy         Int?
+  disputeReason      String?
+  resolvedAt         DateTime?
+  resolvedBy         Int?
+  resolutionReason   String?
+  cancelledAt        DateTime?
+  cancellationReason String?
+
+  // Fees and Charges
+  fees      Float?
+  netAmount Float?
+
   // Timestamps
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  disputes            EscrowDispute[]
+  notifications       EscrowNotification[]
+  milestones          EscrowMilestone[]
+  paymentTransactions PaymentTransaction[] // Add this
+  analytics           EscrowAnalytics[] // Add this
+
+  @@index([userId])
+  @@index([recipientId])
+  @@index([status])
+  @@index([type])
+  @@index([currency])
+  @@index([escrowId])
+  @@index([createdAt])
+  @@index([fundedAt])
+  @@index([releasedAt])
+  @@map("escrow_transactions")
+}
+
+// --- ESCROW DISPUTE MODEL ---
+model EscrowDispute {
+  id String @id @default(cuid())
+
+  // Relations
+  escrowTransactionId String
+  escrowTransaction   EscrowTransaction @relation(fields: [escrowTransactionId], references: [id], onDelete: Cascade)
+  disputedBy          Int
+  disputedByUser      User              @relation("DisputedByUser", fields: [disputedBy], references: [id], onDelete: Cascade)
+
+  // Dispute Details
+  disputeReason String
+  status        String  @default("open") // open, under_review, resolved, escalated, closed
+  priority      String  @default("medium") // low, medium, high, urgent
+  category      String? // non_delivery, defective_product, unauthorized_charge, etc.
+
+  // Resolution
+  resolution     Json? // Resolution object with decision, reason, etc.
+  resolvedBy     Int?
+  resolvedByUser User?     @relation("ResolvedByUser", fields: [resolvedBy], references: [id], onDelete: SetNull)
+  resolvedAt     DateTime?
+
+  // Additional Details
+  adminNotes  String? // Internal admin notes
+  publicNotes String? // Notes visible to both parties
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  evidence DisputeEvidence[]
+  messages DisputeMessage[]
+
+  @@index([escrowTransactionId])
+  @@index([disputedBy])
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+  @@map("escrow_disputes")
+}
+
+// --- DISPUTE EVIDENCE MODEL ---
+model DisputeEvidence {
+  id String @id @default(cuid())
+
+  // Relations
+  disputeId      String
+  dispute        EscrowDispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  uploadedBy     Int
+  uploadedByUser User          @relation("EvidenceUploader", fields: [uploadedBy], references: [id], onDelete: Cascade)
+
+  // Evidence Details
+  type        String // document, image, video, message, transaction_proof, screenshot
+  title       String
+  description String?
+  fileUrl     String?
+  fileName    String?
+  fileSize    Int? // in bytes
+  mimeType    String?
+
+  // Verification
+  isVerified Boolean   @default(false)
+  verifiedBy Int?
+  verifiedAt DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([disputeId])
+  @@index([uploadedBy])
+  @@index([type])
+  @@index([createdAt])
+  @@map("dispute_evidence")
+}
+
+// --- DISPUTE MESSAGE MODEL ---
+model DisputeMessage {
+  id String @id @default(cuid())
+
+  // Relations
+  disputeId String
+  dispute   EscrowDispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  senderId  Int
+  sender    User          @relation("DisputeMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  // Message Details
+  message     String
+  messageType String  @default("user") // user, admin, system, auto
+  isInternal  Boolean @default(false) // Only visible to admins
+
+  // Attachments
+  attachments Json? // Array of attachment URLs
+
+  // Read Status
+  isRead Boolean   @default(false)
+  readAt DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([disputeId])
+  @@index([senderId])
+  @@index([messageType])
+  @@index([createdAt])
+  @@map("dispute_messages")
+}
+
+// --- ESCROW MILESTONE MODEL ---
+model EscrowMilestone {
+  id String @id @default(cuid())
+
+  // Relations
+  escrowTransactionId String
+  escrowTransaction   EscrowTransaction @relation(fields: [escrowTransactionId], references: [id], onDelete: Cascade)
+
+  // Milestone Details
+  title       String
+  description String
+  amount      Float
+  percentage  Float
+  order       Int    @default(1)
+
+  // Status and Dates
+  status          String    @default("pending") // pending, completed, failed, skipped
+  dueDate         DateTime?
+  completedAt     DateTime?
+  completedBy     Int?
+  completedByUser User?     @relation("MilestoneCompleter", fields: [completedBy], references: [id], onDelete: SetNull)
+
+  // Evidence and Verification
+  evidence         Json? // Array of evidence URLs or data
+  requiresApproval Boolean   @default(true)
+  approvedBy       Int?
+  approvedAt       DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([escrowTransactionId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([order])
+  @@map("escrow_milestones")
+}
+
+// --- ESCROW NOTIFICATION MODEL ---
+model EscrowNotification {
+  id String @id @default(cuid())
+
+  // Relations
+  userId              Int
+  user                User               @relation("EscrowNotificationUser", fields: [userId], references: [id], onDelete: Cascade)
+  escrowTransactionId String?
+  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id], onDelete: SetNull)
+
+  // Notification Details
+  type    String // escrow_created, escrow_funded, release_requested, dispute_created, milestone_completed, etc.
+  title   String
+  message String
+  data    Json? // Additional notification data
+
+  // Delivery Channels
+  channels Json // Array: ["email", "sms", "push", "in_app"]
+
+  // Status
+  isRead Boolean   @default(false)
+  readAt DateTime?
+  sentAt DateTime?
+
+  // Delivery Status
+  emailSent Boolean @default(false)
+  smsSent   Boolean @default(false)
+  pushSent  Boolean @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([escrowTransactionId])
+  @@index([type])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("escrow_notifications")
+}
+
+// --- ESCROW TEMPLATE MODEL ---
+model EscrowTemplate {
+  id String @id @default(cuid())
+
+  // Owner
+  userId Int
+  user   User @relation("EscrowTemplateOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Template Details
+  name         String
+  description  String?
+  type         String // escrow_deposit, p2p_escrow, etc.
+  defaultTerms Json // EscrowTerms object
+
+  // Settings
+  isPublic Boolean @default(false)
+  isActive Boolean @default(true)
+
+  // Usage Statistics
+  usageCount Int       @default(0)
+  lastUsedAt DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@index([isPublic])
+  @@index([isActive])
+  @@index([usageCount])
+  @@map("escrow_templates")
+}
+
+// --- ESCROW ANALYTICS MODEL ---
+model EscrowAnalytics {
+  id String @id @default(cuid())
+
+  // Relations
+  escrowTransactionId String?
+  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id], onDelete: SetNull)
+  userId              Int?
+  user                User?              @relation("EscrowAnalyticsUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  // Event Details
+  eventType String // view, create, fund, release, dispute, etc.
+  eventData Json? // Additional event data
+
+  // Context
+  ipAddress String?
+  userAgent String?
+  referer   String?
+  sessionId String?
+
+  // Geographic Data
+  country  String?
+  city     String?
+  timezone String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@index([escrowTransactionId])
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@index([country])
+  @@map("escrow_analytics")
+}
+
+// --- ESCROW FEE STRUCTURE MODEL ---
+model EscrowFeeStructure {
+  id String @id @default(cuid())
+
+  // Fee Configuration
+  type     String // escrow_deposit, p2p_escrow, etc.
+  currency String
+  feeType  String // percentage, fixed, tiered
+
+  // Percentage Fees
+  percentage Float?
+  minFee     Float?
+  maxFee     Float?
+
+  // Fixed Fees
+  fixedAmount Float?
+
+  // Tiered Fees
+  tiers Json? // Array of tier objects
+
+  // Additional Fees
+  disputeFee          Float?
+  expeditedReleaseFee Float?
+  cancellationFee     Float?
+
+  // Settings
+  isActive      Boolean   @default(true)
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([currency])
+  @@index([isActive])
+  @@index([effectiveFrom])
+  @@map("escrow_fee_structures")
+}
+
+// --- ESCROW LIMIT MODEL ---
+model EscrowLimit {
+  id String @id @default(cuid())
+
+  // User
+  userId Int  @unique
+  user   User @relation("UserEscrowLimits", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Limits Configuration
+  currency String @default("USD")
+
+  // Transaction Limits
+  minTransactionAmount Float @default(1)
+  maxTransactionAmount Float @default(100000)
+
+  // Daily Limits
+  maxDailyAmount       Float @default(10000)
+  maxDailyTransactions Int   @default(10)
+
+  // Monthly Limits
+  maxMonthlyAmount       Float @default(100000)
+  maxMonthlyTransactions Int   @default(100)
+
+  // Holding Period Limits
+  minHoldingDays Int @default(1)
+  maxHoldingDays Int @default(365)
+
+  // KYC Requirements
+  requiresKYC Boolean @default(false)
+  kycLevel    String  @default("basic") // basic, intermediate, advanced
+
+  // Usage Tracking
+  dailyUsedAmount         Float    @default(0)
+  dailyUsedTransactions   Int      @default(0)
+  monthlyUsedAmount       Float    @default(0)
+  monthlyUsedTransactions Int      @default(0)
+  lastResetDate           DateTime @default(now())
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([currency])
+  @@map("escrow_limits")
+}
+
+// --- BULK ESCROW OPERATION MODEL ---
+model BulkEscrowOperation {
+  id String @id @default(cuid())
+
+  // Creator
+  userId Int
+  user   User @relation("BulkEscrowCreator", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Operation Details
+  templateId        String?
+  operationType     String // bulk_deposit, bulk_p2p, bulk_release
+  totalTransactions Int
+  totalAmount       Float
+  currency          String  @default("USD")
+
+  // Status
+  status       String @default("processing") // processing, completed, partial, failed
+  successCount Int    @default(0)
+  failureCount Int    @default(0)
+
+  // Configuration
+  commonTerms  Json? // Common escrow terms for all transactions
+  scheduleDate DateTime?
+
+  // Results
+  results Json? // Array of individual transaction results
+
+  // Error Handling
+  errorSummary Json? // Summary of errors encountered
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([userId])
+  @@index([status])
+  @@index([operationType])
+  @@index([createdAt])
+  @@map("bulk_escrow_operations")
+}
+
+model PaymentSettings {
+  id String @id @default(cuid())
+
+  // User
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Settings
+  defaultCurrency     String  @default("KES")
+  autoWithdrawal      Boolean @default(false)
+  withdrawalThreshold Float?
+  defaultBankAccount  String?
+  defaultMobileNumber String?
+
+  // Notifications
+  notificationPreferences Json // Object: {"email": true, "sms": false, ...}
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@map("payment_settings")
 }
 
 model Payout {
-  id         String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Host
-  hostId     Int
-  host       User     @relation("HostPayouts", fields: [hostId], references: [id], onDelete: Cascade)
-  
+  hostId Int
+  host   User @relation("HostPayouts", fields: [hostId], references: [id], onDelete: Cascade)
+
   // Payout Details
-  amount     Float
-  currency   String   @default("USD")
-  status     String   @default("pending") // pending, processing, completed, failed
-  method     String   // bank_transfer, mobile_money, wallet
-  
+  amount   Float
+  currency String @default("USD")
+  status   String @default("pending") // pending, processing, completed, failed
+  method   String // bank_transfer, mobile_money, wallet
+
   // Period covered by this payout
   periodStart DateTime
   periodEnd   DateTime
-  
+
   // Fees and net amount
-  fees       Float    @default(0)
-  netAmount  Float
-  
+  fees      Float @default(0)
+  netAmount Float
+
   // External references
-  reference  String   @unique
+  reference  String  @unique
   externalId String?
-  
+
   // Failure information
   failureReason String?
-  
+
   // Timestamps
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   processedAt DateTime?
 
-  earnings             HostEarning[]       @relation("PayoutEarnings")
-  
+  earnings HostEarning[] @relation("PayoutEarnings")
+
   @@index([hostId])
   @@index([status])
   @@index([periodStart, periodEnd])
@@ -1013,8 +1499,8 @@ model Payout {
 }
 
 model HostEarning {
-  id         String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Relations
   hostId     Int
   host       User     @relation("HostEarnings", fields: [hostId], references: [id], onDelete: Cascade)
@@ -1022,25 +1508,25 @@ model HostEarning {
   booking    Booking  @relation("BookingEarning", fields: [bookingId], references: [id], onDelete: Cascade)
   propertyId Int
   property   Property @relation("PropertyEarnings", fields: [propertyId], references: [id], onDelete: Cascade)
-  
+
   // Financial details
-  grossAmount    Float    // Total booking amount
-  platformFee    Float    // Platform commission
-  hostEarning    Float    // What host receives
-  currency       String   @default("USD")
-  
+  grossAmount Float // Total booking amount
+  platformFee Float // Platform commission
+  hostEarning Float // What host receives
+  currency    String @default("USD")
+
   // Payout tracking
-  payoutId       String?
-  payout         Payout?  @relation("PayoutEarnings", fields: [payoutId], references: [id], onDelete: SetNull)
-  
+  payoutId String?
+  payout   Payout? @relation("PayoutEarnings", fields: [payoutId], references: [id], onDelete: SetNull)
+
   // Status
-  status         String   @default("pending") // pending, earned, paid_out
-  
+  status String @default("pending") // pending, earned, paid_out
+
   // Timestamps
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  earnedAt       DateTime? // When booking was completed
-  
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  earnedAt  DateTime? // When booking was completed
+
   @@index([hostId])
   @@index([bookingId])
   @@index([propertyId])
@@ -1049,22 +1535,21 @@ model HostEarning {
   @@map("host_earnings")
 }
 
-// Optional: Add AgentBooking table for tracking agent commissions
 model AgentBooking {
-  id            String   @id @default(cuid())
-  agentId       Int
-  agent         User     @relation("AgentBookings", fields: [agentId], references: [id], onDelete: Cascade)
-  clientId      Int
-  client        User     @relation("ClientBookings", fields: [clientId], references: [id], onDelete: Cascade)
-  bookingType   String   // 'property' or 'tour'
-  bookingId     String   // Reference to actual booking
-  commission    Float
+  id             String   @id @default(cuid())
+  agentId        Int
+  agent          User     @relation("AgentBookings", fields: [agentId], references: [id], onDelete: Cascade)
+  clientId       Int
+  client         User     @relation("ClientBookings", fields: [clientId], references: [id], onDelete: Cascade)
+  bookingType    String // 'property' or 'tour'
+  bookingId      String // Reference to actual booking
+  commission     Float
   commissionRate Float
-  status        String   @default("active")
-  notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
+  status         String   @default("active")
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
   @@index([agentId])
   @@index([clientId])
   @@map("agent_bookings")

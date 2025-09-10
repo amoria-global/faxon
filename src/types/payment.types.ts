@@ -651,3 +651,6 @@ export interface CreateEscrowPaymentDto {
   conditions?: string;
   releaseDate?: string;
 }
+
+
+

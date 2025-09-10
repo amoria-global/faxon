@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { config } from '../config/config';
 import { BrevoMailingService } from '../utils/brevo.auth';
 import { 
@@ -106,10 +106,10 @@ export class AuthService {
     const tourGuideData = data.userType === 'tourguide' ? {
       bio: data.bio,
       experience: data.experience,
-      languages: data.languages ? JSON.stringify(data.languages) : null,
-      specializations: data.specializations ? JSON.stringify(data.specializations) : null,
+      languages: data.languages ? JSON.stringify(data.languages) : undefined,
+      specializations: data.specializations ? JSON.stringify(data.specializations) : undefined,
       licenseNumber: data.licenseNumber,
-      certifications: data.certifications ? JSON.stringify(data.certifications) : null,
+      certifications: data.certifications ? JSON.stringify(data.certifications) : undefined,
     } : {};
     
     const user = await prisma.user.create({
@@ -694,10 +694,10 @@ export class AuthService {
     const tourGuideData = data.userType === 'tourguide' ? {
       bio: data.bio,
       experience: data.experience,
-      languages: data.languages ? JSON.stringify(data.languages) : null,
-      specializations: data.specializations ? JSON.stringify(data.specializations) : null,
+      languages: data.languages ? JSON.stringify(data.languages) : undefined,
+      specializations: data.specializations ? JSON.stringify(data.specializations) : undefined,
       licenseNumber: data.licenseNumber,
-      certifications: data.certifications ? JSON.stringify(data.certifications) : null,
+      certifications: data.certifications ? JSON.stringify(data.certifications) : undefined,
     } : {};
 
     const user = await prisma.user.create({
@@ -790,10 +790,16 @@ export class AuthService {
     // Tour guide specific fields
     if (data.bio !== undefined) updateData.bio = data.bio;
     if (data.experience !== undefined) updateData.experience = data.experience;
-    if (data.languages !== undefined) updateData.languages = JSON.stringify(data.languages);
-    if (data.specializations !== undefined) updateData.specializations = JSON.stringify(data.specializations);
+    if (data.languages !== undefined) {
+      updateData.languages = data.languages ? JSON.stringify(data.languages) : Prisma.DbNull;
+    }
+    if (data.specializations !== undefined) {
+      updateData.specializations = data.specializations ? JSON.stringify(data.specializations) : Prisma.DbNull;
+    }
     if (data.licenseNumber !== undefined) updateData.licenseNumber = data.licenseNumber;
-    if (data.certifications !== undefined) updateData.certifications = JSON.stringify(data.certifications);
+    if (data.certifications !== undefined) {
+      updateData.certifications = data.certifications ? JSON.stringify(data.certifications) : Prisma.DbNull;
+    }
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },
