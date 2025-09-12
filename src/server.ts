@@ -58,6 +58,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/tours', require('./routes/tours.routes').default); // Importing tours routes
 
 
 // Health check
