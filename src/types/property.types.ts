@@ -94,6 +94,7 @@ export interface PropertySummary {
   name: string;
   location: string;
   category: string;
+  type?: string;
   pricePerNight: number;
   image: string; // Main image URL
   rating: number;

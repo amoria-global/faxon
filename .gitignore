@@ -6,12 +6,3 @@ node_modules
 
 /src/generated/prisma
 
-/src/types/tours.types.ts
-
-/src/services/tours.service.ts
-
-/src/middleware/tours.middleware.ts
-
-/src/controllers/tours.controller.ts
-
-/src/routes/tours.routes.ts

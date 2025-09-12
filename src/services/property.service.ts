@@ -616,6 +616,7 @@ export class PropertyService {
       name: property.name,
       location: property.location,
       category: property.category,
+      type: property.type, 
       pricePerNight: property.pricePerNight,
       image: mainImage,
       rating: property.averageRating || 0,
@@ -1802,7 +1803,7 @@ async getAgentProperties(agentId: number, filters: any, page: number = 1, limit:
         host: { select: { firstName: true, lastName: true, email: true } },
         reviews: { select: { rating: true } },
         bookings: {
-          where: { status: 'completed' },
+          where: { status: { not: '' } },
           select: { totalPrice: true }
         }
       },
