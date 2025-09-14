@@ -1,3 +1,4 @@
+//src/types/booking.types.ts
 // --- PROPERTY BOOKING TYPES ---
 export interface CreatePropertyBookingDto {
   propertyId: number;

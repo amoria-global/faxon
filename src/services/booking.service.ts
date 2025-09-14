@@ -1,3 +1,4 @@
+//src/services/booking.service.ts
 import { PrismaClient } from '@prisma/client';
 import {
   CreatePropertyBookingDto,

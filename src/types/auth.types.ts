@@ -47,6 +47,8 @@ export interface JwtPayload {
   userId: string;
   userType?: string;
   email: string;
+  iat?: number;
+  exp?: number;
 }
 
 // --- PASSWORD MANAGEMENT ---
@@ -127,6 +129,8 @@ export interface UpdateUserProfileDto {
   province?: string;
   city?: string;
   street?: string;
+  
+  // All postal code field variations
   zipCode?: string;
   postalCode?: string;
   postcode?: string;
@@ -134,13 +138,18 @@ export interface UpdateUserProfileDto {
   eircode?: string;
   cep?: string;
   
+  // ADD THESE MISSING FIELDS:
+  district?: string;
+  county?: string;
+  region?: string;
+  
   // Tour Guide specific fields
   bio?: string;
   experience?: number;
-  languages?: string[]; // Will be converted to JSON string
-  specializations?: string[]; // Will be converted to JSON string
+  languages?: string[];
+  specializations?: string[];
   licenseNumber?: string;
-  certifications?: string[]; // Will be converted to JSON string
+  certifications?: string[];
   
   // Additional fields
   verificationStatus?: string;
