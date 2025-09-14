@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const config = {
-  port: process.env.PORT || 3000,
+  port: process.env.PORT || 5000,
   jwtSecret: process.env.JWT_SECRET || 'default-secret',
   googleClientId: process.env.GOOGLE_CLIENT_ID || '739960680632-g75378et3hgeu5qmukdqp8085369gh1t.apps.googleusercontent.com',
   appleClientId: process.env.APPLE_CLIENT_ID || '',

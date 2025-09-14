@@ -1,3 +1,4 @@
+// src/services/auth.service.ts
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
@@ -397,59 +398,99 @@ export class AuthService {
   }
 
   async updateUserProfile(userId: number, data: UpdateUserProfileDto, req?: any): Promise<UserInfo> {
-    const tourGuideData = data.bio || data.experience || data.languages || data.specializations || data.licenseNumber || data.certifications ? {
-      bio: data.bio,
-      experience: data.experience,
-      languages: data.languages ? JSON.stringify(data.languages) : undefined,
-      specializations: data.specializations ? JSON.stringify(data.specializations) : undefined,
-      licenseNumber: data.licenseNumber,
-      certifications: data.certifications ? JSON.stringify(data.certifications) : undefined,
-    } : {};
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
 
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        firstName: data.firstName,
-        lastName: data.lastName,
-        phone: data.phone,
-        phoneCountryCode: data.phoneCountryCode,
-        country: data.country,
-        state: data.state,
-        province: data.province,
-        city: data.city,
-        street: data.street,
-        zipCode: data.zipCode,
-        postalCode: data.postalCode,
-        postcode: data.postcode,
-        pinCode: data.pinCode,
-        eircode: data.eircode,
-        cep: data.cep,
-        verificationStatus: data.verificationStatus,
-        preferredCommunication: data.preferredCommunication,
-        ...tourGuideData
-      }
-    });
-
-    // Send profile update notification
-    try {
-      const securityInfo = this.extractSecurityInfo(req);
-      const mailingContext = this.createMailingContext(user, securityInfo);
-      await this.brevoService.sendProfileUpdateNotification(mailingContext);
-    } catch (emailError) {
-      console.error('Failed to send profile update notification:', emailError);
-    }
-
-    return this.transformToUserInfo(user);
+  if (!user) {
+    throw new Error('User not found');
   }
 
-  async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: { profileImage: imageUrl }
-    });
+  console.log('Updating user profile with data:', data);
 
-    return this.transformToUserInfo(user);
+  // Prepare update data object
+  const updateData: any = {};
+
+  // Handle name fields
+  if (data.firstName !== undefined) updateData.firstName = data.firstName;
+  if (data.lastName !== undefined) updateData.lastName = data.lastName;
+
+  // Handle contact information
+  if (data.phone !== undefined) updateData.phone = data.phone;
+  if (data.phoneCountryCode !== undefined) updateData.phoneCountryCode = data.phoneCountryCode;
+
+  // Handle location fields
+  if (data.country !== undefined) updateData.country = data.country;
+  if (data.state !== undefined) updateData.state = data.state;
+  if (data.province !== undefined) updateData.province = data.province;
+  if (data.city !== undefined) updateData.city = data.city;
+  if (data.street !== undefined) updateData.street = data.street;
+
+  // Handle all possible address/postal code fields
+  if (data.zipCode !== undefined) updateData.zipCode = data.zipCode;
+  if (data.postalCode !== undefined) updateData.postalCode = data.postalCode;
+  if (data.postcode !== undefined) updateData.postcode = data.postcode;
+  if (data.pinCode !== undefined) updateData.pinCode = data.pinCode;
+  if (data.eircode !== undefined) updateData.eircode = data.eircode;
+  if (data.cep !== undefined) updateData.cep = data.cep;
+
+  // Handle additional address fields
+  if (data.district !== undefined) updateData.district = data.district;
+  if (data.county !== undefined) updateData.county = data.county;
+  if (data.region !== undefined) updateData.region = data.region;
+
+  // Handle other profile fields
+  if (data.verificationStatus !== undefined) updateData.verificationStatus = data.verificationStatus;
+  if (data.preferredCommunication !== undefined) updateData.preferredCommunication = data.preferredCommunication;
+
+  // Handle tour guide specific fields if provided
+  const tourGuideData: any = {};
+  if (data.bio !== undefined) tourGuideData.bio = data.bio;
+  if (data.experience !== undefined) tourGuideData.experience = data.experience;
+  if (data.languages !== undefined) {
+    tourGuideData.languages = data.languages ? JSON.stringify(data.languages) : null;
   }
+  if (data.specializations !== undefined) {
+    tourGuideData.specializations = data.specializations ? JSON.stringify(data.specializations) : null;
+  }
+  if (data.licenseNumber !== undefined) tourGuideData.licenseNumber = data.licenseNumber;
+  if (data.certifications !== undefined) {
+    tourGuideData.certifications = data.certifications ? JSON.stringify(data.certifications) : null;
+  }
+
+  // Merge tour guide data if any exists
+  Object.assign(updateData, tourGuideData);
+
+  console.log('Final update data:', updateData);
+
+  const updatedUser = await prisma.user.update({
+    where: { id: userId },
+    data: updateData
+  });
+
+  console.log('User updated successfully:', updatedUser.id);
+
+  // Send profile update notification
+  try {
+    const securityInfo = this.extractSecurityInfo(req);
+    const mailingContext = this.createMailingContext(updatedUser, securityInfo);
+    await this.brevoService.sendProfileUpdateNotification(mailingContext);
+  } catch (emailError) {
+    console.error('Failed to send profile update notification:', emailError);
+  }
+
+  return this.transformToUserInfo(updatedUser);
+}
+
+// And make sure you have the updateProfileImage method:
+async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: { profileImage: imageUrl }
+  });
+
+  return this.transformToUserInfo(user);
+}
 
   // --- PASSWORD MANAGEMENT ---
   async changePassword(userId: number, data: ChangePasswordDto, req?: any): Promise<void> {

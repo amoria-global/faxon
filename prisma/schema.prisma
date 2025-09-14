@@ -36,6 +36,9 @@ model User {
   pinCode    String?
   eircode    String?
   cep        String?
+  district  String?
+  county    String?
+  region    String?
 
   // User Management
   status   String @default("pending") // active, inactive, pending, suspended, unverified

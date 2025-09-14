@@ -1,3 +1,4 @@
+//server.ts
 import express from 'express';
 import cors from 'cors';
 import { config } from './config/config';
@@ -6,6 +7,8 @@ import paymentRoutes from './routes/payment.routes';
 import propertyRoutes from './routes/property.routes';
 import bookingRoutes from './routes/booking.routes';
 import uploadRoutes from './routes/upload.routes';
+import notificationRoutes from './routes/notification.routes'; 
+import helpRoutes from './routes/help.routes';
 
 const app = express();
 
@@ -23,7 +26,8 @@ app.use(cors({
   ],
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Increase limit for base64 images
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Request logger middleware
 app.use((req, res, next) => {
@@ -58,8 +62,9 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/bookings', bookingRoutes);
-app.use('/api/tours', require('./routes/tours.routes').default); // Importing tours routes
-
+app.use('/api/tours', require('./routes/tours.routes').default);
+app.use('/api/notifications', notificationRoutes); 
+app.use('/api/help', helpRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -77,3 +82,5 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 app.listen(config.port, () => {
   console.log(`🚀 Server running on port ${config.port}`);
 });
+
+export default app;
