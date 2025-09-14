@@ -100,7 +100,7 @@ router.get('/agent/bookings', validateAgent, propertyController.getAgentBookings
 router.get('/agent/bookings/calendar', validateAgent, propertyController.getAgentBookingCalendar);
 router.put('/agent/bookings/:bookingId', validateAgent, validateBookingUpdate, propertyController.updateAgentBooking);
 
-// --- GUEST MANAGEMENT ---
+// --- GUEST MANAGEMENT --- 
 // Host guest management
 router.get('/host/guests', validateHost, propertyController.getHostGuests);
 router.get('/host/guests/:guestId', validateHost, propertyController.getGuestDetails);
