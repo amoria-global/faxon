@@ -30,8 +30,22 @@ export const validateProperty = (req: AuthenticatedRequest, res: Response, next:
     errors.push('Property name must be less than 200 characters');
   }
 
-  if (!data.location || data.location.trim().length === 0) {
+  if (!data.location) {
     errors.push('Property location is required');
+  } else if (typeof data.location === 'string') {
+    if (data.location.trim().length === 0) {
+      errors.push('Property location is required');
+    }
+  } else if (typeof data.location === 'object') {
+    // Validate object structure for location
+    if (
+      !data.location.type ||
+      (data.location.type !== 'upi' && data.location.type !== 'address') ||
+      (data.location.type === 'upi' && (!data.location.upi || data.location.upi.trim().length === 0)) ||
+      (data.location.type === 'address' && (!data.location.address || data.location.address.trim().length === 0))
+    ) {
+      errors.push('Property location object is missing required fields');
+    }
   }
 
   if (!data.type || data.type.trim().length === 0) {

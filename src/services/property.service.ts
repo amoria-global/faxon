@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { BrevoPropertyMailingService } from '../utils/brevo.property';
 import {
   CreatePropertyDto,
   UpdatePropertyDto,
@@ -44,6 +45,7 @@ import {
 const prisma = new PrismaClient();
 
 export class PropertyService {
+  private emailService = new BrevoPropertyMailingService();
   
   // --- PROPERTY CRUD OPERATIONS ---
   async createProperty(hostId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
@@ -52,11 +54,32 @@ export class PropertyService {
       throw new Error('End date must be after start date');
     }
 
+  let upiNumber: string | undefined;
+  let propertyAddress: string | undefined;
+  let locationString: string;
+
+  if (typeof data.location === 'object' && data.location.type) {
+    if (data.location.type === 'upi') {
+      upiNumber = data.location.upi;
+      locationString = `UPI: ${data.location.upi}`;
+    } else if (data.location.type === 'address') {
+      propertyAddress = data.location.address;
+      locationString = data.location.address;
+    } else {
+      locationString = data.location.address || data.location.upi || '';
+    }
+  } else {
+    // Fallback for string location (backward compatibility)
+    locationString = typeof data.location === 'string' ? data.location : '';
+  }
+
     const property = await prisma.property.create({
       data: {
         hostId,
         name: data.name,
-        location: data.location,
+        location: locationString,
+        propertyAddress: propertyAddress,
+        upiNumber: upiNumber,
         type: data.type,
         category: data.category,
         pricePerNight: data.pricePerNight,
@@ -78,60 +101,105 @@ export class PropertyService {
         reviews: true,
         bookings: true
       }
-    });
+    }) as any;
+
+    try {
+      // Send property submission confirmation email
+      await this.emailService.sendPropertySubmissionEmail({
+        host: {
+          firstName: property.host.firstName,
+          lastName: property.host.lastName,
+          email: property.host.email,
+          id: property.hostId
+        },
+        company: {
+          name: 'Jambolush',
+          website: 'https://jambolush.com',
+          supportEmail: 'support@jambolush.com',
+          logo: 'https://jambolush.com/logo.png'
+        },
+        property: await this.transformToPropertyInfo(property)
+      });
+    } catch (emailError) {
+      console.error('Failed to send property submission email:', emailError);
+      // Don't fail property creation if email fails
+    }
 
     return this.transformToPropertyInfo(property);
   }
 
   async updateProperty(propertyId: number, hostId: number, data: UpdatePropertyDto): Promise<PropertyInfo> {
-    const existingProperty = await prisma.property.findFirst({
-      where: { id: propertyId, hostId }
-    });
+  const existingProperty = await prisma.property.findFirst({
+    where: { id: propertyId, hostId }
+  });
 
-    if (!existingProperty) {
-      throw new Error('Property not found or access denied');
-    }
-
-    let updatedImages = existingProperty.images || undefined; // Convert null to undefined
-    if (data.images) {
-      // Fix: safely parse JSON with null check
-      const currentImages = existingProperty.images 
-        ? JSON.parse(existingProperty.images as string) 
-        : {};
-      updatedImages = JSON.stringify({ ...currentImages, ...data.images });
-    }
-
-    const property = await prisma.property.update({
-      where: { id: propertyId },
-      data: {
-        ...(data.name && { name: data.name }),
-        ...(data.location && { location: data.location }),
-        ...(data.type && { type: data.type }),
-        ...(data.category && { category: data.category }),
-        ...(data.pricePerNight && { pricePerNight: data.pricePerNight }),
-        ...(data.pricePerTwoNights && { pricePerTwoNights: data.pricePerTwoNights }),
-        ...(data.beds && { beds: data.beds }),
-        ...(data.baths && { baths: data.baths }),
-        ...(data.maxGuests && { maxGuests: data.maxGuests }),
-        ...(data.features && { features: JSON.stringify(data.features) }),
-        ...(data.description && { description: data.description }),
-        ...(data.video3D && { video3D: data.video3D }),
-        ...(data.status && { status: data.status }),
-        ...(data.availabilityDates && {
-          availableFrom: new Date(data.availabilityDates.start),
-          availableTo: new Date(data.availabilityDates.end)
-        }),
-        ...(updatedImages !== undefined && { images: updatedImages })
-      },
-      include: {
-        host: true,
-        reviews: true,
-        bookings: true
-      }
-    });
-
-    return this.transformToPropertyInfo(property);
+  if (!existingProperty) {
+    throw new Error('Property not found or access denied');
   }
+
+  // Handle location updates
+  let locationUpdates: any = {};
+  if (data.location) {
+    if (typeof data.location === 'object' && data.location.type) {
+      if (data.location.type === 'upi') {
+        locationUpdates = {
+          location: `UPI: ${data.location.upi}`,
+          upiNumber: data.location.upi,
+          propertyAddress: null // Clear address when switching to UPI
+        };
+      } else if (data.location.type === 'address') {
+        locationUpdates = {
+          location: data.location.address,
+          propertyAddress: data.location.address,
+          upiNumber: null // Clear UPI when switching to address
+        };
+      }
+    } else if (typeof data.location === 'string') {
+      locationUpdates = {
+        location: data.location
+      };
+    }
+  }
+
+  let updatedImages = existingProperty.images || undefined;
+  if (data.images) {
+    const currentImages = existingProperty.images 
+      ? JSON.parse(existingProperty.images as string) 
+      : {};
+    updatedImages = JSON.stringify({ ...currentImages, ...data.images });
+  }
+
+  const property = await prisma.property.update({
+    where: { id: propertyId },
+    data: {
+      ...(data.name && { name: data.name }),
+      ...locationUpdates, // Apply location updates
+      ...(data.type && { type: data.type }),
+      ...(data.category && { category: data.category }),
+      ...(data.pricePerNight && { pricePerNight: data.pricePerNight }),
+      ...(data.pricePerTwoNights && { pricePerTwoNights: data.pricePerTwoNights }),
+      ...(data.beds && { beds: data.beds }),
+      ...(data.baths && { baths: data.baths }),
+      ...(data.maxGuests && { maxGuests: data.maxGuests }),
+      ...(data.features && { features: JSON.stringify(data.features) }),
+      ...(data.description && { description: data.description }),
+      ...(data.video3D && { video3D: data.video3D }),
+      ...(data.status && { status: data.status }),
+      ...(data.availabilityDates && {
+        availableFrom: new Date(data.availabilityDates.start),
+        availableTo: new Date(data.availabilityDates.end)
+      }),
+      ...(updatedImages !== undefined && { images: updatedImages })
+    },
+    include: {
+      host: true,
+      reviews: true,
+      bookings: true
+    }
+  });
+
+  return this.transformToPropertyInfo(property);
+}
 
   async deleteProperty(propertyId: number, hostId: number): Promise<void> {
     const property = await prisma.property.findFirst({
@@ -447,6 +515,35 @@ export class PropertyService {
     // Update property average rating
     await this.updatePropertyRating(data.propertyId);
 
+    try {
+      // Get property and host info for email
+      const propertyWithHost = await prisma.property.findUnique({
+        where: { id: data.propertyId },
+        include: { host: true }
+      });
+
+      if (propertyWithHost) {
+        await this.emailService.sendNewReviewNotificationEmail({
+          host: {
+            firstName: propertyWithHost.host.firstName,
+            lastName: propertyWithHost.host.lastName,
+            email: propertyWithHost.host.email,
+            id: propertyWithHost.hostId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/logo.png'
+          },
+          property: await this.transformToPropertyInfo(propertyWithHost),
+          review: this.transformToPropertyReview(review)
+        });
+      }
+    } catch (emailError) {
+      console.error('Failed to send new review notification email:', emailError);
+    }
+
     return this.transformToPropertyReview(review);
   }
 
@@ -573,6 +670,8 @@ export class PropertyService {
       id: property.id,
       name: property.name,
       location: property.location,
+      upiNumber: property.upiNumber,
+      propertyAddress: property.propertyAddress,
       type: property.type,
       category: property.category,
       pricePerNight: property.pricePerNight,
@@ -838,6 +937,28 @@ export class PropertyService {
       }
     });
 
+    try {
+      // Send status update email when status changes
+      await this.emailService.sendPropertyStatusUpdateEmail({
+        host: {
+          firstName: updatedProperty.host.firstName,
+          lastName: updatedProperty.host.lastName,
+          email: updatedProperty.host.email,
+          id: updatedProperty.hostId
+        },
+        company: {
+          name: 'Jambolush',
+          website: 'https://jambolush.com',
+          supportEmail: 'support@jambolush.com',
+          logo: 'https://jambolush.com/logo.png'
+        },
+        property: await this.transformToPropertyInfo(updatedProperty),
+        newStatus: status as 'active' | 'pending' | 'rejected' | 'inactive'
+      });
+    } catch (emailError) {
+      console.error('Failed to send property status update email:', emailError);
+    }
+
     return this.transformToPropertyInfo(updatedProperty);
   }
 
@@ -854,6 +975,57 @@ export class PropertyService {
     });
 
     return properties.map((p: { location: any; }) => p.location);
+  }
+
+// --- ADMIN PROPERTY MANAGEMENT ---
+  async updatePropertyStatusByAdmin(propertyId: number, status: 'active' | 'pending' | 'rejected' | 'inactive', rejectionReason?: string): Promise<PropertyInfo> {
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      include: {
+        host: true,
+        reviews: true,
+        bookings: true
+      }
+    });
+
+    if (!property) {
+      throw new Error('Property not found');
+    }
+
+    const updatedProperty = await prisma.property.update({
+      where: { id: propertyId },
+      data: { status },
+      include: {
+        host: true,
+        reviews: true,
+        bookings: true
+      }
+    });
+
+    // Send status update email
+    try {
+      await this.emailService.sendPropertyStatusUpdateEmail({
+        host: {
+          firstName: updatedProperty.host.firstName,
+          lastName: updatedProperty.host.lastName,
+          email: updatedProperty.host.email,
+          id: updatedProperty.hostId
+        },
+        company: {
+          name: 'Jambolush',
+          website: 'https://jambolush.com',
+          supportEmail: 'support@jambolush.com',
+          logo: 'https://jambolush.com/logo.png'
+        },
+        property: await this.transformToPropertyInfo(updatedProperty),
+        newStatus: status,
+        rejectionReason
+      });
+    } catch (emailError) {
+      console.error('Failed to send property status update email:', emailError);
+    }
+
+    return this.transformToPropertyInfo(updatedProperty);
   }
 
   // --- FEATURED PROPERTIES ---
@@ -1749,18 +1921,12 @@ private async getAgentMonthlyCommissions(agentId: number): Promise<MonthlyCommis
 async getAgentProperties(agentId: number, filters: any, page: number = 1, limit: number = 20) {
   const skip = (page - 1) * limit;
   
+  
   const whereClause: any = {
-    host: {
-      clientBookings: {
-        some: {
-          agentId,
-          status: 'active'
-        }
-      }
-    }
+    hostId: agentId  // or uploadedBy: agentId, depending on your schema
   };
 
-  // Apply filters
+  // Apply filters (same as before)
   if (filters.clientId) {
     whereClause.hostId = filters.clientId;
   }
@@ -1774,6 +1940,7 @@ async getAgentProperties(agentId: number, filters: any, page: number = 1, limit:
     ];
   }
 
+  // Sorting logic (same as before)
   const orderBy: any = {};
   if (filters.sortBy) {
     switch (filters.sortBy) {
@@ -1814,14 +1981,14 @@ async getAgentProperties(agentId: number, filters: any, page: number = 1, limit:
     prisma.property.count({ where: whereClause })
   ]);
 
+  // Transform properties (simplified since no commission calculation needed)
   const transformedProperties = await Promise.all(
     properties.map(async (property: any) => {
-      const commission = await this.getAgentPropertyCommission(agentId, property.hostId);
       return {
         ...await this.transformToPropertyInfo(property),
         hostEmail: property.host.email,
         totalRevenue: property.bookings.reduce((sum: number, b: any) => sum + b.totalPrice, 0),
-        agentCommission: commission
+   
       };
     })
   );
