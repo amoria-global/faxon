@@ -157,6 +157,8 @@ model Property {
   // Basic Information
   name        String
   location    String
+  upiNumber    String?
+  propertyAddress     String?
   type        String // apartment, house, villa, condo, townhouse, studio, loft
   category    String // entire_place, private_room, shared_room
   description String?

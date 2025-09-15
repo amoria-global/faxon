@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
+import { BrevoPaymentMailingService } from '../utils/brevo.payment';
 import { config } from '../config/config';
 import {
   DepositDto,
@@ -39,6 +40,7 @@ export class PaymentService {
   private jengaClient: AxiosInstance;
   private jengaConfig: JengaConfig;
   private jengaCredentials: JengaCredentials = {};
+  private emailService = new BrevoPaymentMailingService();
 
   constructor() {
     this.jengaConfig = {
@@ -1000,12 +1002,42 @@ export class PaymentService {
         }
       });
 
-      return bankAccount;
-    } catch (error: any) {
-      console.error('Error adding bank account:', error);
-      throw error;
+      try {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true, firstName: true, lastName: true }
+      });
+
+      if (user) {
+        await this.emailService.sendPaymentMethodAddedEmail({
+          user: {
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            id: userId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/logo.png'
+          },
+          paymentMethod: {
+            type: 'Bank Account',
+            details: `${accountData.bankName} ending in ••••${accountData.accountNumber.slice(-4)}`
+          }
+        });
+      }
+    } catch (emailError) {
+      console.error('Failed to send payment method added email:', emailError);
     }
+
+    return bankAccount;
+  } catch (error: any) {
+    console.error('Error adding bank account:', error);
+    throw error;
   }
+}
 
   async getUserBankAccounts(userId: number) {
     return await prisma.bankAccount.findMany({
@@ -1370,84 +1402,74 @@ export class PaymentService {
   }
 
   private async sendTransactionNotification(userId: number, transactionId: string, status: TransactionStatus) {
-    try {
-      // Get user details
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { email: true, firstName: true, lastName: true, phone: true }
-      });
+  try {
+    // Get user details
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, firstName: true, lastName: true, phone: true }
+    });
 
-      if (!user) return;
+    if (!user) return;
 
-      // Get payment settings
-      const settings = await this.getPaymentSettings(userId);
-      const notificationPrefs = settings.notificationPreferences;
+    // Get payment settings
+    const settings = await this.getPaymentSettings(userId);
+    const notificationPrefs = settings.notificationPreferences;
 
-      // Get transaction details
-      const transaction = await this.getTransactionById(transactionId, userId);
-      if (!transaction) return;
+    // Get transaction details
+    const transaction = await this.getTransactionById(transactionId, userId);
+    if (!transaction) return;
 
-      const message = this.buildNotificationMessage(transaction, status);
-
-      // Send email notification
-      if (notificationPrefs.emailNotifications) {
-        await this.sendEmailNotification(user.email, message.subject, message.body);
+    // Send email notification using Brevo
+    if (notificationPrefs.emailNotifications) {
+      try {
+        await this.emailService.sendTransactionStatusEmail({
+          user: {
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            id: userId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/logo.png'
+          },
+          transaction
+        });
+      } catch (emailError) {
+        console.error('Failed to send transaction email:', emailError);
       }
-
-      // Send SMS notification
-      if (notificationPrefs.smsNotifications && user.phone) {
-        await this.sendSMSNotification(user.phone, message.sms);
-      }
-
-      // Log notification sent
-      console.log(`Notification sent to user ${userId} for transaction ${transactionId}: ${status}`);
-
-    } catch (error: any) {
-      console.error('Error sending transaction notification:', error);
-    }
-  }
-
-  private buildNotificationMessage(transaction: PaymentTransaction, status: TransactionStatus) {
-    const amount = `KES ${transaction.amount.toFixed(2)}`;
-    const reference = transaction.reference;
-
-    let subject = '';
-    let body = '';
-    let sms = '';
-
-    switch (status) {
-      case 'completed':
-        subject = `${transaction.type.charAt(0).toUpperCase() + transaction.type.slice(1)} Successful`;
-        body = `Your ${transaction.type} of ${amount} (Ref: ${reference}) has been completed successfully.`;
-        sms = `${transaction.type.toUpperCase()} SUCCESS: ${amount} (${reference}). Thank you for using our service.`;
-        break;
-      
-      case 'failed':
-        subject = `${transaction.type.charAt(0).toUpperCase() + transaction.type.slice(1)} Failed`;
-        body = `Your ${transaction.type} of ${amount} (Ref: ${reference}) has failed. ${transaction.failureReason || 'Please try again or contact support.'}`;
-        sms = `${transaction.type.toUpperCase()} FAILED: ${amount} (${reference}). Please try again.`;
-        break;
-      
-      case 'processing':
-        subject = `${transaction.type.charAt(0).toUpperCase() + transaction.type.slice(1)} Processing`;
-        body = `Your ${transaction.type} of ${amount} (Ref: ${reference}) is being processed. You will be notified once complete.`;
-        sms = `${transaction.type.toUpperCase()} PROCESSING: ${amount} (${reference}). Please wait for confirmation.`;
-        break;
-
-      default:
-        subject = `${transaction.type.charAt(0).toUpperCase() + transaction.type.slice(1)} Update`;
-        body = `Your ${transaction.type} of ${amount} (Ref: ${reference}) status: ${status}.`;
-        sms = `${transaction.type.toUpperCase()}: ${amount} (${reference}) - ${status.toUpperCase()}.`;
     }
 
-    return { subject, body, sms };
-  }
+    // Send SMS notification (keep existing SMS logic)
+    if (notificationPrefs.smsNotifications && user.phone) {
+      await this.sendSMSNotification(user.phone, this.buildSMSMessage(transaction, status));
+    }
 
-  private async sendEmailNotification(email: string, subject: string, body: string) {
-    // Implement email sending logic here
-    // This could integrate with services like SendGrid, AWS SES, etc.
-    console.log(`EMAIL to ${email}: ${subject} - ${body}`);
+    console.log(`Transaction notification sent to user ${userId} for transaction ${transactionId}: ${status}`);
+
+  } catch (error: any) {
+    console.error('Error sending transaction notification:', error);
   }
+}
+
+// Helper method for SMS (since we're keeping SMS separate from email)
+private buildSMSMessage(transaction: PaymentTransaction, status: TransactionStatus): string {
+  const amount = `KES ${transaction.amount.toFixed(2)}`;
+  const reference = transaction.reference;
+
+  switch (status) {
+    case 'completed':
+      return `${transaction.type.toUpperCase()} SUCCESS: ${amount} (${reference}). Thank you!`;
+    case 'failed':
+      return `${transaction.type.toUpperCase()} FAILED: ${amount} (${reference}). Please try again.`;
+    case 'processing':
+      return `${transaction.type.toUpperCase()} PROCESSING: ${amount} (${reference}). Please wait.`;
+    default:
+      return `${transaction.type.toUpperCase()}: ${amount} (${reference}) - ${status.toUpperCase()}.`;
+  }
+}
 
   private async sendSMSNotification(phone: string, message: string) {
     // Implement SMS sending logic here

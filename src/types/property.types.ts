@@ -1,7 +1,12 @@
 // --- PROPERTY DTOs ---
 export interface CreatePropertyDto {
   name: string;
-  location: string;
+    location: {
+    type: 'upi' | 'address';
+    upi: string;
+    address: string;
+    upiDocument?: string;
+  } | string;
   type: string;
   category: string;
   pricePerNight: number;
@@ -22,7 +27,14 @@ export interface CreatePropertyDto {
 
 export interface UpdatePropertyDto {
   name?: string;
-  location?: string;
+  location?: {
+    type: 'upi' | 'address';
+    upi: string;
+    address: string;
+    upiDocument?: string;
+  };
+  upiNumber?: string;
+  propertyAddress?: string;
   type?: string;
   category?: string;
   pricePerNight?: number;
@@ -65,6 +77,8 @@ export interface PropertyInfo {
   id: number;
   name: string;
   location: string;
+  upiNumber?: string;
+  propertyAddress?: string;
   type: string;
   category: string;
   pricePerNight: number;

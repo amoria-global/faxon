@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { BrevoTourMailingService, TourMailingContext } from '../utils/brevo.tours';
 import {
   CreateTourDto,
   UpdateTourDto,
@@ -35,6 +36,11 @@ import {
 const prisma = new PrismaClient();
 
 export class TourService {
+  private emailService: BrevoTourMailingService;
+
+  constructor() {
+    this.emailService = new BrevoTourMailingService();
+  }
   // --- PUBLIC TOUR OPERATIONS ---
   
   async searchTours(filters: TourSearchFilters, page: number = 1, limit: number = 20) {
@@ -617,8 +623,10 @@ export class TourService {
             title: true,
             tourGuide: {
               select: {
+                id: true,
                 firstName: true,
-                lastName: true
+                lastName: true,
+                email: true
               }
             }
           }
@@ -643,6 +651,31 @@ export class TourService {
       where: { id: bookingData.tourId },
       data: { totalBookings: { increment: 1 } }
     });
+
+    try {
+    if (booking.user && booking.tour.tourGuide) {
+      const emailContext: TourMailingContext = {
+        recipient: {
+          firstName: booking.tour.tourGuide.firstName,
+          lastName: booking.tour.tourGuide.lastName,
+          email: booking.tour.tourGuide.email,
+          id: booking.tour.tourGuide.id
+        },
+        company: {
+          name: 'Jambolush Tours',
+          website: 'https://jambolush.com',
+          supportEmail: 'support@jambolush.com',
+          logo: 'https://jambolush.com/logo.png'
+        },
+        tour: this.formatTourInfo(booking.tour), 
+        booking: this.formatTourBookingInfo(booking)
+      };
+
+      await this.emailService.sendNewBookingRequestEmail(emailContext);
+    }
+  } catch (emailError) {
+    console.error('Failed to send booking request email:', emailError);
+  }
 
     return this.formatTourBookingInfo(booking);
   }
@@ -988,6 +1021,37 @@ export class TourService {
       where: { id: tourGuideId },
       data: { totalTours: { increment: 1 } }
     });
+
+    try {
+      const tourGuide = await prisma.user.findUnique({
+        where: { id: tourGuideId },
+        select: { firstName: true, lastName: true, email: true }
+      });
+
+      if (tourGuide) {
+        const emailContext: TourMailingContext = {
+          recipient: {
+            firstName: tourGuide.firstName,
+            lastName: tourGuide.lastName,
+            email: tourGuide.email,
+            id: tourGuideId
+          },
+          company: {
+            name: 'Jambolush Tours',
+            website: 'https://jambolush.com', // Replace with your domain
+            supportEmail: 'support@jambolush.com', // Replace with your email
+            logo: 'https://jambolush.com/logo.png' // Replace with your logo
+          },
+          tour: this.formatTourInfo(tour)
+        };
+
+        await this.emailService.sendNewTourConfirmationEmail(emailContext);
+      }
+    } catch (emailError) {
+      console.error('Failed to send tour confirmation email:', emailError);
+      // Don't fail the tour creation if email fails
+    }
+
 
     return this.formatTourInfo({ ...tour, schedules: [] });
   }

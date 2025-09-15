@@ -1,210 +1,140 @@
-import axios from 'axios';
-import { config } from '../config/config';
-
-interface BrevoContact {
-  email: string;
-  attributes: {
-    FIRSTNAME?: string;
-    LASTNAME?: string;
-    SMS?: string;
-  };
-  listIds?: number[];
-}
-
-interface BrevoEmailData {
-  sender: {
-    name: string;
-    email: string;
-  };
-  to: Array<{
-    email: string;
-    name?: string;
-  }>;
-  subject: string;
-  htmlContent: string;
-  textContent?: string;
-  templateId?: number;
-  params?: Record<string, any>;
-}
-
-interface MailingContext {
-  user: {
-    firstName: string;
-    lastName: string;
-    email: string;
-    id: number;
-  };
-  company: {
-    name: string;
-    website: string;
-    supportEmail: string;
-    logo: string;
-  };
-  security?: {
-    device?: string;
-    browser?: string;
-    location?: string;
-    ipAddress?: string;
-    timestamp: string;
-  };
-  verification?: {
-    code: string;
-    expiresIn: string;
-  };
-}
-
-export class BrevoMailingService {
-  private apiKey: string;
-  private apiUrl = 'https://api.brevo.com/v3';
-  private defaultSender: { name: string; email: string };
-
-  constructor() {
-    this.apiKey = config.brevoApiKey;
-    this.defaultSender = {
-      name: 'Jambolush Security',
-      email: config.brevoSenderEmail
-    };
-  }
-
-  private async makeRequest(endpoint: string, data: any, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST') {
-    try {
-      const response = await axios({
-        method,
-        url: `${this.apiUrl}${endpoint}`,
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'api-key': this.apiKey
-        },
-        data
-      });
-      return response.data;
-    } catch (error: any) {
-      console.error('Brevo API Error:', error.response?.data || error.message);
-      throw new Error(`Failed to send email: ${error.response?.data?.message || error.message}`);
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BrevoMailingService = void 0;
+const axios_1 = __importDefault(require("axios"));
+const config_1 = require("../config/config");
+class BrevoMailingService {
+    constructor() {
+        this.apiUrl = 'https://api.brevo.com/v3';
+        this.apiKey = config_1.config.brevoApiKey;
+        this.defaultSender = {
+            name: 'Jambolush Security',
+            email: config_1.config.brevoSenderEmail
+        };
     }
-  }
-
-  // --- CONTACT MANAGEMENT ---
-  async createOrUpdateContact(contact: BrevoContact): Promise<void> {
-    await this.makeRequest('/contacts', contact, 'POST');
-  }
-
-  // --- EMAIL SENDING METHODS ---
-  async sendTransactionalEmail(emailData: BrevoEmailData): Promise<string> {
-    const response = await this.makeRequest('/smtp/email', emailData);
-    return response.messageId;
-  }
-
-  // --- AUTHENTICATION EMAIL METHODS ---
-
-  async sendWelcomeEmail(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `Welcome to ${context.company.name} - Your Journey Begins Here!`,
-      htmlContent: this.getWelcomeTemplate(context),
-      textContent: this.getWelcomeTextTemplate(context)
-    };
-
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Welcome email sent to ${context.user.email}`);
-  }
-
-  async sendEmailVerification(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `Verify Your ${context.company.name} Account`,
-      htmlContent: this.getEmailVerificationTemplate(context),
-      textContent: this.getEmailVerificationTextTemplate(context)
-    };
-
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Email verification sent to ${context.user.email}`);
-  }
-
-  async sendPasswordResetOTP(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `Your ${context.company.name} Password Reset Code`,
-      htmlContent: this.getPasswordResetTemplate(context),
-      textContent: this.getPasswordResetTextTemplate(context)
-    };
-
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Password reset OTP sent to ${context.user.email}`);
-  }
-
-  async sendPasswordChangedNotification(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `${context.company.name} Password Changed Successfully`,
-      htmlContent: this.getPasswordChangedTemplate(context),
-      textContent: this.getPasswordChangedTextTemplate(context)
-    };
-
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Password changed notification sent to ${context.user.email}`);
-  }
-
-  async sendLoginNotification(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `New Login to Your ${context.company.name} Account`,
-      htmlContent: this.getLoginNotificationTemplate(context),
-      textContent: this.getLoginNotificationTextTemplate(context)
-    };
-
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Login notification sent to ${context.user.email}`);
-  }
-
-  async sendSuspiciousActivityAlert(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `Suspicious Activity Detected - ${context.company.name} Security Alert`,
-      htmlContent: this.getSuspiciousActivityTemplate(context),
-      textContent: this.getSuspiciousActivityTextTemplate(context)
-    };
-
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Suspicious activity alert sent to ${context.user.email}`);
-  }
-
-  async sendAccountStatusChange(context: MailingContext, status: 'suspended' | 'reactivated'): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `${status === 'suspended' ? 'Account Suspended' : 'Account Reactivated'} - ${context.company.name}`,
-      htmlContent: this.getAccountStatusTemplate(context, status),
-      textContent: this.getAccountStatusTextTemplate(context, status)
-    };
-
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Account ${status} notification sent to ${context.user.email}`);
-  }
-
-  async sendProfileUpdateNotification(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `Profile Updated - ${context.company.name}`,
-      htmlContent: this.getProfileUpdateTemplate(context),
-      textContent: this.getProfileUpdateTextTemplate(context)
-    };
-
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Profile update notification sent to ${context.user.email}`);
-  }
-
-  // --- MODERNIZED EMAIL TEMPLATES ---
-  private getBaseTemplate(): string {
-    return `
+    async makeRequest(endpoint, data, method = 'POST') {
+        try {
+            const response = await (0, axios_1.default)({
+                method,
+                url: `${this.apiUrl}${endpoint}`,
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'api-key': this.apiKey
+                },
+                data
+            });
+            return response.data;
+        }
+        catch (error) {
+            console.error('Brevo API Error:', error.response?.data || error.message);
+            throw new Error(`Failed to send email: ${error.response?.data?.message || error.message}`);
+        }
+    }
+    // --- CONTACT MANAGEMENT ---
+    async createOrUpdateContact(contact) {
+        await this.makeRequest('/contacts', contact, 'POST');
+    }
+    // --- EMAIL SENDING METHODS ---
+    async sendTransactionalEmail(emailData) {
+        const response = await this.makeRequest('/smtp/email', emailData);
+        return response.messageId;
+    }
+    // --- AUTHENTICATION EMAIL METHODS ---
+    async sendWelcomeEmail(context) {
+        const emailData = {
+            sender: this.defaultSender,
+            to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+            subject: `Welcome to ${context.company.name} - Your Journey Begins Here!`,
+            htmlContent: this.getWelcomeTemplate(context),
+            textContent: this.getWelcomeTextTemplate(context)
+        };
+        await this.sendTransactionalEmail(emailData);
+        console.log(`Welcome email sent to ${context.user.email}`);
+    }
+    async sendEmailVerification(context) {
+        const emailData = {
+            sender: this.defaultSender,
+            to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+            subject: `Verify Your ${context.company.name} Account`,
+            htmlContent: this.getEmailVerificationTemplate(context),
+            textContent: this.getEmailVerificationTextTemplate(context)
+        };
+        await this.sendTransactionalEmail(emailData);
+        console.log(`Email verification sent to ${context.user.email}`);
+    }
+    async sendPasswordResetOTP(context) {
+        const emailData = {
+            sender: this.defaultSender,
+            to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+            subject: `Your ${context.company.name} Password Reset Code`,
+            htmlContent: this.getPasswordResetTemplate(context),
+            textContent: this.getPasswordResetTextTemplate(context)
+        };
+        await this.sendTransactionalEmail(emailData);
+        console.log(`Password reset OTP sent to ${context.user.email}`);
+    }
+    async sendPasswordChangedNotification(context) {
+        const emailData = {
+            sender: this.defaultSender,
+            to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+            subject: `${context.company.name} Password Changed Successfully`,
+            htmlContent: this.getPasswordChangedTemplate(context),
+            textContent: this.getPasswordChangedTextTemplate(context)
+        };
+        await this.sendTransactionalEmail(emailData);
+        console.log(`Password changed notification sent to ${context.user.email}`);
+    }
+    async sendLoginNotification(context) {
+        const emailData = {
+            sender: this.defaultSender,
+            to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+            subject: `New Login to Your ${context.company.name} Account`,
+            htmlContent: this.getLoginNotificationTemplate(context),
+            textContent: this.getLoginNotificationTextTemplate(context)
+        };
+        await this.sendTransactionalEmail(emailData);
+        console.log(`Login notification sent to ${context.user.email}`);
+    }
+    async sendSuspiciousActivityAlert(context) {
+        const emailData = {
+            sender: this.defaultSender,
+            to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+            subject: `Suspicious Activity Detected - ${context.company.name} Security Alert`,
+            htmlContent: this.getSuspiciousActivityTemplate(context),
+            textContent: this.getSuspiciousActivityTextTemplate(context)
+        };
+        await this.sendTransactionalEmail(emailData);
+        console.log(`Suspicious activity alert sent to ${context.user.email}`);
+    }
+    async sendAccountStatusChange(context, status) {
+        const emailData = {
+            sender: this.defaultSender,
+            to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+            subject: `${status === 'suspended' ? 'Account Suspended' : 'Account Reactivated'} - ${context.company.name}`,
+            htmlContent: this.getAccountStatusTemplate(context, status),
+            textContent: this.getAccountStatusTextTemplate(context, status)
+        };
+        await this.sendTransactionalEmail(emailData);
+        console.log(`Account ${status} notification sent to ${context.user.email}`);
+    }
+    async sendProfileUpdateNotification(context) {
+        const emailData = {
+            sender: this.defaultSender,
+            to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+            subject: `Profile Updated - ${context.company.name}`,
+            htmlContent: this.getProfileUpdateTemplate(context),
+            textContent: this.getProfileUpdateTextTemplate(context)
+        };
+        await this.sendTransactionalEmail(emailData);
+        console.log(`Profile update notification sent to ${context.user.email}`);
+    }
+    // --- MODERNIZED EMAIL TEMPLATES ---
+    getBaseTemplate() {
+        return `
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         
@@ -517,10 +447,9 @@ export class BrevoMailingService {
         }
       </style>
     `;
-  }
-
-  private getWelcomeTemplate(context: MailingContext): string {
-    return `
+    }
+    getWelcomeTemplate(context) {
+        return `
       <!DOCTYPE html>
       <html>
       <head>
@@ -593,10 +522,9 @@ export class BrevoMailingService {
       </body>
       </html>
     `;
-  }
-
-  private getEmailVerificationTemplate(context: MailingContext): string {
-    return `
+    }
+    getEmailVerificationTemplate(context) {
+        return `
       <!DOCTYPE html>
       <html>
       <head>
@@ -660,10 +588,9 @@ export class BrevoMailingService {
       </body>
       </html>
     `;
-  }
-
-  private getPasswordResetTemplate(context: MailingContext): string {
-    return `
+    }
+    getPasswordResetTemplate(context) {
+        return `
       <!DOCTYPE html>
       <html>
       <head>
@@ -754,10 +681,9 @@ export class BrevoMailingService {
       </body>
       </html>
     `;
-  }
-
-  private getPasswordChangedTemplate(context: MailingContext): string {
-    return `
+    }
+    getPasswordChangedTemplate(context) {
+        return `
       <!DOCTYPE html>
       <html>
       <head>
@@ -847,10 +773,9 @@ export class BrevoMailingService {
       </body>
       </html>
     `;
-  }
-
-  private getLoginNotificationTemplate(context: MailingContext): string {
-    return `
+    }
+    getLoginNotificationTemplate(context) {
+        return `
       <!DOCTYPE html>
       <html>
       <head>
@@ -947,10 +872,9 @@ export class BrevoMailingService {
       </body>
       </html>
     `;
-  }
-
-  private getSuspiciousActivityTemplate(context: MailingContext): string {
-    return `
+    }
+    getSuspiciousActivityTemplate(context) {
+        return `
       <!DOCTYPE html>
       <html>
       <head>
@@ -1054,14 +978,12 @@ export class BrevoMailingService {
       </body>
       </html>
     `;
-  }
-
-  private getAccountStatusTemplate(context: MailingContext, status: 'suspended' | 'reactivated'): string {
-    const isSuspended = status === 'suspended';
-    const headerClass = isSuspended ? 'header-critical' : '';
-    const title = isSuspended ? 'Account Suspended' : 'Account Reactivated';
-    
-    return `
+    }
+    getAccountStatusTemplate(context, status) {
+        const isSuspended = status === 'suspended';
+        const headerClass = isSuspended ? 'header-critical' : '';
+        const title = isSuspended ? 'Account Suspended' : 'Account Reactivated';
+        return `
       <!DOCTYPE html>
       <html>
       <head>
@@ -1168,10 +1090,9 @@ export class BrevoMailingService {
       </body>
       </html>
     `;
-  }
-
-  private getProfileUpdateTemplate(context: MailingContext): string {
-    return `
+    }
+    getProfileUpdateTemplate(context) {
+        return `
       <!DOCTYPE html>
       <html>
       <head>
@@ -1266,11 +1187,10 @@ export class BrevoMailingService {
       </body>
       </html>
     `;
-  }
-
-  // --- TEXT TEMPLATES FOR FALLBACK ---
-  private getWelcomeTextTemplate(context: MailingContext): string {
-    return `
+    }
+    // --- TEXT TEMPLATES FOR FALLBACK ---
+    getWelcomeTextTemplate(context) {
+        return `
 Welcome to ${context.company.name}, ${context.user.firstName}!
 
 We're thrilled to have you join our community. Your account has been successfully created and you're now part of something extraordinary.
@@ -1282,10 +1202,9 @@ Need help? Visit our support center: ${context.company.website}/support
 © ${new Date().getFullYear()} ${context.company.name}
 This email was sent to ${context.user.email}
     `.trim();
-  }
-
-  private getEmailVerificationTextTemplate(context: MailingContext): string {
-    return `
+    }
+    getEmailVerificationTextTemplate(context) {
+        return `
 Email Verification - ${context.company.name}
 
 Hi ${context.user.firstName}, please verify your email address using the code below:
@@ -1299,10 +1218,9 @@ If you didn't create this account, please ignore this email.
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
-  }
-
-  private getPasswordResetTextTemplate(context: MailingContext): string {
-    return `
+    }
+    getPasswordResetTextTemplate(context) {
+        return `
 Password Reset - ${context.company.name}
 
 Hi ${context.user.firstName}, use this code to reset your password:
@@ -1316,10 +1234,9 @@ If you didn't request this, please ignore this email or contact support at ${con
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
-  }
-
-  private getPasswordChangedTextTemplate(context: MailingContext): string {
-    return `
+    }
+    getPasswordChangedTextTemplate(context) {
+        return `
 Password Changed - ${context.company.name}
 
 Hi ${context.user.firstName}, your password was successfully changed.
@@ -1332,10 +1249,9 @@ Sign in: ${context.company.website}/login
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
-  }
-
-  private getLoginNotificationTextTemplate(context: MailingContext): string {
-    return `
+    }
+    getLoginNotificationTextTemplate(context) {
+        return `
 New Login Detected - ${context.company.name}
 
 Hi ${context.user.firstName}, we detected a new sign-in to your account.
@@ -1349,10 +1265,9 @@ ${context.company.website}/security
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
-  }
-
-  private getSuspiciousActivityTextTemplate(context: MailingContext): string {
-    return `
+    }
+    getSuspiciousActivityTextTemplate(context) {
+        return `
 SECURITY ALERT - ${context.company.name}
 
 ${context.user.firstName}, suspicious activity detected on your account.
@@ -1366,30 +1281,26 @@ Emergency support: ${context.company.supportEmail}
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
-  }
-
-  private getAccountStatusTextTemplate(context: MailingContext, status: 'suspended' | 'reactivated'): string {
-    const action = status === 'suspended' ? 'suspended' : 'reactivated';
-    const url = status === 'suspended' ? '/appeal' : '/login';
-    
-    return `
+    }
+    getAccountStatusTextTemplate(context, status) {
+        const action = status === 'suspended' ? 'suspended' : 'reactivated';
+        const url = status === 'suspended' ? '/appeal' : '/login';
+        return `
 Account ${action.toUpperCase()} - ${context.company.name}
 
 Hi ${context.user.firstName}, your account has been ${action}.
 
-${status === 'suspended' 
-  ? `Your account access has been temporarily restricted. Submit an appeal: ${context.company.website}${url}`
-  : `Welcome back! Your account is now active. Sign in: ${context.company.website}${url}`
-}
+${status === 'suspended'
+            ? `Your account access has been temporarily restricted. Submit an appeal: ${context.company.website}${url}`
+            : `Welcome back! Your account is now active. Sign in: ${context.company.website}${url}`}
 
 Questions? Contact support: ${context.company.supportEmail}
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
-  }
-
-  private getProfileUpdateTextTemplate(context: MailingContext): string {
-    return `
+    }
+    getProfileUpdateTextTemplate(context) {
+        return `
 Profile Updated - ${context.company.name}
 
 Hi ${context.user.firstName}, your profile has been successfully updated.
@@ -1402,5 +1313,6 @@ If you didn't make these changes, report it: ${context.company.supportEmail}
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
-  }
+    }
 }
+exports.BrevoMailingService = BrevoMailingService;

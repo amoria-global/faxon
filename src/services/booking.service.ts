@@ -1,5 +1,6 @@
 //src/services/booking.service.ts
 import { PrismaClient } from '@prisma/client';
+import { BrevoBookingMailingService } from '../utils/brevo.booking';
 import {
   CreatePropertyBookingDto,
   UpdatePropertyBookingDto,
@@ -27,6 +28,7 @@ import {
 const prisma = new PrismaClient();
 
 export class BookingService {
+  private emailService = new BrevoBookingMailingService();
 
   // --- PROPERTY BOOKING METHODS ---
   async createPropertyBooking(userId: number, data: CreatePropertyBookingDto): Promise<PropertyBookingInfo> {
@@ -142,6 +144,47 @@ export class BookingService {
       data: { totalBookings: { increment: 1 } }
     });
 
+try {
+      // Send confirmation email to guest
+      await this.emailService.sendBookingConfirmationEmail({
+        user: {
+          firstName: booking.guest.firstName,
+          lastName: booking.guest.lastName,
+          email: booking.guest.email,
+          id: booking.guestId
+        },
+        company: {
+          name: 'Jambolush',
+          website: 'https://jambolush.com',
+          supportEmail: 'support@jambolush.com',
+          logo: 'https://jambolush.com/logo.png'
+        },
+        booking: this.transformToPropertyBookingInfo(booking),
+        recipientType: 'guest'
+      });
+
+      // Send notification to host
+      await this.emailService.sendNewBookingNotification({
+        user: {
+          firstName: booking.property.host.firstName,
+          lastName: booking.property.host.lastName,
+          email: booking.property.host.email,
+          id: booking.property.hostId
+        },
+        company: {
+          name: 'Jambolush',
+          website: 'https://jambolush.com',
+          supportEmail: 'support@jambolush.com',
+          logo: 'https://jambolush.com/logo.png'
+        },
+        booking: this.transformToPropertyBookingInfo(booking),
+        recipientType: 'host'
+      });
+    } catch (emailError) {
+      console.error('Failed to send property booking emails:', emailError);
+      // Don't fail the booking if email fails
+    }
+
     return this.transformToPropertyBookingInfo(booking);
   }
 
@@ -196,6 +239,32 @@ export class BookingService {
         guest: true
       }
     });
+
+    // ADD THIS EMAIL INTEGRATION FOR CANCELLATIONS:
+    if (data.status === 'cancelled') {
+      try {
+        await this.emailService.sendBookingCancellationEmail({
+          user: {
+            firstName: updatedBooking.guest.firstName,
+            lastName: updatedBooking.guest.lastName,
+            email: updatedBooking.guest.email,
+            id: updatedBooking.guestId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/logo.png'
+          },
+          booking: this.transformToPropertyBookingInfo(updatedBooking),
+          recipientType: 'guest',
+          cancellationReason: data.message || 'Booking has been cancelled as requested.'
+        });
+      } catch (emailError) {
+        console.error('Failed to send cancellation email:', emailError);
+      }
+    }
+    // END EMAIL INTEGRATION CODE
 
     return this.transformToPropertyBookingInfo(updatedBooking);
   }
@@ -345,10 +414,52 @@ export class BookingService {
     });
 
     // Update tour total bookings
-    await prisma.tour.update({
+     await prisma.tour.update({
       where: { id: data.tourId },
       data: { totalBookings: { increment: 1 } }
     });
+
+    // ADD THIS EMAIL INTEGRATION CODE HERE:
+    try {
+      // Send confirmation email to guest
+      await this.emailService.sendBookingConfirmationEmail({
+        user: {
+          firstName: booking.user.firstName,
+          lastName: booking.user.lastName,
+          email: booking.user.email,
+          id: booking.userId
+        },
+        company: {
+          name: 'Jambolush',
+          website: 'https://jambolush.com',
+          supportEmail: 'support@jambolush.com',
+          logo: 'https://jambolush.com/logo.png'
+        },
+        booking: this.transformToTourBookingInfo(booking),
+        recipientType: 'guest'
+      });
+
+      // Send notification to tour guide
+      await this.emailService.sendNewBookingNotification({
+        user: {
+          firstName: booking.tour.tourGuide.firstName,
+          lastName: booking.tour.tourGuide.lastName,
+          email: booking.tour.tourGuide.email,
+          id: booking.tourGuideId
+        },
+        company: {
+          name: 'Jambolush',
+          website: 'https://jambolush.com',
+          supportEmail: 'support@jambolush.com',
+          logo: 'https://jambolush.com/logo.png'
+        },
+        booking: this.transformToTourBookingInfo(booking),
+        recipientType: 'guide'
+      });
+    } catch (emailError) {
+      console.error('Failed to send tour booking emails:', emailError);
+      // Don't fail the booking if email fails
+    }
 
     return this.transformToTourBookingInfo(booking);
   }
@@ -401,6 +512,7 @@ export class BookingService {
     if (data.checkInStatus === 'checked_in' && !booking.checkInTime) {
       updateData.checkInTime = new Date();
     }
+
     if (data.checkInStatus === 'checked_out' && !booking.checkOutTime) {
       updateData.checkOutTime = new Date();
     }
@@ -416,6 +528,30 @@ export class BookingService {
         user: true
       }
     });
+
+    if (data.status === 'cancelled') {
+      try {
+        await this.emailService.sendBookingCancellationEmail({
+          user: {
+            firstName: updatedBooking.user.firstName,
+            lastName: updatedBooking.user.lastName,
+            email: updatedBooking.user.email,
+            id: updatedBooking.userId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/logo.png'
+          },
+          booking: this.transformToTourBookingInfo(updatedBooking),
+          recipientType: 'guest',
+          cancellationReason: data.specialRequests || 'Tour booking has been cancelled as requested.'
+        });
+      } catch (emailError) {
+        console.error('Failed to send tour cancellation email:', emailError);
+      }
+    }
 
     return this.transformToTourBookingInfo(updatedBooking);
   }
