@@ -8,7 +8,8 @@ import {
   validateBookingUpdate,
   validateAgent,
   validateBookingAccess,
-  validateWishlistItem
+  validateWishlistItem,
+  validateWishlistFilters
 } from '../middleware/booking.middleware';
 
 const router = Router();
@@ -65,7 +66,37 @@ router.get('/stats', bookingController.getBookingStats);
 
 // --- WISHLIST ROUTES ---
 // Add item to wishlist
-router.post('/wishlist', validateWishlistItem, bookingController.addToWishlist);
+router.post('/wishlist', 
+  authenticate, 
+  validateWishlistItem, 
+  bookingController.addToWishlist
+);
+
+router.get('/wishlist', 
+  authenticate, 
+  validateWishlistFilters, 
+  bookingController.getWishlist
+);
+
+router.delete('/wishlist/:wishlistItemId', 
+  authenticate, 
+  bookingController.removeFromWishlist
+);
+
+router.get('/wishlist/check', 
+  authenticate, 
+  bookingController.checkWishlistStatus
+);
+
+router.get('/wishlist/stats', 
+  authenticate, 
+  bookingController.getWishlistStats
+);
+
+router.delete('/wishlist', 
+  authenticate, 
+  bookingController.clearWishlist
+);
 
 // --- GUEST SPECIFIC ROUTES ---
 // Guest dashboard data

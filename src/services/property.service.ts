@@ -2889,4 +2889,210 @@ private transformToAgentBookingInfo(agentBooking: any): AgentBookingInfo {
   };
 }
 
+// Add these methods to your PropertyService class
+
+// --- AGENT AS HOST METHODS ---
+async createAgentOwnProperty(agentId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
+  // Create property with agent as the direct host
+  const property = await this.createProperty(agentId, data);
+  
+  // Create a self-referential agent booking record to track this as agent's own property
+  await prisma.agentBooking.create({
+    data: {
+      agentId,
+      clientId: agentId, // Agent is their own client for owned properties
+      bookingType: 'property',
+      bookingId: `own-property-${property.id}`,
+      commission: 0, // No commission on own properties, full revenue
+      commissionRate: 0,
+      status: 'active',
+      notes: `Agent-owned property: ${property.name}`
+    }
+  });
+
+  return property;
+}
+
+async getAgentOwnProperties(agentId: number, filters?: Partial<PropertySearchFilters>) {
+  const whereClause: any = { 
+    hostId: agentId // Direct ownership
+  };
+  
+  if (filters?.status) {
+    whereClause.status = filters.status;
+  }
+
+  const properties = await prisma.property.findMany({
+    where: whereClause,
+    include: {
+      host: true,
+      reviews: { select: { rating: true } },
+      bookings: {
+        where: { status: 'confirmed' },
+        select: { id: true }
+      }
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  return Promise.all(
+    properties.map((p: any) => this.transformToPropertyInfo(p))
+  );
+}
+
+async getAgentOwnPropertyBookings(agentId: number, propertyId: number) {
+  // Verify agent owns this property directly
+  const property = await prisma.property.findFirst({
+    where: { id: propertyId, hostId: agentId }
+  });
+
+  if (!property) {
+    throw new Error('Property not found or not owned by agent');
+  }
+
+  const bookings = await prisma.booking.findMany({
+    where: { propertyId },
+    include: {
+      guest: true,
+      property: { select: { name: true } }
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  return bookings.map((b: any) => this.transformToBookingInfo(b));
+}
+
+async getAgentOwnPropertyGuests(agentId: number, propertyId?: number) {
+  let whereClause: any = {};
+
+  if (propertyId) {
+    // Verify agent owns this specific property
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, hostId: agentId }
+    });
+
+    if (!property) {
+      throw new Error('Property not found or not owned by agent');
+    }
+
+    whereClause = {
+      bookingsAsGuest: {
+        some: { propertyId }
+      }
+    };
+  } else {
+    // Get guests from all agent-owned properties
+    const agentProperties = await prisma.property.findMany({
+      where: { hostId: agentId },
+      select: { id: true }
+    });
+
+    const propertyIds = agentProperties.map(p => p.id);
+
+    whereClause = {
+      bookingsAsGuest: {
+        some: {
+          propertyId: { in: propertyIds }
+        }
+      }
+    };
+  }
+
+  const guests = await prisma.user.findMany({
+    where: whereClause,
+    include: {
+      bookingsAsGuest: {
+        where: propertyId ? { propertyId } : {
+          propertyId: { in: await this.getAgentOwnPropertyIds(agentId) }
+        },
+        include: {
+          property: { select: { name: true } }
+        },
+        orderBy: { createdAt: 'desc' }
+      }
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  return guests.map((guest: any) => this.transformToGuestProfile(guest));
+}
+
+// Helper method
+private async getAgentOwnPropertyIds(agentId: number): Promise<number[]> {
+  const properties = await prisma.property.findMany({
+    where: { hostId: agentId },
+    select: { id: true }
+  });
+  return properties.map(p => p.id);
+}
+
+// Unified method to get all agent properties (owned + managed)
+async getAllAgentProperties(agentId: number, filters?: any) {
+  const [ownProperties, clientProperties] = await Promise.all([
+    this.getAgentOwnProperties(agentId, filters),
+    this.getAgentProperties(agentId, filters)
+  ]);
+
+  // Mark which properties are owned vs managed
+  const enrichedOwnProperties = ownProperties.map(p => ({
+    ...p,
+    relationshipType: 'owned' as const,
+    commissionRate: 0,
+    fullRevenue: true
+  }));
+
+  const enrichedClientProperties = clientProperties.properties?.map(p => ({
+    ...p,
+    relationshipType: 'managed' as const,
+    fullRevenue: false
+  })) || [];
+
+  return {
+    ownProperties: enrichedOwnProperties,
+    managedProperties: enrichedClientProperties,
+    totalOwned: ownProperties.length,
+    totalManaged: enrichedClientProperties.length,
+    totalProperties: ownProperties.length + enrichedClientProperties.length
+  };
+}
+
+// Enhanced agent dashboard including owned properties
+async getEnhancedAgentDashboard(agentId: number): Promise<any> {
+  const [basicDashboard, ownProperties, ownBookings] = await Promise.all([
+    this.getAgentDashboard(agentId),
+    this.getAgentOwnProperties(agentId),
+    this.getAgentOwnPropertyBookings(agentId, 0) // All owned properties
+  ]);
+
+  const ownPropertyRevenue = await this.getAgentOwnPropertyRevenue(agentId);
+
+  return {
+    ...basicDashboard,
+    ownProperties: {
+      count: ownProperties.length,
+      totalRevenue: ownPropertyRevenue,
+      recentBookings: ownBookings.slice(0, 5)
+    },
+    summary: {
+      totalPropertiesOwned: ownProperties.length,
+      totalPropertiesManaged: basicDashboard.totalClients,
+      ownPropertyRevenue,
+      managedPropertyCommissions: basicDashboard.totalCommissions,
+      combinedEarnings: ownPropertyRevenue + basicDashboard.totalCommissions
+    }
+  };
+}
+
+private async getAgentOwnPropertyRevenue(agentId: number): Promise<number> {
+  const revenue = await prisma.booking.aggregate({
+    where: {
+      property: { hostId: agentId },
+      status: 'completed'
+    },
+    _sum: { totalPrice: true }
+  });
+
+  return revenue._sum.totalPrice || 0;
+}
+
 }

@@ -22,7 +22,9 @@ import {
   PropertyBookingStatus,
   TourBookingStatus,
   TourCheckInStatus,
-  TourParticipant
+  TourParticipant,
+  WishlistFilters,
+  WishlistStats
 } from '../types/booking.types';
 
 const prisma = new PrismaClient();
@@ -861,73 +863,251 @@ async getGuestBookingStats(userId: number): Promise<GuestBookingStats> {
 
 
   // --- WISHLIST METHODS ---
-  async addToWishlist(userId: number, type: 'property' | 'tour', itemId: string | number): Promise<WishlistItem> {
-  let itemDetails: any;
-
-  if (type === 'property') {
-    const property = await prisma.property.findUnique({
-      where: { id: itemId as number }
-    });
-    if (!property) throw new Error('Property not found');
-    
-    // Fix: Proper type casting for JSON.parse
-    const propertyImages = typeof property.images === 'string' ? property.images : JSON.stringify(property.images || {});
-    const parsedImages = JSON.parse(propertyImages);
-    
-    itemDetails = {
-      name: property.name,
-      location: property.location,
-      price: property.pricePerNight,
-      rating: property.averageRating,
-      image: parsedImages?.exterior?.[0] || ''
-    };
-  } else {
-    const tour = await prisma.tour.findUnique({
-      where: { id: itemId as string }
-    });
-    if (!tour) throw new Error('Tour not found');
-    
-    // Fix: Proper type casting for JSON.parse
-    const tourImages = typeof tour.images === 'string' ? tour.images : JSON.stringify(tour.images || {});
-    const parsedImages = JSON.parse(tourImages);
-    
-    itemDetails = {
-      name: tour.title,
-      location: tour.locationCity,
-      price: tour.price,
-      rating: tour.rating,
-      image: parsedImages?.main?.[0] || ''
-    };
+  // Update the existing addToWishlist method
+async addToWishlist(userId: number, type: 'property' | 'tour', itemId: string | number, notes?: string): Promise<WishlistItem> {
+  // Currently only supports properties due to schema limitation
+  if (type === 'tour') {
+    throw new Error('Tour wishlists are not supported yet. Please add tourId field to Wishlist model.');
   }
 
-  // Fix: Handle undefined propertyId properly
-  const wishlistData: any = {
-    userId
-  };
+  const propertyId = itemId as number;
 
-  if (type === 'property') {
-    wishlistData.propertyId = itemId as number;
-  }
-  // Note: You'll need to add tourId field to Wishlist model for tour wishlists
-  // else {
-  //   wishlistData.tourId = itemId as string;
-  // }
-
-  const wishlistItem = await prisma.wishlist.create({
-    data: wishlistData
+  // Check if property exists
+  const property = await prisma.property.findUnique({
+    where: { id: propertyId },
+    select: {
+      id: true,
+      name: true,
+      location: true,
+      pricePerNight: true,
+      averageRating: true,
+      images: true,
+      status: true
+    }
   });
+
+  if (!property) {
+    throw new Error('Property not found');
+  }
+
+  // Check if already in wishlist
+  const existingItem = await prisma.wishlist.findUnique({
+    where: {
+      userId_propertyId: {
+        userId,
+        propertyId
+      }
+    }
+  });
+
+  if (existingItem) {
+    throw new Error('Property is already in your wishlist');
+  }
+
+  // Add to wishlist
+  const wishlistItem = await prisma.wishlist.create({
+    data: {
+      userId,
+      propertyId
+    }
+  });
+
+  // Parse images
+  const images = typeof property.images === 'string' 
+    ? JSON.parse(property.images) 
+    : property.images || {};
 
   return {
     id: wishlistItem.id,
     userId,
-    type,
-    itemId,
-    itemDetails,
-    isAvailable: true,
+    type: 'property',
+    itemId: propertyId,
+    itemDetails: {
+      name: property.name,
+      location: property.location,
+      price: property.pricePerNight,
+      rating: property.averageRating || 0,
+      image: images?.exterior?.[0] || ''
+    },
+    notes,
+    isAvailable: property.status === 'active',
     priceAlerts: false,
     createdAt: wishlistItem.createdAt.toISOString()
   };
 }
+
+async getUserWishlist(
+  userId: number, 
+  filters: WishlistFilters = {}, 
+  page: number = 1, 
+  limit: number = 20
+) {
+  const skip = (page - 1) * limit;
+
+  // Build where clause
+  const whereClause: any = { userId };
+
+  // Since we only support properties for now
+  if (filters.type === 'tour') {
+    return {
+      items: [],
+      total: 0,
+      page,
+      limit,
+      totalPages: 0
+    };
+  }
+
+  const propertyWhere: any = {};
+
+  if (filters.location) {
+    propertyWhere.location = { contains: filters.location, mode: 'insensitive' };
+  }
+
+  if (filters.minPrice || filters.maxPrice) {
+    propertyWhere.pricePerNight = {};
+    if (filters.minPrice) propertyWhere.pricePerNight.gte = filters.minPrice;
+    if (filters.maxPrice) propertyWhere.pricePerNight.lte = filters.maxPrice;
+  }
+
+  if (filters.isAvailable !== undefined) {
+    propertyWhere.status = filters.isAvailable ? 'active' : { not: 'active' };
+  }
+
+  if (filters.search) {
+    propertyWhere.OR = [
+      { name: { contains: filters.search, mode: 'insensitive' } },
+      { location: { contains: filters.search, mode: 'insensitive' } },
+      { description: { contains: filters.search, mode: 'insensitive' } }
+    ];
+  }
+
+  if (Object.keys(propertyWhere).length > 0) {
+    whereClause.property = propertyWhere;
+  }
+
+  const [wishlistItems, total] = await Promise.all([
+    prisma.wishlist.findMany({
+      where: whereClause,
+      include: {
+        property: {
+          select: {
+            id: true,
+            name: true,
+            location: true,
+            pricePerNight: true,
+            averageRating: true,
+            images: true,
+            status: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit
+    }),
+    prisma.wishlist.count({ where: whereClause })
+  ]);
+
+  const items: WishlistItem[] = wishlistItems.map(item => {
+    const images = typeof item.property.images === 'string' 
+      ? JSON.parse(item.property.images) 
+      : item.property.images || {};
+
+    return {
+      id: item.id,
+      userId: item.userId,
+      type: 'property',
+      itemId: item.property.id,
+      itemDetails: {
+        name: item.property.name,
+        location: item.property.location,
+        price: item.property.pricePerNight,
+        rating: item.property.averageRating || 0,
+        image: images?.exterior?.[0] || ''
+      },
+      isAvailable: item.property.status === 'active',
+      priceAlerts: false,
+      createdAt: item.createdAt.toISOString()
+    };
+  });
+
+  return {
+    items,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit)
+  };
+}
+
+async removeFromWishlist(userId: number, wishlistItemId: string): Promise<void> {
+  const wishlistItem = await prisma.wishlist.findFirst({
+    where: {
+      id: wishlistItemId,
+      userId: userId
+    }
+  });
+
+  if (!wishlistItem) {
+    throw new Error('Wishlist item not found or access denied');
+  }
+
+  await prisma.wishlist.delete({
+    where: { id: wishlistItemId }
+  });
+}
+
+async isInWishlist(userId: number, type: 'property' | 'tour', itemId: string | number): Promise<boolean> {
+  if (type === 'tour') {
+    return false; // Not supported yet
+  }
+
+  const existingItem = await prisma.wishlist.findUnique({
+    where: {
+      userId_propertyId: {
+        userId,
+        propertyId: itemId as number
+      }
+    }
+  });
+
+  return !!existingItem;
+}
+
+async getWishlistStats(userId: number): Promise<WishlistStats> {
+  const wishlistItems = await prisma.wishlist.findMany({
+    where: { userId },
+    include: {
+      property: {
+        select: {
+          pricePerNight: true,
+          status: true
+        }
+      }
+    }
+  });
+
+  const activeItems = wishlistItems.filter(item => item.property.status === 'active');
+  const totalValue = activeItems.reduce((sum, item) => sum + item.property.pricePerNight, 0);
+
+  return {
+    totalItems: wishlistItems.length,
+    propertyCount: wishlistItems.length,
+    tourCount: 0, // Not supported yet
+    totalValue,
+    averagePrice: activeItems.length > 0 ? totalValue / activeItems.length : 0
+  };
+}
+
+async clearWishlist(userId: number): Promise<void> {
+  await prisma.wishlist.deleteMany({
+    where: { userId }
+  });
+}
+
+
+
 
 // --- HELPER METHODS ---
 private transformToPropertyBookingInfo(booking: any): PropertyBookingInfo {
