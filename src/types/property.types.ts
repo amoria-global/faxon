@@ -1529,3 +1529,49 @@ export interface AgentClientValidation {
   permissions: AgentPermissions;
   reason?: string;
 }
+
+// Add these types to your existing types file
+
+// --- AGENT AS HOST TYPES ---
+export interface AgentPropertyOwnership {
+  isDirectOwner: boolean;
+  isClientProperty: boolean;
+  propertyId: number;
+}
+
+export interface AgentOwnProperty extends PropertyInfo {
+  relationshipType: 'owned';
+  commissionRate: 0;
+  fullRevenue: true;
+  totalRevenue: number;
+}
+
+export interface AgentManagedProperty extends PropertyInfo {
+  relationshipType: 'managed';
+  fullRevenue: false;
+  agentCommission: number;
+  clientName: string;
+}
+
+export interface AgentAllPropertiesResponse {
+  ownProperties: AgentOwnProperty[];
+  managedProperties: AgentManagedProperty[];
+  totalOwned: number;
+  totalManaged: number;
+  totalProperties: number;
+}
+
+export interface EnhancedAgentDashboard extends AgentDashboard {
+  ownProperties: {
+    count: number;
+    totalRevenue: number;
+    recentBookings: BookingInfo[];
+  };
+  summary: {
+    totalPropertiesOwned: number;
+    totalPropertiesManaged: number;
+    ownPropertyRevenue: number;
+    managedPropertyCommissions: number;
+    combinedEarnings: number;
+  };
+}

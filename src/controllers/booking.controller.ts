@@ -9,7 +9,8 @@ import {
   CreateAgentBookingDto,
   PropertyBookingFilters,
   TourBookingFilters,
-  AgentBookingFilters
+  AgentBookingFilters,
+  WishlistFilters
 } from '../types/booking.types';
 
 interface AuthenticatedRequest extends Request {
@@ -579,26 +580,10 @@ export class BookingController {
       }
 
       const userId = parseInt(req.user.userId);
-      const { type, itemId } = req.body;
+      const { type, itemId, notes } = req.body;
 
-      if (!type || !itemId) {
-        res.status(400).json({
-          success: false,
-          message: 'Type and item ID are required'
-        });
-        return;
-      }
-
-      if (!['property', 'tour'].includes(type)) {
-        res.status(400).json({
-          success: false,
-          message: 'Type must be either "property" or "tour"'
-        });
-        return;
-      }
-
-      const wishlistItem = await this.bookingService.addToWishlist(userId, type, itemId);
-      
+      const wishlistItem = await this.bookingService.addToWishlist(userId, type, itemId, notes);
+              
       res.status(201).json({
         success: true,
         message: 'Item added to wishlist successfully',
@@ -612,6 +597,187 @@ export class BookingController {
       });
     }
   };
+
+  getWishlist = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const userId = parseInt(req.user.userId);
+      const {
+        type,
+        location,
+        minPrice,
+        maxPrice,
+        isAvailable,
+        search,
+        page = '1',
+        limit = '20'
+      } = req.query;
+
+      const filters: WishlistFilters = {};
+      if (type) filters.type = type as 'property' | 'tour';
+      if (location) filters.location = location as string;
+      if (minPrice) filters.minPrice = Number(minPrice);
+      if (maxPrice) filters.maxPrice = Number(maxPrice);
+      if (isAvailable !== undefined) filters.isAvailable = isAvailable === 'true';
+      if (search) filters.search = search as string;
+
+      const result = await this.bookingService.getUserWishlist(
+        userId,
+        filters,
+        Number(page),
+        Number(limit)
+      );
+
+      res.status(200).json({
+        success: true,
+        message: 'Wishlist retrieved successfully',
+        data: result
+      });
+    } catch (error: any) {
+      console.error('Error fetching wishlist:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to fetch wishlist'
+      });
+    }
+  };
+
+  removeFromWishlist = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const userId = parseInt(req.user.userId);
+      const { wishlistItemId } = req.params;
+
+      if (!wishlistItemId) {
+        res.status(400).json({
+          success: false,
+          message: 'Wishlist item ID is required'
+        });
+        return;
+      }
+
+      await this.bookingService.removeFromWishlist(userId, wishlistItemId);
+
+      res.status(200).json({
+        success: true,
+        message: 'Item removed from wishlist successfully'
+      });
+    } catch (error: any) {
+      console.error('Error removing from wishlist:', error);
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to remove item from wishlist'
+      });
+    }
+  };
+
+  checkWishlistStatus = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const userId = parseInt(req.user.userId);
+      const { type, itemId } = req.query;
+
+      if (!type || !itemId) {
+        res.status(400).json({
+          success: false,
+          message: 'Type and item ID are required'
+        });
+        return;
+      }
+
+      const isInWishlist = await this.bookingService.isInWishlist(
+        userId,
+        type as 'property' | 'tour',
+        type === 'property' ? Number(itemId) : itemId as string
+      );
+
+      res.status(200).json({
+        success: true,
+        data: { isInWishlist }
+      });
+    } catch (error: any) {
+      console.error('Error checking wishlist status:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to check wishlist status'
+      });
+    }
+  };
+
+  getWishlistStats = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const userId = parseInt(req.user.userId);
+      const stats = await this.bookingService.getWishlistStats(userId);
+
+      res.status(200).json({
+        success: true,
+        message: 'Wishlist stats retrieved successfully',
+        data: stats
+      });
+    } catch (error: any) {
+      console.error('Error fetching wishlist stats:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to fetch wishlist stats'
+      });
+    }
+  };
+
+  clearWishlist = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const userId = parseInt(req.user.userId);
+      await this.bookingService.clearWishlist(userId);
+
+      res.status(200).json({
+        success: true,
+        message: 'Wishlist cleared successfully'
+      });
+    } catch (error: any) {
+      console.error('Error clearing wishlist:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to clear wishlist'
+      });
+    }
+  };
+
 
   // --- BULK OPERATIONS ---
   cancelBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {

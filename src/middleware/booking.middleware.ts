@@ -377,6 +377,47 @@ export const validateWishlistItem = (req: AuthenticatedRequest, res: Response, n
   next();
 };
 
+export const validateWishlistFilters = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  const { type, minPrice, maxPrice, page, limit } = req.query;
+  const errors: string[] = [];
+
+  if (type && !['property', 'tour'].includes(type as string)) {
+    errors.push('Type filter must be either "property" or "tour"');
+  }
+
+  if (minPrice && (isNaN(Number(minPrice)) || Number(minPrice) < 0)) {
+    errors.push('Minimum price must be a valid positive number');
+  }
+
+  if (maxPrice && (isNaN(Number(maxPrice)) || Number(maxPrice) < 0)) {
+    errors.push('Maximum price must be a valid positive number');
+  }
+
+  if (minPrice && maxPrice && Number(minPrice) > Number(maxPrice)) {
+    errors.push('Minimum price cannot be greater than maximum price');
+  }
+
+  if (page && (isNaN(Number(page)) || Number(page) < 1)) {
+    errors.push('Page must be a valid positive number');
+  }
+
+  if (limit && (isNaN(Number(limit)) || Number(limit) < 1 || Number(limit) > 100)) {
+    errors.push('Limit must be a valid number between 1 and 100');
+  }
+
+  if (errors.length > 0) {
+    res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors
+    });
+    return;
+  }
+
+  next();
+};
+
+
 // Validate date filters
 export const validateDateFilters = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
   const { checkInDate, checkOutDate, tourDate } = req.query;

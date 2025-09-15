@@ -7,7 +7,8 @@ import {
   validateHost,
   validateAgent,
   validateAgentPropertyAccess,
-  validateAgentPropertyEdit 
+  validateAgentPropertyEdit, 
+  validateAgentAsHost
 } from '../middleware/property.middleware';
 
 const router = Router();
@@ -128,5 +129,22 @@ router.post('/:id/reviews', propertyController.createReview);
 // Agent review management
 router.get('/agent/properties/:id/reviews', validateAgent, validateAgentPropertyAccess, propertyController.getAgentPropertyReviews);
 router.get('/agent/reviews/summary', validateAgent, propertyController.getAgentReviewsSummary);
+// Add these routes to your existing router
+
+// --- AGENT AS HOST ROUTES ---
+// Agent's own property management
+router.post('/agent/own/properties', validateAgent, validateAgentAsHost, validateProperty, propertyController.createAgentOwnProperty);
+router.get('/agent/own/properties', validateAgent, propertyController.getAgentOwnProperties);
+router.get('/agent/own/properties/:id/bookings', validateAgent, propertyController.getAgentOwnPropertyBookings);
+router.get('/agent/own/guests', validateAgent, propertyController.getAgentOwnPropertyGuests);
+
+// Unified agent property management
+router.get('/agent/all-properties', validateAgent, propertyController.getAllAgentProperties);
+router.get('/agent/dashboard/enhanced', validateAgent, propertyController.getEnhancedAgentDashboard);
+
+// Agent's own property editing (full access like a host)
+router.put('/agent/own/properties/:id', validateAgent, propertyController.updateProperty);
+router.delete('/agent/own/properties/:id', validateAgent, propertyController.deleteProperty);
+router.post('/agent/own/properties/:id/images', validateAgent, propertyController.uploadPropertyImages);
 
 export default router;

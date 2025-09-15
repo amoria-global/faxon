@@ -450,44 +450,43 @@ export const validateAgentPropertyAccess = async (req: AuthenticatedRequest, res
       return;
     }
 
-    // Check if agent has access to this property through their clients
-    const hasAccess = await prisma.agentBooking.findFirst({
+    // Check 1: Direct ownership (agent owns the property)
+    const directOwnership = await prisma.property.findFirst({
       where: {
-        agentId,
-        bookingType: 'property'
-      },
-      include: {
-        client: {
-          include: {
-            properties: {
-              where: { id: propertyId }
-            }
-          }
-        }
+        id: propertyId,
+        hostId: agentId
       }
     });
 
-    // Alternative check: verify if the property belongs to one of agent's clients
-    const property = await prisma.property.findFirst({
+    // Check 2: Client relationship (agent manages for client)
+    const clientProperty = await prisma.property.findFirst({
       where: {
         id: propertyId,
         host: {
           clientBookings: {
             some: {
-              agentId: agentId
+              agentId: agentId,
+              status: 'active'
             }
           }
         }
       }
     });
 
-    if (!hasAccess && !property) {
+    if (!directOwnership && !clientProperty) {
       res.status(403).json({
         success: false,
-        message: 'Access denied. Property not associated with your clients.'
+        message: 'Access denied. Property not owned by you or associated with your clients.'
       });
       return;
     }
+
+    // Add property ownership info to request for downstream use
+    (req as any).propertyOwnership = {
+      isDirectOwner: !!directOwnership,
+      isClientProperty: !!clientProperty,
+      propertyId
+    };
 
     next();
   } catch (error: any) {
@@ -497,6 +496,28 @@ export const validateAgentPropertyAccess = async (req: AuthenticatedRequest, res
       message: 'Failed to validate property access'
     });
   }
+};
+
+// NEW: Validate agent can create properties directly
+export const validateAgentAsHost = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  if (!req.user) {
+    res.status(401).json({
+      success: false,
+      message: 'Authentication required'
+    });
+    return;
+  }
+
+  // Check if user type is agent (and allow them to act as host)
+  if (req.user.userType && !['agent', 'host'].includes(req.user.userType)) {
+    res.status(403).json({
+      success: false,
+      message: 'Host or Agent access required'
+    });
+    return;
+  }
+
+  next();
 };
 
 // Validate agent property edit permissions (limited fields only)
@@ -739,4 +760,7 @@ export const validateAgentClientAccess = async (req: AuthenticatedRequest, res: 
       message: 'Failed to validate client access'
     });
   }
+
+  
 };
+

@@ -377,6 +377,29 @@ export interface WishlistItem {
   createdAt: string;
 }
 
+export interface WishlistFilters {
+  type?: 'property' | 'tour';
+  location?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  isAvailable?: boolean;
+  search?: string;
+}
+
+export interface WishlistStats {
+  totalItems: number;
+  propertyCount: number;
+  tourCount: number;
+  totalValue: number;
+  averagePrice: number;
+}
+
+export interface AddToWishlistRequest {
+  type: 'property' | 'tour';
+  itemId: string | number;
+  notes?: string;
+}
+
 // --- API RESPONSE TYPES ---
 export interface BookingResponse {
   success: boolean;

@@ -64,7 +64,7 @@ export const config = {
 
   // Enhanced Payment Configuration (Updated)
   payment: {
-    defaultCurrency: 'KES', // Keeping your existing default
+    defaultCurrency: 'USD', // Keeping your existing default
     
     // Traditional payment limits (your existing limits)
     limits: {
