@@ -552,7 +552,33 @@ export class TourService {
   // --- GUEST OPERATIONS ---
 
   async createTourBooking(userId: number, bookingData: TourBookingRequest): Promise<TourBookingInfo> {
-    // Verify tour and schedule exist and are available
+    // First, check if schedule exists at all
+    const scheduleExists = await prisma.tourSchedule.findUnique({
+      where: { id: bookingData.scheduleId }
+    });
+    
+    console.log('Schedule exists:', scheduleExists);
+    
+    if (!scheduleExists) {
+      throw new Error(`Schedule with ID ${bookingData.scheduleId} not found`);
+    }
+    
+    // Check if it belongs to the correct tour
+    if (scheduleExists.tourId !== bookingData.tourId) {
+      throw new Error(`Schedule ${bookingData.scheduleId} doesn't belong to tour ${bookingData.tourId}`);
+    }
+    
+    // Check availability
+    if (!scheduleExists.isAvailable) {
+      throw new Error(`Schedule ${bookingData.scheduleId} is not available`);
+    }
+    
+    // Check if it's in the future
+    if (scheduleExists.startDate < new Date()) {
+      throw new Error(`Schedule ${bookingData.scheduleId} is in the past`);
+    }
+    
+    // Now proceed with the original query
     const schedule = await prisma.tourSchedule.findFirst({
       where: {
         id: bookingData.scheduleId,
@@ -761,6 +787,64 @@ export class TourService {
       limit,
       totalPages: Math.ceil(total / limit)
     };
+  }
+
+  // Add this method to your TourService class in the GUEST OPERATIONS section
+
+  async getUserTourBookingById(userId: number, bookingId: string): Promise<TourBookingInfo | null> {
+    const booking = await prisma.tourBooking.findFirst({
+      where: {
+        id: bookingId,
+        userId // Security: Only allow users to access their own bookings
+      },
+      include: {
+        tour: {
+          select: {
+            title: true,
+            shortDescription: true,
+            category: true,
+            locationCity: true,
+            locationCountry: true,
+            meetingPoint: true,
+            price: true,
+            duration: true,
+            images: true,
+            tourGuide: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                profileImage: true,
+                phone: true
+              }
+            }
+          }
+        },
+        user: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true
+          }
+        },
+        schedule: {
+          select: {
+            startDate: true,
+            endDate: true,
+            startTime: true,
+            endTime: true,
+            availableSlots: true
+          }
+        }
+      }
+    });
+
+    if (!booking) {
+      return null;
+    }
+
+    return this.formatTourBookingInfo(booking);
   }
 
   async createTourReview(userId: number, reviewData: CreateTourReviewDto): Promise<TourReviewInfo> {
@@ -2296,11 +2380,12 @@ export class TourService {
         licenseNumber: tour.tourGuide.licenseNumber,
         certifications: tour.tourGuide.certifications as string[]
       } : {} as TourGuideInfo,
+      // FIX: Add null checks for date objects before calling toISOString()
       schedules: tour.schedules ? tour.schedules.map((schedule: any) => ({
         id: schedule.id,
         tourId: schedule.tourId,
-        startDate: schedule.startDate.toISOString(),
-        endDate: schedule.endDate.toISOString(),
+        startDate: schedule.startDate?.toISOString() || '',
+        endDate: schedule.endDate?.toISOString() || '',
         startTime: schedule.startTime,
         endTime: schedule.endTime,
         availableSlots: schedule.availableSlots,
@@ -2308,11 +2393,11 @@ export class TourService {
         isAvailable: schedule.isAvailable,
         price: schedule.price,
         specialNotes: schedule.specialNotes,
-        createdAt: schedule.createdAt.toISOString(),
-        updatedAt: schedule.updatedAt.toISOString()
+        createdAt: schedule.createdAt?.toISOString() || '',
+        updatedAt: schedule.updatedAt?.toISOString() || ''
       })) : [],
-      createdAt: tour.createdAt.toISOString(),
-      updatedAt: tour.updatedAt.toISOString()
+      createdAt: tour.createdAt?.toISOString() || '',
+      updatedAt: tour.updatedAt?.toISOString() || ''
     };
   }
 
@@ -2326,7 +2411,7 @@ export class TourService {
       userName: `${booking.user.firstName} ${booking.user.lastName}`,
       userEmail: booking.user.email,
       tourGuideId: booking.tourGuideId,
-      tourGuideName: `${booking.tourGuide.firstName} ${booking.tourGuide.lastName}`,
+      tourGuideName: `${booking.tourGuide}`,
       numberOfParticipants: booking.numberOfParticipants,
       participants: booking.participants as any[],
       specialRequests: booking.specialRequests,
@@ -2388,17 +2473,28 @@ export class TourService {
     const bookings = await prisma.tourBooking.findMany({
       where: { tourGuideId },
       include: {
-        tour: { select: { title: true } },
+        tour: { 
+          select: { 
+            title: true,
+            // FIX: Include tourGuide data
+            tourGuide: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true
+              }
+            }
+          } 
+        },
         user: { select: { firstName: true, lastName: true, email: true } },
-        schedule: { select: { startDate: true, startTime: true } },
-        // Removed invalid 'tourGuide' property
+        schedule: { select: { startDate: true, startTime: true } }
       },
       orderBy: { createdAt: 'desc' },
       take: limit
     });
 
     return bookings.map(booking => this.formatTourBookingInfo(booking));
-  }
+}
 
   private async getUpcomingTourSchedules(tourGuideId: number, limit: number = 5): Promise<TourScheduleInfo[]> {
     const schedules = await prisma.tourSchedule.findMany({

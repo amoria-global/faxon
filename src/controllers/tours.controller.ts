@@ -349,7 +349,51 @@ export class TourController {
       });
     }
   };
+  
+  getMyTourBookingById = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
 
+      const userId = parseInt(req.user.userId);
+      const bookingId = req.params.bookingId;
+
+      if (!bookingId) {
+        res.status(400).json({
+          success: false,
+          message: 'Booking ID is required'
+        });
+        return;
+      }
+
+      const booking = await this.tourService.getUserTourBookingById(userId, bookingId);
+      
+      if (!booking) {
+        res.status(404).json({
+          success: false,
+          message: 'Booking not found or you do not have access to this booking'
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        message: 'Tour booking retrieved successfully',
+        data: booking
+      });
+    } catch (error: any) {
+      console.error('Error fetching tour booking by ID:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve tour booking'
+      });
+    }
+  };
   createTourReview = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       if (!req.user) {
