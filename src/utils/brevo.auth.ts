@@ -204,320 +204,393 @@ export class BrevoMailingService {
 
   // --- MODERNIZED EMAIL TEMPLATES ---
   private getBaseTemplate(): string {
-    return `
-      <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        
-        * { 
-          margin: 0; 
-          padding: 0; 
-          box-sizing: border-box; 
-        }
-        
-        body {
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          line-height: 1.6;
-          color: #374151;
-          background-color: #f9fafb;
-        }
-        
+  return `
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+      
+      * { 
+        margin: 0; 
+        padding: 0; 
+        box-sizing: border-box; 
+      }
+      
+      body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        line-height: 1.6;
+        color: #374151;
+        background: linear-gradient(135deg, #f0fdfa 0%, #cffafe 50%, #e0f2fe 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+      
+      .email-wrapper {
+        max-width: 600px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      
+      /* Main card container - similar to login form */
+      .email-container {
+        background: rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(8px);
+        border-radius: 24px;
+        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+        border: 1px solid rgba(20, 184, 166, 0.2);
+        overflow: hidden;
+        transition: all 0.5s ease;
+      }
+      
+      /* Navy gradient header - original colors */
+      .header {
+        background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
+        padding: 40px 30px;
+        text-align: center;
+        color: white;
+        position: relative;
+      }
+      
+      .header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, transparent 50%);
+        pointer-events: none;
+      }
+      
+      .logo {
+        font-size: 28px;
+        font-weight: 700;
+        margin-bottom: 8px;
+        letter-spacing: -0.025em;
+        position: relative;
+        z-index: 1;
+      }
+      
+      .header-subtitle {
+        font-size: 16px;
+        font-weight: 400;
+        opacity: 0.95;
+        position: relative;
+        z-index: 1;
+      }
+      
+      /* Content section within the same card */
+      .content {
+        padding: 40px 30px;
+        background: rgba(255, 255, 255, 0.95);
+      }
+      
+      .greeting {
+        font-size: 24px;
+        font-weight: 600;
+        color: #111827;
+        margin-bottom: 20px;
+        letter-spacing: -0.025em;
+      }
+      
+      .message {
+        font-size: 16px;
+        line-height: 1.7;
+        color: #4b5563;
+        margin-bottom: 24px;
+      }
+      
+      .highlight-box {
+        background: linear-gradient(135deg, rgba(248, 250, 252, 0.8) 0%, rgba(239, 246, 255, 0.6) 100%);
+        border: 2px solid #083A85;
+        border-radius: 16px;
+        padding: 24px;
+        margin: 24px 0;
+        text-align: center;
+        backdrop-filter: blur(4px);
+      }
+      
+      .verification-code {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 32px;
+        font-weight: 700;
+        color: #083A85;
+        letter-spacing: 6px;
+        margin: 12px 0;
+      }
+      
+      .code-label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #6b7280;
+        margin-bottom: 8px;
+      }
+      
+      .code-expiry {
+        font-size: 14px;
+        color: #9ca3af;
+        margin-top: 8px;
+      }
+      
+      .button {
+        display: inline-block;
+        background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
+        color: #ffffffff;
+        text-decoration: none;
+        padding: 14px 28px;
+        border-radius: 12px;
+        font-weight: 600;
+        font-size: 16px;
+        text-align: center;
+        box-shadow: 0 4px 14px rgba(8, 58, 133, 0.3);
+        transition: all 0.3s ease;
+      }
+      
+      .button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 20px rgba(8, 58, 133, 0.4);
+        background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);
+        color: white !important;
+      }
+      
+      .button-center {
+        text-align: center;
+        margin: 32px 0;
+      }
+      
+      /* Info card for login details - navy background with white text */
+      .info-card {
+        background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        padding: 20px;
+        margin: 24px 0;
+        backdrop-filter: blur(4px);
+        box-shadow: 0 4px 12px rgba(8, 58, 133, 0.2);
+      }
+      
+      .info-card-header {
+        display: flex;
+        align-items: center;
+        font-weight: 600;
+        color: white;
+        margin-bottom: 16px;
+        font-size: 15px;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      
+      .info-card-icon {
+        margin-right: 8px;
+        font-size: 18px;
+      }
+      
+      .info-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(241, 245, 249, 0.7);
+        gap: 16px;
+        min-height: 24px;
+      }
+      
+      .info-row:last-child {
+        border-bottom: none;
+      }
+      
+      .info-label {
+        font-weight: 600;
+        color: white;
+        font-size: 14px;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        flex-shrink: 0;
+        min-width: 80px;
+      }
+      
+      .info-value {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        color: #e2e8f0;
+        font-size: 14px;
+        font-weight: 400;
+        text-align: right;
+        flex: 1;
+        word-break: break-word;
+        line-height: 1.4;
+      }
+      
+      .alert-box {
+        border-radius: 12px;
+        padding: 20px;
+        margin: 24px 0;
+        border-left: 4px solid;
+        backdrop-filter: blur(4px);
+      }
+      
+      .alert-success {
+        background: rgba(240, 253, 244, 0.9);
+        border-left-color: #22c55e;
+        color: #15803d;
+      }
+      
+      .alert-warning {
+        background: rgba(255, 251, 235, 0.9);
+        border-left-color: #f59e0b;
+        color: #d97706;
+      }
+      
+      .alert-error {
+        background: rgba(254, 242, 242, 0.9);
+        border-left-color: #ef4444;
+        color: #dc2626;
+      }
+      
+      .alert-title {
+        font-weight: 600;
+        margin-bottom: 8px;
+        font-size: 15px;
+      }
+      
+      .alert-text {
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      
+      .divider {
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(229, 231, 235, 0.8), transparent);
+        margin: 32px 0;
+      }
+      
+      /* Footer within the same card - original navy colors */
+      .footer {
+        background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
+        color: white;
+        padding: 32px 30px;
+        text-align: center;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        position: relative;
+      }
+      
+      .footer::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 50%);
+        pointer-events: none;
+      }
+      
+      .footer-links {
+        margin-bottom: 20px;
+        position: relative;
+        z-index: 1;
+      }
+      
+      .footer-links a {
+        color: rgba(255, 255, 255, 0.9);
+        text-decoration: none;
+        margin: 0 12px;
+        font-weight: 500;
+        font-size: 14px;
+        transition: color 0.3s ease;
+      }
+      
+      .footer-links a:hover {
+        color: #52e000ff;
+      }
+      
+      .footer-text {
+        font-size: 13px;
+        color: #ffffffff;
+        line-height: 1.5;
+        position: relative;
+        z-index: 1;
+      }
+      
+      .footer-email {
+        color: #23f8edff;
+        font-weight: 500;
+        text-decoration: none;
+      }
+      
+      .security-badge {
+        display: inline-flex;
+        align-items: center;
+        background: rgba(219, 234, 254, 0.9);
+        color: #1e40af;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 500;
+        margin-top: 16px;
+        backdrop-filter: blur(4px);
+      }
+      
+      .feature-list {
+        list-style: none;
+        padding: 0;
+        margin: 16px 0;
+      }
+      
+      .feature-list li {
+        padding: 8px 0;
+        color: #4b5563;
+        font-size: 15px;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      
+      .feature-list li:before {
+        content: "✓";
+        color: #22c55e;
+        font-weight: bold;
+        margin-right: 8px;
+      }
+      
+      @media (max-width: 600px) {
         .email-wrapper {
-          max-width: 600px;
-          margin: 0 auto;
-          background-color: #f9fafb;
-          padding: 20px;
-        }
-        
-        .email-container {
-          background: white;
-          border-radius: 20px;
-          overflow: hidden;
-          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-          border: 1px solid #e5e7eb;
-        }
-        
-        .header {
-          background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
-          padding: 40px 30px;
-          text-align: center;
-          color: white;
-        }
-        
-        .logo {
-          font-size: 28px;
-          font-weight: 700;
-          margin-bottom: 8px;
-          letter-spacing: -0.025em;
-        }
-        
-        .header-subtitle {
-          font-size: 16px;
-          font-weight: 400;
-          opacity: 0.9;
+          padding: 10px;
         }
         
         .content {
-          padding: 40px 30px;
+          padding: 30px 20px;
         }
         
-        .greeting {
-          font-size: 24px;
-          font-weight: 600;
-          color: #111827;
-          margin-bottom: 20px;
-          letter-spacing: -0.025em;
-        }
-        
-        .message {
-          font-size: 16px;
-          line-height: 1.7;
-          color: #4b5563;
-          margin-bottom: 24px;
-        }
-        
-        .highlight-box {
-          background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-          border: 2px solid #083A85;
-          border-radius: 16px;
-          padding: 24px;
-          margin: 24px 0;
-          text-align: center;
-        }
-        
-        .verification-code {
-          font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-          font-size: 32px;
-          font-weight: 700;
-          color: #083A85;
-          letter-spacing: 6px;
-          margin: 12px 0;
-        }
-        
-        .code-label {
-          font-size: 14px;
-          font-weight: 500;
-          color: #6b7280;
-          margin-bottom: 8px;
-        }
-        
-        .code-expiry {
-          font-size: 14px;
-          color: #9ca3af;
-          margin-top: 8px;
-        }
-        
-        .button {
-          display: inline-block;
-          background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
-          color: white;
-          text-decoration: none;
-          padding: 14px 28px;
-          border-radius: 12px;
-          font-weight: 600;
-          font-size: 16px;
-          text-align: center;
-          box-shadow: 0 4px 14px rgba(8, 58, 133, 0.3);
-          transition: all 0.3s ease;
-        }
-        
-        .button:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 6px 20px rgba(8, 58, 133, 0.4);
-        }
-        
-        .button-center {
-          text-align: center;
-          margin: 32px 0;
-        }
-        
-        .info-card {
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 20px;
-          margin: 24px 0;
-        }
-        
-        .info-card-header {
-          display: flex;
-          align-items: center;
-          font-weight: 600;
-          color: #374151;
-          margin-bottom: 16px;
-          font-size: 15px;
-        }
-        
-        .info-card-icon {
-          margin-right: 8px;
-          font-size: 18px;
-        }
-        
-        .info-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 8px 0;
-          border-bottom: 1px solid #f1f5f9;
-        }
-        
-        .info-row:last-child {
-          border-bottom: none;
-        }
-        
-        .info-label {
-          font-weight: 500;
-          color: #374151;
-          font-size: 14px;
-        }
-        
-        .info-value {
-          font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-          color: #6b7280;
-          font-size: 14px;
-          text-align: right;
-        }
-        
-        .alert-box {
-          border-radius: 12px;
-          padding: 20px;
-          margin: 24px 0;
-          border-left: 4px solid;
-        }
-        
-        .alert-success {
-          background: #f0fdf4;
-          border-left-color: #22c55e;
-          color: #15803d;
-        }
-        
-        .alert-warning {
-          background: #fffbeb;
-          border-left-color: #f59e0b;
-          color: #d97706;
-        }
-        
-        .alert-error {
-          background: #fef2f2;
-          border-left-color: #ef4444;
-          color: #dc2626;
-        }
-        
-        .alert-title {
-          font-weight: 600;
-          margin-bottom: 8px;
-          font-size: 15px;
-        }
-        
-        .alert-text {
-          font-size: 14px;
-          line-height: 1.5;
-        }
-        
-        .divider {
-          height: 1px;
-          background: linear-gradient(90deg, transparent, #e5e7eb, transparent);
-          margin: 32px 0;
+        .header {
+          padding: 30px 20px;
         }
         
         .footer {
-          background: #083A85;
-          color: white;
-          padding: 32px 30px;
-          text-align: center;
+          padding: 24px 20px;
         }
         
-        .footer-links {
-          margin-bottom: 20px;
+        .verification-code {
+          font-size: 28px;
+          letter-spacing: 4px;
         }
         
-        .footer-links a {
-          color: #93c5fd;
-          text-decoration: none;
-          margin: 0 12px;
-          font-weight: 500;
-          font-size: 14px;
+        .greeting {
+          font-size: 20px;
         }
         
-        .footer-links a:hover {
-          color: white;
+        .info-row {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 6px;
+          padding: 10px 0;
         }
         
-        .footer-text {
-          font-size: 13px;
-          color: #cbd5e1;
-          line-height: 1.5;
+        .info-label {
+          min-width: auto;
         }
         
-        .security-badge {
-          display: inline-flex;
-          align-items: center;
-          background: #dbeafe;
-          color: #1e40af;
-          padding: 6px 12px;
-          border-radius: 20px;
-          font-size: 13px;
-          font-weight: 500;
-          margin-top: 16px;
+        .info-value {
+          text-align: left;
+          word-break: break-all;
         }
-        
-        .feature-list {
-          list-style: none;
-          padding: 0;
-          margin: 16px 0;
-        }
-        
-        .feature-list li {
-          padding: 8px 0;
-          color: #4b5563;
-          font-size: 15px;
-        }
-        
-        .feature-list li:before {
-          content: "✓";
-          color: #22c55e;
-          font-weight: bold;
-          margin-right: 8px;
-        }
-        
-        @media (max-width: 600px) {
-          .email-wrapper {
-            padding: 10px;
-          }
-          
-          .content {
-            padding: 30px 20px;
-          }
-          
-          .header {
-            padding: 30px 20px;
-          }
-          
-          .footer {
-            padding: 24px 20px;
-          }
-          
-          .verification-code {
-            font-size: 28px;
-            letter-spacing: 4px;
-          }
-          
-          .greeting {
-            font-size: 20px;
-          }
-          
-          .info-row {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 4px;
-          }
-          
-          .info-value {
-            text-align: left;
-          }
-        }
-      </style>
-    `;
-  }
+      }
+    </style>
+  `;
+}
 
   private getWelcomeTemplate(context: MailingContext): string {
     return `
@@ -850,104 +923,119 @@ export class BrevoMailingService {
   }
 
   private getLoginNotificationTemplate(context: MailingContext): string {
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>New Login Detected</title>
-        ${this.getBaseTemplate()}
-      </head>
-      <body>
-        <div class="email-wrapper">
-          <div class="email-container">
-            <div class="header">
-              <div class="logo">${context.company.name}</div>
-              <div class="header-subtitle">Login Alert</div>
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>New Login Detected</title>
+      ${this.getBaseTemplate()}
+    </head>
+    <body>
+      <div class="email-wrapper">
+        <!-- Single card container similar to login form -->
+        <div class="email-container">
+          
+          <!-- Header section within the card -->
+          <div class="header">
+            <div class="logo">${context.company.name}</div>
+            <div class="header-subtitle">Login Alert</div>
+          </div>
+          
+          <!-- Content section within the same card -->
+          <div class="content">
+            <div class="greeting">New Login Detected</div>
+            
+            <div class="message">
+              Hi ${context.user.firstName}, we detected a new sign-in to your ${context.company.name} account. If this was you, no action is needed.
             </div>
             
-            <div class="content">
-              <div class="greeting">New Login Detected</div>
-              
-              <div class="message">
-                Hi ${context.user.firstName}, we detected a new sign-in to your ${context.company.name} account. If this was you, no action is needed.
-              </div>
-              
-              ${context.security ? `
-                <div class="info-card">
-                  <div class="info-card-header">
-                    <span class="info-card-icon">🔍</span>
-                    Login Details
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">Time</span>
-                    <span class="info-value">${new Date(context.security.timestamp).toLocaleString()}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">Device</span>
-                    <span class="info-value">${context.security.device || 'Unknown Device'}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">Browser</span>
-                    <span class="info-value">${context.security.browser || 'Unknown Browser'}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">Location</span>
-                    <span class="info-value">${context.security.location || 'Unknown Location'}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">IP Address</span>
-                    <span class="info-value">${context.security.ipAddress || 'Unknown'}</span>
-                  </div>
+            ${context.security ? `
+              <div class="info-card">
+                <div class="info-card-header">
+                  <span class="info-card-icon">🔍</span>
+                  Login Details
                 </div>
-              ` : ''}
-              
-              <div class="alert-box alert-success">
-                <div class="alert-title">Was This You?</div>
-                <div class="alert-text">
-                  If you recognize this activity, you can safely ignore this email.
+                <div class="info-row">
+                  <span class="info-label">Time</span>
+                  <span class="info-value">${new Date(context.security.timestamp).toLocaleString()}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Device</span>
+                  <span class="info-value">${context.security.device || 'Unknown Device'}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Browser</span>
+                  <span class="info-value">${context.security.browser || 'Unknown Browser'}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Location</span>
+                  <span class="info-value">${context.security.location || 'Unknown Location'}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">IP Address</span>
+                  <span class="info-value">${context.security.ipAddress || 'Unknown'}</span>
                 </div>
               </div>
-              
-              <div class="button-center">
-                <a href="${context.company.website}/security/sessions" class="button">
-                  Review Account Activity
-                </a>
-              </div>
-              
-              <div class="alert-box alert-error">
-                <div class="alert-title">Unrecognized Login?</div>
-                <div class="alert-text">
-                  If you don't recognize this activity:
-                  <ul style="margin: 8px 0; padding-left: 20px;">
-                    <li>Change your password immediately</li>
-                    <li>Review your account activity</li>
-                    <li>Enable two-factor authentication</li>
-                    <li><a href="mailto:${context.company.supportEmail}" style="color: #dc2626; text-decoration: none; font-weight: 500;">Contact our security team</a></li>
-                  </ul>
-                </div>
+            ` : ''}
+            
+            <div class="alert-box alert-success">
+              <div class="alert-title">Was This You?</div>
+              <div class="alert-text">
+                If you recognize this activity, you can safely ignore this email.
               </div>
             </div>
             
-            <div class="footer">
-              <div class="footer-links">
-                <a href="${context.company.website}/security">Security</a>
-                <a href="${context.company.website}/settings">Settings</a>
-                <a href="${context.company.website}/support">Support</a>
+            <div class="button-center">
+              <a href="${context.company.website}/security/sessions" class="button">
+                Review Account Activity
+              </a>
+            </div>
+            
+            <div class="alert-box alert-error">
+              <div class="alert-title">Unrecognized Login?</div>
+              <div class="alert-text">
+                If you don't recognize this activity:
+                <ul style="margin: 8px 0; padding-left: 20px;">
+                  <li>Change your password immediately</li>
+                  <li>Review your account activity</li>
+                  <li>Enable two-factor authentication</li>
+                  <li><a href="mailto:${context.company.supportEmail}" style="color: #dc2626; text-decoration: none; font-weight: 500;">Contact our security team</a></li>
+                </ul>
               </div>
-              <div class="footer-text">
-                © ${new Date().getFullYear()} ${context.company.name}. Monitoring your security 24/7.
-                <br>
-                This security alert was sent to ${context.user.email}
-              </div>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <div style="text-align: center; color: #6b7280;">
+              <p>Questions about your account activity?</p>
+              <p style="margin-top: 8px;">
+                <a href="mailto:${context.company.supportEmail}" style="color: #0d9488; text-decoration: none; font-weight: 500;">Contact Support Team</a>
+              </p>
             </div>
           </div>
+          
+          <!-- Footer section within the same card -->
+          <div class="footer">
+            <div class="footer-links">
+              <a href="${context.company.website}/security">Security</a>
+              <a href="${context.company.website}/settings">Settings</a>
+              <a href="${context.company.website}/support">Support</a>
+            </div>
+            <div class="footer-text">
+              © ${new Date().getFullYear()} ${context.company.name}. Monitoring your security 24/7.
+              <br>
+              This security alert was sent to <span class="footer-email">${context.user.email}</span>
+            </div>
+          </div>
+          
         </div>
-      </body>
-      </html>
-    `;
-  }
+      </div>
+    </body>
+    </html>
+  `;
+}
 
   private getSuspiciousActivityTemplate(context: MailingContext): string {
     return `
