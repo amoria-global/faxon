@@ -37,6 +37,7 @@ router.use(authenticate); // All routes below require authentication
 // --- GUEST TOUR BOOKING ROUTES ---
 router.post('/bookings', validateGuest, validateTourBooking, tourController.createTourBooking);
 router.get('/guest/bookings', validateGuest, tourController.getMyTourBookings);
+router.get('/guest/bookings/:bookingId', validateGuest, tourController.getMyTourBookingById); // NEW: Get specific booking by ID
 router.post('/reviews', validateGuest, validateReviewPermissions, tourController.createTourReview);
 
 // --- TOUR GUIDE DASHBOARD & OVERVIEW ---

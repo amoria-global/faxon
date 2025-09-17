@@ -32,6 +32,34 @@ const prisma = new PrismaClient();
 export class BookingService {
   private emailService = new BrevoBookingMailingService();
 
+  // --- BLOCKED DATES HELPER METHODS ---
+  private async createBlockedDatesForBooking(
+    propertyId: number, 
+    checkIn: Date, 
+    checkOut: Date, 
+    bookingId: string, 
+    reason: string = "booked"
+  ): Promise<void> {
+    await prisma.blockedDate.create({
+      data: {
+        propertyId,
+        startDate: checkIn,
+        endDate: checkOut,
+        reason: `${reason} - Booking ID: ${bookingId}`,
+        isActive: true
+      }
+    });
+  }
+
+  private async removeBlockedDatesForBooking(bookingId: string): Promise<void> {
+    await prisma.blockedDate.deleteMany({
+      where: {
+        reason: { contains: `Booking ID: ${bookingId}` },
+        isActive: true
+      }
+    });
+  }
+
   // --- PROPERTY BOOKING METHODS ---
   async createPropertyBooking(userId: number, data: CreatePropertyBookingDto): Promise<PropertyBookingInfo> {
     // Validate property exists and is available
@@ -140,13 +168,27 @@ export class BookingService {
       }
     });
 
+    // Create blocked dates for the booking period
+    try {
+      await this.createBlockedDatesForBooking(
+        data.propertyId,
+        checkInDate,
+        checkOutDate,
+        booking.id,
+        "confirmed booking"
+      );
+    } catch (blockError) {
+      console.error('Failed to create blocked dates:', blockError);
+      // Continue even if blocked dates creation fails
+    }
+
     // Update property total bookings
     await prisma.property.update({
       where: { id: data.propertyId },
       data: { totalBookings: { increment: 1 } }
     });
 
-try {
+    try {
       // Send confirmation email to guest
       await this.emailService.sendBookingConfirmationEmail({
         user: {
@@ -242,33 +284,230 @@ try {
       }
     });
 
-    // ADD THIS EMAIL INTEGRATION FOR CANCELLATIONS:
-    if (data.status === 'cancelled') {
+    // Handle blocked dates based on status changes
+    if (data.status) {
       try {
-        await this.emailService.sendBookingCancellationEmail({
-          user: {
-            firstName: updatedBooking.guest.firstName,
-            lastName: updatedBooking.guest.lastName,
-            email: updatedBooking.guest.email,
-            id: updatedBooking.guestId
-          },
-          company: {
-            name: 'Jambolush',
-            website: 'https://jambolush.com',
-            supportEmail: 'support@jambolush.com',
-            logo: 'https://jambolush.com/logo.png'
-          },
-          booking: this.transformToPropertyBookingInfo(updatedBooking),
-          recipientType: 'guest',
-          cancellationReason: data.message || 'Booking has been cancelled as requested.'
-        });
-      } catch (emailError) {
-        console.error('Failed to send cancellation email:', emailError);
+        if (data.status === 'cancelled') {
+          // Remove blocked dates when booking is cancelled
+          await this.removeBlockedDatesForBooking(bookingId);
+          
+          // Send cancellation email
+          await this.emailService.sendBookingCancellationEmail({
+            user: {
+              firstName: updatedBooking.guest.firstName,
+              lastName: updatedBooking.guest.lastName,
+              email: updatedBooking.guest.email,
+              id: updatedBooking.guestId
+            },
+            company: {
+              name: 'Jambolush',
+              website: 'https://jambolush.com',
+              supportEmail: 'support@jambolush.com',
+              logo: 'https://jambolush.com/logo.png'
+            },
+            booking: this.transformToPropertyBookingInfo(updatedBooking),
+            recipientType: 'guest',
+            cancellationReason: data.message || 'Booking has been cancelled as requested.'
+          });
+        } else if (data.status === 'confirmed' && booking.status !== 'confirmed') {
+          // Ensure blocked dates exist when booking is confirmed
+          // (in case they weren't created initially or were removed)
+          await this.createBlockedDatesForBooking(
+            updatedBooking.propertyId,
+            updatedBooking.checkIn,
+            updatedBooking.checkOut,
+            bookingId,
+            "confirmed booking"
+          );
+        }
+      } catch (blockError) {
+        console.error('Failed to update blocked dates:', blockError);
+        // Continue even if blocked dates update fails
       }
     }
-    // END EMAIL INTEGRATION CODE
 
     return this.transformToPropertyBookingInfo(updatedBooking);
+  }
+
+  async updateBookingDates(
+    bookingId: string, 
+    userId: number, 
+    newCheckIn: Date, 
+    newCheckOut: Date
+  ): Promise<PropertyBookingInfo> {
+    const booking = await prisma.booking.findFirst({
+      where: {
+        id: bookingId,
+        OR: [
+          { guestId: userId },
+          { property: { hostId: userId } }
+        ]
+      }
+    });
+
+    if (!booking) {
+      throw new Error('Booking not found or access denied');
+    }
+
+    // Validate new dates don't conflict with other bookings
+    const conflictingBooking = await prisma.booking.findFirst({
+      where: {
+        propertyId: booking.propertyId,
+        id: { not: bookingId }, // Exclude current booking
+        status: { in: ['pending', 'confirmed'] },
+        OR: [
+          {
+            checkIn: { lte: newCheckIn },
+            checkOut: { gt: newCheckIn }
+          },
+          {
+            checkIn: { lt: newCheckOut },
+            checkOut: { gte: newCheckOut }
+          },
+          {
+            checkIn: { gte: newCheckIn },
+            checkOut: { lte: newCheckOut }
+          }
+        ]
+      }
+    });
+
+    if (conflictingBooking) {
+      throw new Error('New dates conflict with existing booking');
+    }
+
+    // Check for blocked dates in the new date range
+    const blockedDates = await prisma.blockedDate.findFirst({
+      where: {
+        propertyId: booking.propertyId,
+        isActive: true,
+        reason: { not: { contains: `Booking ID: ${bookingId}` } }, // Exclude current booking's blocked dates
+        OR: [
+          {
+            startDate: { lte: newCheckIn },
+            endDate: { gt: newCheckIn }
+          },
+          {
+            startDate: { lt: newCheckOut },
+            endDate: { gte: newCheckOut }
+          },
+          {
+            startDate: { gte: newCheckIn },
+            endDate: { lte: newCheckOut }
+          }
+        ]
+      }
+    });
+
+    if (blockedDates) {
+      throw new Error('Property is blocked for the new selected dates');
+    }
+
+    // Calculate new price
+    const nights = Math.ceil((newCheckOut.getTime() - newCheckIn.getTime()) / (1000 * 60 * 60 * 24));
+    const property = await prisma.property.findUnique({ where: { id: booking.propertyId } });
+    const newTotalPrice = nights === 2 && property?.pricePerTwoNights 
+      ? property.pricePerTwoNights 
+      : nights * (property?.pricePerNight || 0);
+
+    // Update booking with new dates and price
+    const updatedBooking = await prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        checkIn: newCheckIn,
+        checkOut: newCheckOut,
+        totalPrice: newTotalPrice
+      },
+      include: {
+        property: {
+          include: { host: true }
+        },
+        guest: true
+      }
+    });
+
+    // Update blocked dates
+    try {
+      // Remove old blocked dates
+      await this.removeBlockedDatesForBooking(bookingId);
+      
+      // Create new blocked dates
+      await this.createBlockedDatesForBooking(
+        booking.propertyId,
+        newCheckIn,
+        newCheckOut,
+        bookingId,
+        "updated booking"
+      );
+    } catch (blockError) {
+      console.error('Failed to update blocked dates for date change:', blockError);
+    }
+
+    return this.transformToPropertyBookingInfo(updatedBooking);
+  }
+
+  async getPropertyAvailability(
+    propertyId: number, 
+    startDate: Date, 
+    endDate: Date
+  ): Promise<{ isAvailable: boolean; blockedPeriods: Array<{ start: Date; end: Date; reason: string }> }> {
+    // Get all bookings in the date range
+    const bookings = await prisma.booking.findMany({
+      where: {
+        propertyId,
+        status: { in: ['pending', 'confirmed'] },
+        OR: [
+          {
+            checkIn: { lte: endDate },
+            checkOut: { gte: startDate }
+          }
+        ]
+      }
+    });
+
+    // Get all blocked dates in the date range
+    const blockedDates = await prisma.blockedDate.findMany({
+      where: {
+        propertyId,
+        isActive: true,
+        OR: [
+          {
+            startDate: { lte: endDate },
+            endDate: { gte: startDate }
+          }
+        ]
+      }
+    });
+
+    const blockedPeriods: Array<{ start: Date; end: Date; reason: string }> = [];
+
+    // Add booking periods
+    bookings.forEach(booking => {
+      blockedPeriods.push({
+        start: booking.checkIn,
+        end: booking.checkOut,
+        reason: `Booking ${booking.id}`
+      });
+    });
+
+    // Add blocked date periods
+    blockedDates.forEach(blocked => {
+      blockedPeriods.push({
+        start: blocked.startDate,
+        end: blocked.endDate,
+        reason: blocked.reason || 'Blocked by host'
+      });
+    });
+
+    // Check if the requested period overlaps with any blocked period
+    const isAvailable = !blockedPeriods.some(period => 
+      period.start < endDate && period.end > startDate
+    );
+
+    return {
+      isAvailable,
+      blockedPeriods: blockedPeriods.sort((a, b) => a.start.getTime() - b.start.getTime())
+    };
   }
 
   async searchPropertyBookings(userId: number, filters: PropertyBookingFilters, page: number = 1, limit: number = 20) {
@@ -421,7 +660,6 @@ try {
       data: { totalBookings: { increment: 1 } }
     });
 
-    // ADD THIS EMAIL INTEGRATION CODE HERE:
     try {
       // Send confirmation email to guest
       await this.emailService.sendBookingConfirmationEmail({
@@ -1105,9 +1343,6 @@ async clearWishlist(userId: number): Promise<void> {
     where: { userId }
   });
 }
-
-
-
 
 // --- HELPER METHODS ---
 private transformToPropertyBookingInfo(booking: any): PropertyBookingInfo {
