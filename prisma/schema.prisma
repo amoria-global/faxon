@@ -77,11 +77,26 @@ model User {
   reviews         Review[]
   wishlists       Wishlist[]
 
-  // PawaPay Payment Relations (Updated)
+  // Payment Relations
   wallet              Wallet?
   paymentTransactions PaymentTransaction[]
+  bankAccounts        BankAccount[]
   mobileMoneyAccounts MobileMoneyAccount[]
   paymentSettings     PaymentSettings?
+
+  // Add Escrow Relations
+  escrowTransactions            EscrowTransaction[]   @relation("UserEscrowTransactions")
+  escrowTransactionsAsRecipient EscrowTransaction[]   @relation("RecipientEscrowTransactions")
+  escrowDisputes                EscrowDispute[]       @relation("DisputedByUser")
+  escrowDisputesResolved        EscrowDispute[]       @relation("ResolvedByUser")
+  disputeEvidence               DisputeEvidence[]     @relation("EvidenceUploader")
+  disputeMessages               DisputeMessage[]      @relation("DisputeMessageSender")
+  escrowMilestones              EscrowMilestone[]     @relation("MilestoneCompleter")
+  escrowNotifications           EscrowNotification[]  @relation("EscrowNotificationUser")
+  escrowTemplates               EscrowTemplate[]      @relation("EscrowTemplateOwner")
+  escrowAnalytics               EscrowAnalytics[]     @relation("EscrowAnalyticsUser")
+  escrowLimits                  EscrowLimit?          @relation("UserEscrowLimits")
+  bulkEscrowOperations          BulkEscrowOperation[] @relation("BulkEscrowCreator")
 
   hostPayouts  Payout[]      @relation("HostPayouts")
   hostEarnings HostEarning[] @relation("HostEarnings")
@@ -784,7 +799,7 @@ model TourTag {
   @@map("tour_tags")
 }
 
-// --- PAWAPAY PAYMENT MODELS (Updated) ---
+// --- PAYMENT MODELS ---
 
 model Wallet {
   id     String @id @default(cuid())
@@ -821,16 +836,16 @@ model PaymentTransaction {
   user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Transaction Details
-  type     String // deposit, payout, refund, transfer, commission, fee
-  method   String // mobile_money, widget, bank_transfer, wallet, cash
+  type     String // deposit, withdrawal, transfer, refund, commission, fee
+  method   String // mobile_money, bank_transfer, card, wallet, cash
   amount   Float
   currency String @default("KES")
   status   String @default("pending") // pending, processing, completed, failed, cancelled, expired
 
   // References
-  reference            String  @unique
-  externalId           String? // External system reference
-  pawaPayTransactionId String? // PawaPay API transaction ID (replaces jengaTransactionId)
+  reference          String  @unique
+  externalId         String? // External system reference
+  jengaTransactionId String? // Jenga API transaction ID
 
   // Details
   description String?
@@ -840,12 +855,17 @@ model PaymentTransaction {
   charges   Float?
   netAmount Float?
 
-  // PawaPay Specific Fields
-  phoneNumber          String? // Mobile money phone number
-  correspondent        String? // PawaPay correspondent (e.g., MTN_MOMO_ZMB)
-  country              String? // Country code (e.g., ZMB, KEN)
-  originalTransactionId String? // For refunds, link to original transaction
-  pawaPayData          Json?   // Store full PawaPay response data
+  // Account Information
+  sourceAccount      String?
+  destinationAccount String?
+  phoneNumber        String?
+  bankCode           String?
+  accountName        String?
+
+  escrowTransactionId String?
+  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id], onDelete: SetNull)
+  isEscrowBased       Boolean            @default(false)
+  escrowStatus        String? // Maps to EscrowStatus
 
   // Failure Information
   failureReason String?
@@ -863,9 +883,7 @@ model PaymentTransaction {
   @@index([type])
   @@index([method])
   @@index([reference])
-  @@index([pawaPayTransactionId])
-  @@index([correspondent])
-  @@index([country])
+  @@index([jengaTransactionId])
   @@index([createdAt])
   @@map("payment_transactions")
 }
@@ -897,7 +915,7 @@ model WalletTransaction {
   @@map("wallet_transactions")
 }
 
-model MobileMoneyAccount {
+model BankAccount {
   id String @id @default(cuid())
 
   // User
@@ -905,11 +923,11 @@ model MobileMoneyAccount {
   user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Account Details
-  phoneNumber   String
-  correspondent String // PawaPay correspondent code (e.g., MTN_MOMO_ZMB, MPESA_KEN)
-  provider      String // Provider name (e.g., MTN, Safaricom, Airtel)
-  country       String // Country code (e.g., ZMB, KEN, UGA)
+  accountNumber String
   accountName   String
+  bankCode      String
+  bankName      String
+  branchCode    String?
 
   // Status
   isDefault  Boolean @default(false)
@@ -919,11 +937,504 @@ model MobileMoneyAccount {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([userId, phoneNumber, correspondent])
+  @@unique([userId, accountNumber, bankCode])
   @@index([userId])
-  @@index([correspondent])
-  @@index([country])
+  @@map("bank_accounts")
+}
+
+model MobileMoneyAccount {
+  id String @id @default(cuid())
+
+  // User
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Account Details
+  phoneNumber String
+  provider    String // mpesa, airtel, orange, mtn, tigo
+  accountName String
+
+  // Status
+  isDefault  Boolean @default(false)
+  isVerified Boolean @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, phoneNumber])
+  @@index([userId])
   @@map("mobile_money_accounts")
+}
+
+// Add these models to your existing Prisma schema
+
+// --- ESCROW TRANSACTION MODEL ---
+model EscrowTransaction {
+  id String @id @default(cuid())
+
+  // User Relations
+  userId      Int
+  user        User  @relation("UserEscrowTransactions", fields: [userId], references: [id], onDelete: Cascade)
+  recipientId Int?
+  recipient   User? @relation("RecipientEscrowTransactions", fields: [recipientId], references: [id], onDelete: SetNull)
+
+  // Transaction Details
+  type        String // escrow_deposit, escrow_withdrawal, escrow_transfer, p2p_escrow, escrow_release, escrow_refund
+  amount      Float
+  currency    String  @default("USD")
+  status      String  @default("pending") // pending, funded, released, disputed, resolved, cancelled, expired
+  reference   String  @unique
+  description String?
+
+  // Escrow Provider Details
+  escrowId   String? // External escrow provider ID
+  externalId String? // External transaction ID
+  paymentUrl String? // Payment URL for funding
+
+  // Escrow Terms and Conditions
+  escrowTerms       Json? // EscrowTerms object
+  releaseConditions Json? // Array of ReleaseCondition objects
+  disputeDeadline   DateTime?
+  autoReleaseDate   DateTime?
+
+  // Transfer specific
+  sourceEscrowId String? // For escrow transfers
+  transferType   String? // full, partial
+
+  // P2P specific
+  isP2P       Boolean @default(false)
+  notifyBySMS Boolean @default(false)
+
+  // Status Tracking
+  fundedAt           DateTime?
+  releasedAt         DateTime?
+  releasedBy         Int?
+  releaseReason      String?
+  disputedAt         DateTime?
+  disputedBy         Int?
+  disputeReason      String?
+  resolvedAt         DateTime?
+  resolvedBy         Int?
+  resolutionReason   String?
+  cancelledAt        DateTime?
+  cancellationReason String?
+
+  // Fees and Charges
+  fees      Float?
+  netAmount Float?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  disputes            EscrowDispute[]
+  notifications       EscrowNotification[]
+  milestones          EscrowMilestone[]
+  paymentTransactions PaymentTransaction[] // Add this
+  analytics           EscrowAnalytics[] // Add this
+
+  @@index([userId])
+  @@index([recipientId])
+  @@index([status])
+  @@index([type])
+  @@index([currency])
+  @@index([escrowId])
+  @@index([createdAt])
+  @@index([fundedAt])
+  @@index([releasedAt])
+  @@map("escrow_transactions")
+}
+
+// --- ESCROW DISPUTE MODEL ---
+model EscrowDispute {
+  id String @id @default(cuid())
+
+  // Relations
+  escrowTransactionId String
+  escrowTransaction   EscrowTransaction @relation(fields: [escrowTransactionId], references: [id], onDelete: Cascade)
+  disputedBy          Int
+  disputedByUser      User              @relation("DisputedByUser", fields: [disputedBy], references: [id], onDelete: Cascade)
+
+  // Dispute Details
+  disputeReason String
+  status        String  @default("open") // open, under_review, resolved, escalated, closed
+  priority      String  @default("medium") // low, medium, high, urgent
+  category      String? // non_delivery, defective_product, unauthorized_charge, etc.
+
+  // Resolution
+  resolution     Json? // Resolution object with decision, reason, etc.
+  resolvedBy     Int?
+  resolvedByUser User?     @relation("ResolvedByUser", fields: [resolvedBy], references: [id], onDelete: SetNull)
+  resolvedAt     DateTime?
+
+  // Additional Details
+  adminNotes  String? // Internal admin notes
+  publicNotes String? // Notes visible to both parties
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  evidence DisputeEvidence[]
+  messages DisputeMessage[]
+
+  @@index([escrowTransactionId])
+  @@index([disputedBy])
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+  @@map("escrow_disputes")
+}
+
+// --- DISPUTE EVIDENCE MODEL ---
+model DisputeEvidence {
+  id String @id @default(cuid())
+
+  // Relations
+  disputeId      String
+  dispute        EscrowDispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  uploadedBy     Int
+  uploadedByUser User          @relation("EvidenceUploader", fields: [uploadedBy], references: [id], onDelete: Cascade)
+
+  // Evidence Details
+  type        String // document, image, video, message, transaction_proof, screenshot
+  title       String
+  description String?
+  fileUrl     String?
+  fileName    String?
+  fileSize    Int? // in bytes
+  mimeType    String?
+
+  // Verification
+  isVerified Boolean   @default(false)
+  verifiedBy Int?
+  verifiedAt DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([disputeId])
+  @@index([uploadedBy])
+  @@index([type])
+  @@index([createdAt])
+  @@map("dispute_evidence")
+}
+
+// --- DISPUTE MESSAGE MODEL ---
+model DisputeMessage {
+  id String @id @default(cuid())
+
+  // Relations
+  disputeId String
+  dispute   EscrowDispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  senderId  Int
+  sender    User          @relation("DisputeMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  // Message Details
+  message     String
+  messageType String  @default("user") // user, admin, system, auto
+  isInternal  Boolean @default(false) // Only visible to admins
+
+  // Attachments
+  attachments Json? // Array of attachment URLs
+
+  // Read Status
+  isRead Boolean   @default(false)
+  readAt DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([disputeId])
+  @@index([senderId])
+  @@index([messageType])
+  @@index([createdAt])
+  @@map("dispute_messages")
+}
+
+// --- ESCROW MILESTONE MODEL ---
+model EscrowMilestone {
+  id String @id @default(cuid())
+
+  // Relations
+  escrowTransactionId String
+  escrowTransaction   EscrowTransaction @relation(fields: [escrowTransactionId], references: [id], onDelete: Cascade)
+
+  // Milestone Details
+  title       String
+  description String
+  amount      Float
+  percentage  Float
+  order       Int    @default(1)
+
+  // Status and Dates
+  status          String    @default("pending") // pending, completed, failed, skipped
+  dueDate         DateTime?
+  completedAt     DateTime?
+  completedBy     Int?
+  completedByUser User?     @relation("MilestoneCompleter", fields: [completedBy], references: [id], onDelete: SetNull)
+
+  // Evidence and Verification
+  evidence         Json? // Array of evidence URLs or data
+  requiresApproval Boolean   @default(true)
+  approvedBy       Int?
+  approvedAt       DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([escrowTransactionId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([order])
+  @@map("escrow_milestones")
+}
+
+// --- ESCROW NOTIFICATION MODEL ---
+model EscrowNotification {
+  id String @id @default(cuid())
+
+  // Relations
+  userId              Int
+  user                User               @relation("EscrowNotificationUser", fields: [userId], references: [id], onDelete: Cascade)
+  escrowTransactionId String?
+  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id], onDelete: SetNull)
+
+  // Notification Details
+  type    String // escrow_created, escrow_funded, release_requested, dispute_created, milestone_completed, etc.
+  title   String
+  message String
+  data    Json? // Additional notification data
+
+  // Delivery Channels
+  channels Json // Array: ["email", "sms", "push", "in_app"]
+
+  // Status
+  isRead Boolean   @default(false)
+  readAt DateTime?
+  sentAt DateTime?
+
+  // Delivery Status
+  emailSent Boolean @default(false)
+  smsSent   Boolean @default(false)
+  pushSent  Boolean @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([escrowTransactionId])
+  @@index([type])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("escrow_notifications")
+}
+
+// --- ESCROW TEMPLATE MODEL ---
+model EscrowTemplate {
+  id String @id @default(cuid())
+
+  // Owner
+  userId Int
+  user   User @relation("EscrowTemplateOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Template Details
+  name         String
+  description  String?
+  type         String // escrow_deposit, p2p_escrow, etc.
+  defaultTerms Json // EscrowTerms object
+
+  // Settings
+  isPublic Boolean @default(false)
+  isActive Boolean @default(true)
+
+  // Usage Statistics
+  usageCount Int       @default(0)
+  lastUsedAt DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@index([isPublic])
+  @@index([isActive])
+  @@index([usageCount])
+  @@map("escrow_templates")
+}
+
+// --- ESCROW ANALYTICS MODEL ---
+model EscrowAnalytics {
+  id String @id @default(cuid())
+
+  // Relations
+  escrowTransactionId String?
+  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id], onDelete: SetNull)
+  userId              Int?
+  user                User?              @relation("EscrowAnalyticsUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  // Event Details
+  eventType String // view, create, fund, release, dispute, etc.
+  eventData Json? // Additional event data
+
+  // Context
+  ipAddress String?
+  userAgent String?
+  referer   String?
+  sessionId String?
+
+  // Geographic Data
+  country  String?
+  city     String?
+  timezone String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@index([escrowTransactionId])
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@index([country])
+  @@map("escrow_analytics")
+}
+
+// --- ESCROW FEE STRUCTURE MODEL ---
+model EscrowFeeStructure {
+  id String @id @default(cuid())
+
+  // Fee Configuration
+  type     String // escrow_deposit, p2p_escrow, etc.
+  currency String
+  feeType  String // percentage, fixed, tiered
+
+  // Percentage Fees
+  percentage Float?
+  minFee     Float?
+  maxFee     Float?
+
+  // Fixed Fees
+  fixedAmount Float?
+
+  // Tiered Fees
+  tiers Json? // Array of tier objects
+
+  // Additional Fees
+  disputeFee          Float?
+  expeditedReleaseFee Float?
+  cancellationFee     Float?
+
+  // Settings
+  isActive      Boolean   @default(true)
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([currency])
+  @@index([isActive])
+  @@index([effectiveFrom])
+  @@map("escrow_fee_structures")
+}
+
+// --- ESCROW LIMIT MODEL ---
+model EscrowLimit {
+  id String @id @default(cuid())
+
+  // User
+  userId Int  @unique
+  user   User @relation("UserEscrowLimits", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Limits Configuration
+  currency String @default("USD")
+
+  // Transaction Limits
+  minTransactionAmount Float @default(1)
+  maxTransactionAmount Float @default(100000)
+
+  // Daily Limits
+  maxDailyAmount       Float @default(10000)
+  maxDailyTransactions Int   @default(10)
+
+  // Monthly Limits
+  maxMonthlyAmount       Float @default(100000)
+  maxMonthlyTransactions Int   @default(100)
+
+  // Holding Period Limits
+  minHoldingDays Int @default(1)
+  maxHoldingDays Int @default(365)
+
+  // KYC Requirements
+  requiresKYC Boolean @default(false)
+  kycLevel    String  @default("basic") // basic, intermediate, advanced
+
+  // Usage Tracking
+  dailyUsedAmount         Float    @default(0)
+  dailyUsedTransactions   Int      @default(0)
+  monthlyUsedAmount       Float    @default(0)
+  monthlyUsedTransactions Int      @default(0)
+  lastResetDate           DateTime @default(now())
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([currency])
+  @@map("escrow_limits")
+}
+
+// --- BULK ESCROW OPERATION MODEL ---
+model BulkEscrowOperation {
+  id String @id @default(cuid())
+
+  // Creator
+  userId Int
+  user   User @relation("BulkEscrowCreator", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Operation Details
+  templateId        String?
+  operationType     String // bulk_deposit, bulk_p2p, bulk_release
+  totalTransactions Int
+  totalAmount       Float
+  currency          String  @default("USD")
+
+  // Status
+  status       String @default("processing") // processing, completed, partial, failed
+  successCount Int    @default(0)
+  failureCount Int    @default(0)
+
+  // Configuration
+  commonTerms  Json? // Common escrow terms for all transactions
+  scheduleDate DateTime?
+
+  // Results
+  results Json? // Array of individual transaction results
+
+  // Error Handling
+  errorSummary Json? // Summary of errors encountered
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([userId])
+  @@index([status])
+  @@index([operationType])
+  @@index([createdAt])
+  @@map("bulk_escrow_operations")
 }
 
 model PaymentSettings {
@@ -935,10 +1446,10 @@ model PaymentSettings {
 
   // Settings
   defaultCurrency     String  @default("KES")
-  defaultCountry      String  @default("KEN")
-  autoDeposit         Boolean @default(false)
-  depositThreshold    Float?
-  defaultMobileAccount String?
+  autoWithdrawal      Boolean @default(false)
+  withdrawalThreshold Float?
+  defaultBankAccount  String?
+  defaultMobileNumber String?
 
   // Notifications
   notificationPreferences Json // Object: {"email": true, "sms": false, ...}
