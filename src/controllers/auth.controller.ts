@@ -2,6 +2,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthService } from '../services/auth.service';
 
+
 const authService = new AuthService();
 
 export class AuthController {
@@ -162,34 +163,40 @@ export class AuthController {
     }
   }
 
- async updateProfileImage(req: Request, res: Response, next: NextFunction) {
+async updateProfileImage(req: Request, res: Response, next: NextFunction) {
   try {
-    console.log('Request body keys:', Object.keys(req.body));
-    console.log('Request body:', req.body);
-    console.log('Content-Type:', req.headers['content-type']);
-    
     if (!req.user?.userId) {
       return res.status(401).json({ message: 'User not authenticated' });
     }
 
     const { imageUrl } = req.body;
-    console.log('Extracted imageUrl:', imageUrl ? imageUrl.substring(0, 50) + '...' : 'undefined');
     
     if (!imageUrl) {
       return res.status(400).json({ message: 'Image URL is required' });
     }
 
-    // Validate base64 image format
-    if (!imageUrl.startsWith('data:image/')) {
-      return res.status(400).json({ message: 'Invalid image format' });
+    // Optional: Validate that it's a proper Supabase URL for security
+    if (!imageUrl.startsWith('https://') || !imageUrl.includes('supabase.co')) {
+      return res.status(400).json({ message: 'Invalid image URL format' });
     }
 
     const user = await authService.updateProfileImage(parseInt(req.user.userId), imageUrl);
-    res.json({ profile: imageUrl, user });
+    
+    res.json({ 
+      success: true,
+      data: {
+        profile: imageUrl, 
+        user
+      },
+      message: 'Profile image updated successfully'
+    });
     
   } catch (error: any) {
     console.error('Backend error:', error);
-    res.status(400).json({ message: error.message });
+    res.status(400).json({ 
+      success: false,
+      message: error.message 
+    });
   }
 }
 
