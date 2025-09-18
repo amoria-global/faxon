@@ -16,8 +16,12 @@ import {
   UpdateUserProfileDto,
   UserSession,
   RefreshTokenDto,
-  AdminUpdateUserDto
+  AdminUpdateUserDto,
+  TourGuideLoginResponse,
+  TourGuideType,
+  DocumentType // Import DocumentType from types/auth.types
 } from '../types/auth.types';
+// Remove local DocumentType definition; use the imported one only
 
 const prisma = new PrismaClient();
 const googleClient = new OAuth2Client(config.googleClientId);
@@ -72,7 +76,7 @@ export class AuthService {
   }
 
   // --- REGISTRATION & LOGIN ---
-  async register(data: RegisterDto, req?: any): Promise<AuthResponse> {
+ async register(data: RegisterDto, req?: any): Promise<AuthResponse> {
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email }
     });
@@ -111,6 +115,12 @@ export class AuthService {
       specializations: data.specializations ? JSON.stringify(data.specializations) : undefined,
       licenseNumber: data.licenseNumber,
       certifications: data.certifications ? JSON.stringify(data.certifications) : undefined,
+      // Tour Guide Employment Type fields (without document URLs)
+      tourGuideType: data.tourGuideType,
+      nationalId: data.nationalId,
+      companyTIN: data.companyTIN,
+      companyName: data.companyName,
+      // Documents will be uploaded separately from frontend
     } : {};
     
     const user = await prisma.user.create({
@@ -169,7 +179,7 @@ export class AuthService {
     };
   }
 
-  async login(data: LoginDto, req?: any): Promise<AuthResponse> {
+    async login(data: LoginDto, req?: any): Promise<AuthResponse | TourGuideLoginResponse> {
     const user = await prisma.user.findUnique({
       where: { email: data.email }
     });
@@ -202,7 +212,7 @@ export class AuthService {
     const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email, user.userType);
     await this.createSession(user.id, refreshToken);
 
-    // Send login notification (optional, can be enabled/disabled)
+    // Send login notification
     try {
       const securityInfo = this.extractSecurityInfo(req);
       if (securityInfo) {
@@ -211,13 +221,82 @@ export class AuthService {
       }
     } catch (emailError) {
       console.error('Failed to send login notification:', emailError);
-      // Don't break login if email fails
     }
 
-    return { 
+    const baseResponse = { 
       user: this.transformToUserInfo(updatedUser), 
       accessToken, 
       refreshToken 
+    };
+
+    // Enhanced response for tour guides
+    if (user.userType === 'tourguide') {
+      const missingDocuments = this.getMissingDocuments(updatedUser);
+      return {
+        ...baseResponse,
+        tourGuideType: (updatedUser as any).tourGuideType as TourGuideType,
+        documentVerificationStatus: this.getDocumentVerificationStatus(updatedUser),
+        missingDocuments
+      };
+    }
+
+    return baseResponse;
+  }
+
+async updateDocumentUrl(
+    userId: number, 
+    documentType: 'verification' | 'employment',
+    documentUrl: string
+  ): Promise<UserInfo> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    if (user.userType !== 'tourguide') {
+      throw new Error('Document updates are only available for tour guides');
+    }
+
+    const updateData: any = {};
+    
+    if (documentType === 'verification') {
+      updateData.verificationDocument = documentUrl || null;
+    } else if (documentType === 'employment') {
+      updateData.employmentContract = documentUrl || null;
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: updateData
+    });
+
+    return this.transformToUserInfo(updatedUser);
+  }
+
+async getUserDocuments(userId: number): Promise<{
+    verificationDocument?: string;
+    employmentContract?: string;
+    tourGuideType?: TourGuideType;
+    documentVerificationStatus?: string;
+    missingDocuments?: string[];
+  }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    return {
+      verificationDocument: user.verificationDocument || undefined,
+      employmentContract: user.employmentContract || undefined,
+      tourGuideType: (user as any).tourGuideType as TourGuideType || undefined,
+      documentVerificationStatus: user.verificationStatus || 'pending',
+      missingDocuments: this.getMissingDocuments(user)
     };
   }
 
@@ -397,100 +476,100 @@ export class AuthService {
     return this.transformToUserInfo(user);
   }
 
-  async updateUserProfile(userId: number, data: UpdateUserProfileDto, req?: any): Promise<UserInfo> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId }
-  });
+async updateUserProfile(userId: number, data: UpdateUserProfileDto, req?: any): Promise<UserInfo> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
 
-  if (!user) {
-    throw new Error('User not found');
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Prepare update data object
+    const updateData: any = {};
+
+    // Handle name fields
+    if (data.firstName !== undefined) updateData.firstName = data.firstName;
+    if (data.lastName !== undefined) updateData.lastName = data.lastName;
+
+    // Handle contact information
+    if (data.phone !== undefined) updateData.phone = data.phone;
+    if (data.phoneCountryCode !== undefined) updateData.phoneCountryCode = data.phoneCountryCode;
+
+    // Handle location fields
+    if (data.country !== undefined) updateData.country = data.country;
+    if (data.state !== undefined) updateData.state = data.state;
+    if (data.province !== undefined) updateData.province = data.province;
+    if (data.city !== undefined) updateData.city = data.city;
+    if (data.street !== undefined) updateData.street = data.street;
+
+    // Handle all possible address/postal code fields
+    if (data.zipCode !== undefined) updateData.zipCode = data.zipCode;
+    if (data.postalCode !== undefined) updateData.postalCode = data.postalCode;
+    if (data.postcode !== undefined) updateData.postcode = data.postcode;
+    if (data.pinCode !== undefined) updateData.pinCode = data.pinCode;
+    if (data.eircode !== undefined) updateData.eircode = data.eircode;
+    if (data.cep !== undefined) updateData.cep = data.cep;
+
+    // Handle additional address fields
+    if (data.district !== undefined) updateData.district = data.district;
+    if (data.county !== undefined) updateData.county = data.county;
+    if (data.region !== undefined) updateData.region = data.region;
+
+    // Handle other profile fields
+    if (data.verificationStatus !== undefined) updateData.verificationStatus = data.verificationStatus;
+    if (data.preferredCommunication !== undefined) updateData.preferredCommunication = data.preferredCommunication;
+
+    // Handle tour guide specific fields
+    const tourGuideData: any = {};
+    if (data.bio !== undefined) tourGuideData.bio = data.bio;
+    if (data.experience !== undefined) tourGuideData.experience = data.experience;
+    if (data.languages !== undefined) {
+      tourGuideData.languages = data.languages ? JSON.stringify(data.languages) : null;
+    }
+    if (data.specializations !== undefined) {
+      tourGuideData.specializations = data.specializations ? JSON.stringify(data.specializations) : null;
+    }
+    if (data.licenseNumber !== undefined) tourGuideData.licenseNumber = data.licenseNumber;
+    if (data.certifications !== undefined) {
+      tourGuideData.certifications = data.certifications ? JSON.stringify(data.certifications) : null;
+    }
+
+    // Handle tour guide employment type fields (but NOT document URLs - those come through updateDocumentUrl)
+    if (data.tourGuideType !== undefined) tourGuideData.tourGuideType = data.tourGuideType;
+    if (data.nationalId !== undefined) tourGuideData.nationalId = data.nationalId;
+    if (data.companyTIN !== undefined) tourGuideData.companyTIN = data.companyTIN;
+    if (data.companyName !== undefined) tourGuideData.companyName = data.companyName;
+
+    // Merge tour guide data
+    Object.assign(updateData, tourGuideData);
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: updateData
+    });
+
+    // Send profile update notification
+    try {
+      const securityInfo = this.extractSecurityInfo(req);
+      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
+      await this.brevoService.sendProfileUpdateNotification(mailingContext);
+    } catch (emailError) {
+      console.error('Failed to send profile update notification:', emailError);
+    }
+
+    return this.transformToUserInfo(updatedUser);
   }
-
-  console.log('Updating user profile with data:', data);
-
-  // Prepare update data object
-  const updateData: any = {};
-
-  // Handle name fields
-  if (data.firstName !== undefined) updateData.firstName = data.firstName;
-  if (data.lastName !== undefined) updateData.lastName = data.lastName;
-
-  // Handle contact information
-  if (data.phone !== undefined) updateData.phone = data.phone;
-  if (data.phoneCountryCode !== undefined) updateData.phoneCountryCode = data.phoneCountryCode;
-
-  // Handle location fields
-  if (data.country !== undefined) updateData.country = data.country;
-  if (data.state !== undefined) updateData.state = data.state;
-  if (data.province !== undefined) updateData.province = data.province;
-  if (data.city !== undefined) updateData.city = data.city;
-  if (data.street !== undefined) updateData.street = data.street;
-
-  // Handle all possible address/postal code fields
-  if (data.zipCode !== undefined) updateData.zipCode = data.zipCode;
-  if (data.postalCode !== undefined) updateData.postalCode = data.postalCode;
-  if (data.postcode !== undefined) updateData.postcode = data.postcode;
-  if (data.pinCode !== undefined) updateData.pinCode = data.pinCode;
-  if (data.eircode !== undefined) updateData.eircode = data.eircode;
-  if (data.cep !== undefined) updateData.cep = data.cep;
-
-  // Handle additional address fields
-  if (data.district !== undefined) updateData.district = data.district;
-  if (data.county !== undefined) updateData.county = data.county;
-  if (data.region !== undefined) updateData.region = data.region;
-
-  // Handle other profile fields
-  if (data.verificationStatus !== undefined) updateData.verificationStatus = data.verificationStatus;
-  if (data.preferredCommunication !== undefined) updateData.preferredCommunication = data.preferredCommunication;
-
-  // Handle tour guide specific fields if provided
-  const tourGuideData: any = {};
-  if (data.bio !== undefined) tourGuideData.bio = data.bio;
-  if (data.experience !== undefined) tourGuideData.experience = data.experience;
-  if (data.languages !== undefined) {
-    tourGuideData.languages = data.languages ? JSON.stringify(data.languages) : null;
-  }
-  if (data.specializations !== undefined) {
-    tourGuideData.specializations = data.specializations ? JSON.stringify(data.specializations) : null;
-  }
-  if (data.licenseNumber !== undefined) tourGuideData.licenseNumber = data.licenseNumber;
-  if (data.certifications !== undefined) {
-    tourGuideData.certifications = data.certifications ? JSON.stringify(data.certifications) : null;
-  }
-
-  // Merge tour guide data if any exists
-  Object.assign(updateData, tourGuideData);
-
-  console.log('Final update data:', updateData);
-
-  const updatedUser = await prisma.user.update({
-    where: { id: userId },
-    data: updateData
-  });
-
-  console.log('User updated successfully:', updatedUser.id);
-
-  // Send profile update notification
-  try {
-    const securityInfo = this.extractSecurityInfo(req);
-    const mailingContext = this.createMailingContext(updatedUser, securityInfo);
-    await this.brevoService.sendProfileUpdateNotification(mailingContext);
-  } catch (emailError) {
-    console.error('Failed to send profile update notification:', emailError);
-  }
-
-  return this.transformToUserInfo(updatedUser);
-}
 
 // And make sure you have the updateProfileImage method:
 async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
-  const user = await prisma.user.update({
-    where: { id: userId },
-    data: { profileImage: imageUrl }
-  });
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { profileImage: imageUrl }
+    });
 
-  return this.transformToUserInfo(user);
-}
+    return this.transformToUserInfo(user);
+  }
 
   // --- PASSWORD MANAGEMENT ---
   async changePassword(userId: number, data: ChangePasswordDto, req?: any): Promise<void> {
@@ -1022,7 +1101,42 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
   }
 
   // --- UTILITY METHODS ---
-  private async generateTokens(userId: number, email: string, userType: string) {
+
+private getMissingDocuments(user: any): DocumentType[] {
+  const missing: DocumentType[] = [];
+  
+  if (user.userType === 'tourguide') {
+    if (!user.verificationDocument) {
+      if (user.tourGuideType === 'freelancer') {
+        missing.push('national_id');
+      } else if (user.tourGuideType === 'employed') {
+        missing.push('company_tin');
+      }
+    }
+    
+    if (user.tourGuideType === 'employed' && !user.employmentContract) {
+      missing.push('employment_contract');
+    }
+  }
+  
+  return missing;
+}
+
+private getDocumentVerificationStatus(user: any): 'pending' | 'approved' | 'rejected' | 'none' {
+  if (!user.verificationDocument) {
+    return 'none';
+  }
+  
+  if (user.verificationStatus === 'verified') {
+    return 'approved';
+  } else if (user.verificationStatus === 'rejected') {
+    return 'rejected';
+  }
+  
+  return 'pending';
+}
+
+private async generateTokens(userId: number, email: string, userType: string) {
     const accessToken = jwt.sign(
       { userId: userId.toString(), email, userType } as JwtPayload,
       config.jwtSecret,
@@ -1091,6 +1205,12 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
       isVerified: user.isVerified,
       licenseNumber: user.licenseNumber,
       certifications,
+      tourGuideType: user.tourGuideType,
+      nationalId: user.nationalId,
+      companyTIN: user.companyTIN,
+      companyName: user.companyName,
+      verificationDocument: user.verificationDocument,
+      employmentContract: user.employmentContract,
       verificationStatus: user.verificationStatus,
       preferredCommunication: user.preferredCommunication,
       hostNotes: user.hostNotes,

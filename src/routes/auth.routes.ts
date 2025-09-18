@@ -28,6 +28,14 @@ router.put('/me', authController.updateProfile);
 router.put('/me/image', authController.updateProfileImage);
 router.put('/me/password', authController.changePassword);
 
+router.put('/me/document-url', authController.updateDocumentUrl);
+router.get('/me/documents', authController.getUserDocuments);
+router.delete('/me/documents/:documentType', authController.removeDocumentUrl);
+
+// --- TOUR GUIDE SPECIFIC ROUTES ---
+router.get('/tourguide/profile', authorize('tourguide', 'admin'), authController.getCurrentUser);
+router.put('/tourguide/employment-type', authorize('tourguide', 'admin'), authController.updateTourGuideType);
+
 // --- ADMIN ROUTES (might need additional admin middleware) ---
 router.get('/users', authController.getAllUsers);
 router.get('/users/email/:email', authController.getUserByEmail);
@@ -66,12 +74,10 @@ router.get('/host/properties', authorize('host', 'admin'), (req, res) => {
   res.json({ message: 'Host properties endpoint - implement in property controller' });
 });
 
-// Example: Tour guide-specific endpoints  
 router.get('/tourguide/tours', authorize('tourguide', 'admin'), (req, res) => {
   res.json({ message: 'Tour guide tours endpoint - implement in tour controller' });
 });
 
-// Example: Agent-specific endpoints
 router.get('/agent/clients', authorize('agent', 'admin'), (req, res) => {
   res.json({ message: 'Agent clients endpoint - implement in agent controller' });
 });
