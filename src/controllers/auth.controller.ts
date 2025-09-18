@@ -16,24 +16,44 @@ export class AuthController {
 
       // Validate required fields based on user type
       if (!req.body.userType || req.body.userType === 'guest') {
-        // For regular signup (guests), all fields are required
         if (!req.body.firstName || !req.body.lastName || !req.body.email || !req.body.password) {
           return res.status(400).json({ 
             message: 'First name, last name, email, and password are required' 
           });
         }
       } else {
-        // For service providers, email is always required
         if (!req.body.email) {
           return res.status(400).json({ 
             message: 'Email is required' 
           });
         }
-        // Names or firstName/lastName required
         if (!req.body.names && (!req.body.firstName || !req.body.lastName)) {
           return res.status(400).json({ 
             message: 'Full name is required' 
           });
+        }
+      }
+
+      // Tour guide specific validation
+      if (req.body.userType === 'tourguide') {
+        if (!req.body.tourGuideType || !['freelancer', 'employed'].includes(req.body.tourGuideType)) {
+          return res.status(400).json({ 
+            message: 'Valid tour guide type (freelancer or employed) is required' 
+          });
+        }
+
+        if (req.body.tourGuideType === 'freelancer' && !req.body.nationalId) {
+          return res.status(400).json({ 
+            message: 'National ID is required for freelance tour guides' 
+          });
+        }
+
+        if (req.body.tourGuideType === 'employed') {
+          if (!req.body.companyTIN || !req.body.companyName) {
+            return res.status(400).json({ 
+              message: 'Company TIN and company name are required for employed tour guides' 
+            });
+          }
         }
       }
 
@@ -62,6 +82,142 @@ export class AuthController {
       res.status(401).json({ message: error.message });
     }
   }
+
+ async updateDocumentUrl(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({ message: 'User not authenticated' });
+      }
+
+      const { documentType, documentUrl } = req.body;
+      
+      if (!documentType || !['verification', 'employment'].includes(documentType)) {
+        return res.status(400).json({ 
+          message: 'Invalid document type. Must be "verification" or "employment"' 
+        });
+      }
+
+      if (!documentUrl || typeof documentUrl !== 'string') {
+        return res.status(400).json({ 
+          message: 'Document URL is required and must be a valid string' 
+        });
+      }
+
+      // Basic URL validation
+      try {
+        new URL(documentUrl);
+      } catch {
+        return res.status(400).json({ 
+          message: 'Invalid document URL format' 
+        });
+      }
+
+      const user = await authService.updateDocumentUrl(
+        parseInt(req.user.userId),
+        documentType,
+        documentUrl
+      );
+
+      res.json({
+        success: true,
+        data: { user },
+        message: 'Document URL updated successfully'
+      });
+    } catch (error: any) {
+      res.status(400).json({ 
+        success: false,
+        message: error.message 
+      });
+    }
+  }
+
+  async getUserDocuments(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({ message: 'User not authenticated' });
+      }
+
+      const documents = await authService.getUserDocuments(parseInt(req.user.userId));
+      
+      res.json({
+        success: true,
+        data: documents
+      });
+    } catch (error: any) {
+      res.status(500).json({ 
+        success: false,
+        message: error.message 
+      });
+    }
+  }
+
+  async removeDocumentUrl(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({ message: 'User not authenticated' });
+      }
+
+      const { documentType } = req.params;
+      
+      if (!documentType || !['verification', 'employment'].includes(documentType)) {
+        return res.status(400).json({ 
+          message: 'Invalid document type' 
+        });
+      }
+
+      // Set document URL to null
+      const user = await authService.updateDocumentUrl(
+        parseInt(req.user.userId),
+        documentType as 'verification' | 'employment',
+        '' // Empty string or null to remove
+      );
+
+      res.json({
+        success: true,
+        data: { user },
+        message: 'Document URL removed successfully'
+      });
+    } catch (error: any) {
+      res.status(400).json({ 
+        success: false,
+        message: error.message 
+      });
+    }
+  }
+
+  async updateTourGuideType(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({ message: 'User not authenticated' });
+      }
+
+      const { tourGuideType } = req.body;
+      
+      if (!tourGuideType || !['freelancer', 'employed'].includes(tourGuideType)) {
+        return res.status(400).json({ 
+          message: 'Invalid tour guide type. Must be "freelancer" or "employed"' 
+        });
+      }
+
+      const user = await authService.updateUserProfile(
+        parseInt(req.user.userId), 
+        { tourGuideType },
+        req
+      );
+
+      res.json({
+        success: true,
+        data: { user },
+        message: 'Tour guide type updated successfully'
+      });
+    } catch (error: any) {
+      res.status(400).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
+  }
+
 
   async googleAuth(req: Request, res: Response, next: NextFunction) {
     try {
@@ -139,7 +295,7 @@ export class AuthController {
   }
 
   // --- USER PROFILE MANAGEMENT ---
-  async getCurrentUser(req: Request, res: Response, next: NextFunction) {
+   async getCurrentUser(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.user?.userId) {
         return res.status(401).json({ message: 'User not authenticated' });
@@ -151,7 +307,8 @@ export class AuthController {
     }
   }
 
-  async updateProfile(req: Request, res: Response, next: NextFunction) {
+
+ async updateProfile(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.user?.userId) {
         return res.status(401).json({ message: 'User not authenticated' });
@@ -164,41 +321,42 @@ export class AuthController {
   }
 
 async updateProfileImage(req: Request, res: Response, next: NextFunction) {
-  try {
-    if (!req.user?.userId) {
-      return res.status(401).json({ message: 'User not authenticated' });
-    }
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({ message: 'User not authenticated' });
+      }
 
-    const { imageUrl } = req.body;
-    
-    if (!imageUrl) {
-      return res.status(400).json({ message: 'Image URL is required' });
-    }
+      const { imageUrl } = req.body;
+      
+      if (!imageUrl) {
+        return res.status(400).json({ message: 'Image URL is required' });
+      }
 
-    // Optional: Validate that it's a proper Supabase URL for security
-    if (!imageUrl.startsWith('https://') || !imageUrl.includes('supabase.co')) {
-      return res.status(400).json({ message: 'Invalid image URL format' });
-    }
+      // Optional: Validate that it's a proper Supabase URL for security
+      if (!imageUrl.startsWith('https://') || !imageUrl.includes('supabase.co')) {
+        return res.status(400).json({ message: 'Invalid image URL format' });
+      }
 
-    const user = await authService.updateProfileImage(parseInt(req.user.userId), imageUrl);
-    
-    res.json({ 
-      success: true,
-      data: {
-        profile: imageUrl, 
-        user
-      },
-      message: 'Profile image updated successfully'
-    });
-    
-  } catch (error: any) {
-    console.error('Backend error:', error);
-    res.status(400).json({ 
-      success: false,
-      message: error.message 
-    });
+      const user = await authService.updateProfileImage(parseInt(req.user.userId), imageUrl);
+      
+      res.json({ 
+        success: true,
+        data: {
+          profile: imageUrl, 
+          user
+        },
+        message: 'Profile image updated successfully'
+      });
+      
+    } catch (error: any) {
+      console.error('Backend error:', error);
+      res.status(400).json({ 
+        success: false,
+        message: error.message 
+      });
+    }
   }
-}
+
 
   async changePassword(req: Request, res: Response, next: NextFunction) {
     try {

@@ -1,10 +1,11 @@
+// src/types/auth.types.ts
 // --- AUTHENTICATION DTOs ---
 export interface RegisterDto {
   email: string;
   firstName?: string;
   lastName?: string;
-  names?: string; // Full name from BecomeHost
-  password?: string; // Optional for service providers
+  names?: string; 
+  password?: string; 
   phone?: string;
   phoneCountryCode?: string;
   country?: string;
@@ -28,6 +29,12 @@ export interface RegisterDto {
   specializations?: string[]; // Array of specializations
   licenseNumber?: string;
   certifications?: string[]; // Array of certifications
+  tourGuideType?: 'freelancer' | 'employed'; // New field
+  nationalId?: string; // For freelancers
+  companyTIN?: string; // For employed tour guides
+  verificationDocument?: string; // URL to uploaded document
+  companyName?: string; // For employed tour guides
+  employmentContract?: string;
 }
 
 export interface LoginDto {
@@ -104,6 +111,12 @@ export interface UserInfo {
   isVerified?: boolean;
   licenseNumber?: string;
   certifications?: string[]; // Parsed from JSON string
+  tourGuideType?: 'freelancer' | 'employed';
+  nationalId?: string;
+  companyTIN?: string;
+  verificationDocument?: string;
+  companyName?: string;
+  employmentContract?: string;
   
   // Additional fields from schema
   verificationStatus?: string;
@@ -150,10 +163,48 @@ export interface UpdateUserProfileDto {
   specializations?: string[];
   licenseNumber?: string;
   certifications?: string[];
+  tourGuideType?: 'freelancer' | 'employed';
+  nationalId?: string;
+  companyTIN?: string;
+  verificationDocument?: string;
+  companyName?: string;
+  employmentContract?: string;
   
   // Additional fields
   verificationStatus?: string;
   preferredCommunication?: string;
+}
+
+export interface DocumentUploadDto {
+  file: File;
+  documentType: 'national_id' | 'company_tin' | 'employment_contract';
+  userId: string;
+}
+
+export interface DocumentUploadResponse {
+  documentUrl: string;
+  message: string;
+}
+
+export interface DocumentValidation {
+  valid: boolean;
+  error?: string;
+}
+
+export interface TourGuideTypeSelectionDto {
+  tourGuideType: 'freelancer' | 'employed';
+}
+
+export interface TourGuideFormState {
+  tourGuideType: TourGuideType | '';
+  nationalId: string;
+  companyTIN: string;
+  companyName: string;
+  verificationDocument: File | null;
+  employmentContract: File | null;
+  uploadProgress: number;
+  isUploading: boolean;
+  documentError: string;
 }
 
 export interface UploadProfileImageDto {
@@ -185,6 +236,14 @@ export interface AuthResponse {
   accessToken: string;
   refreshToken: string;
   applicationId?: string; // For BecomeHost registration
+  requiresDocumentUpload?: boolean;
+  documentsToUpload?: DocumentType[];
+}
+
+export interface TourGuideLoginResponse extends AuthResponse {
+  tourGuideType?: TourGuideType;
+  documentVerificationStatus?: 'pending' | 'approved' | 'rejected' | 'none';
+  missingDocuments?: DocumentType[];
 }
 
 export interface ApiResponse<T = any> {
@@ -278,6 +337,8 @@ export interface ValidationError {
 export type AuthProvider = string; // 'manual' | 'google' | 'apple' - stored as string in DB
 export type UserStatus = string; // 'active' | 'inactive' | 'pending' | 'suspended' | 'unverified'
 export type UserType = string; // 'guest' | 'host' | 'tourguide' | 'agent' | 'admin'
+export type TourGuideType = 'freelancer' | 'employed';
+export type DocumentType = 'national_id' | 'company_tin' | 'employment_contract';
 export type AddressField = 'street' | 'city' | 'state' | 'province' | 'zipCode' | 'postalCode' | 'postcode' | 'pinCode' | 'eircode' | 'cep';
 
 // --- FORM STATE TYPES ---

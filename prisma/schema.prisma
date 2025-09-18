@@ -24,6 +24,14 @@ model User {
   phoneCountryCode String?
   profileImage     String?
 
+  // Tour Guide Employment Type fields
+  tourGuideType         String?    
+  nationalId           String?   
+  companyTIN           String?    
+  companyName          String?    
+  verificationDocument String?    
+  employmentContract   String?    
+
   // Address (flexible international support)
   country    String?
   state      String?
