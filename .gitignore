@@ -7,3 +7,9 @@ node_modules
 /src/generated/prisma
 
 .env.example
+
+/src/payment.service.ts
+/src/payment.routes.ts
+/src/payment.middleware.ts
+/src/payment.controller.ts
+/src/payment.types.ts

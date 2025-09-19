@@ -1261,7 +1261,7 @@ export class PaymentController {
       res.status(500).json(errorResponse);
     }
   };
-
+ 
   // --- CURRENCY SUPPORT ---
   getSupportedCurrencies = async (req: Request, res: Response): Promise<void> => {
     try {

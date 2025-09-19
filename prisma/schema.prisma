@@ -1,3 +1,5 @@
+// prisma/schema.prisma - Updated for Escrow Payment System
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,6 +9,8 @@ datasource db {
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
+
+// === USER MANAGEMENT ===
 
 model User {
   id        Int     @id @default(autoincrement())
@@ -44,24 +48,24 @@ model User {
   pinCode    String?
   eircode    String?
   cep        String?
-  district  String?
-  county    String?
-  region    String?
+  district   String?
+  county     String?
+  region     String?
 
   // User Management
   status   String @default("pending") // active, inactive, pending, suspended, unverified
   userType String @default("guest") // guest, agent, tourguide, host
 
-  // Tour Guide Specific Fields (when userType = "tourguide")
+  // Tour Guide Specific Fields
   bio             String?
-  experience      Int? // years of experience
-  languages       Json? // Array of languages: ["English", "Spanish"]
-  specializations Json? // Array of specializations: ["Wildlife", "History"]
+  experience      Int?
+  languages       Json?
+  specializations Json?
   rating          Float   @default(0)
   totalTours      Int     @default(0)
   isVerified      Boolean @default(false)
   licenseNumber   String?
-  certifications  Json? // Array of certifications
+  certifications  Json?
 
   // Activity Tracking
   totalSessions    Int     @default(0)
@@ -85,29 +89,27 @@ model User {
   reviews         Review[]
   wishlists       Wishlist[]
 
-  // Payment Relations
-  wallet              Wallet?
+  // Escrow Relations (NEW)
+  escrowTransactions            EscrowTransaction[]   @relation("UserEscrowTransactions")
+  escrowTransactionsAsRecipient EscrowTransaction[]   @relation("RecipientEscrowTransactions")
+  withdrawalRequests            WithdrawalRequest[]
+  escrowNotifications           EscrowNotification[]
+
+  // Wallet Relations (UPDATED)
+  wallet Wallet?
+
+  // Payment Relations (UPDATED - keeping for compatibility)
   paymentTransactions PaymentTransaction[]
   bankAccounts        BankAccount[]
   mobileMoneyAccounts MobileMoneyAccount[]
   paymentSettings     PaymentSettings?
 
-  // Add Escrow Relations
-  escrowTransactions            EscrowTransaction[]   @relation("UserEscrowTransactions")
-  escrowTransactionsAsRecipient EscrowTransaction[]   @relation("RecipientEscrowTransactions")
-  escrowDisputes                EscrowDispute[]       @relation("DisputedByUser")
-  escrowDisputesResolved        EscrowDispute[]       @relation("ResolvedByUser")
-  disputeEvidence               DisputeEvidence[]     @relation("EvidenceUploader")
-  disputeMessages               DisputeMessage[]      @relation("DisputeMessageSender")
-  escrowMilestones              EscrowMilestone[]     @relation("MilestoneCompleter")
-  escrowNotifications           EscrowNotification[]  @relation("EscrowNotificationUser")
-  escrowTemplates               EscrowTemplate[]      @relation("EscrowTemplateOwner")
-  escrowAnalytics               EscrowAnalytics[]     @relation("EscrowAnalyticsUser")
-  escrowLimits                  EscrowLimit?          @relation("UserEscrowLimits")
-  bulkEscrowOperations          BulkEscrowOperation[] @relation("BulkEscrowCreator")
-
-  hostPayouts  Payout[]      @relation("HostPayouts")
-  hostEarnings HostEarning[] @relation("HostEarnings")
+  // Host/Agent Relations
+  hostPayouts      Payout[]        @relation("HostPayouts")
+  hostEarnings     HostEarning[]   @relation("HostEarnings")
+  agentBookings    AgentBooking[]  @relation("AgentBookings")
+  clientBookings   AgentBooking[]  @relation("ClientBookings")
+  tourEarnings     TourEarnings[]
 
   // Tour Relations
   toursAsGuide         Tour[]             @relation("TourGuideToTours")
@@ -116,16 +118,12 @@ model User {
   sentTourMessages     TourMessage[]      @relation("TourMessageSender")
   receivedTourMessages TourMessage[]      @relation("TourMessageReceiver")
   tourNotifications    TourNotification[]
-  tourEarnings         TourEarnings[]
 
   // Enhanced guest management
-  verificationStatus     String? @default("unverified") // verified, pending, unverified
-  preferredCommunication String? @default("email") // email, phone, both
-  hostNotes              String? // Host's private notes about guest
-  averageRating          Float   @default(0) // Guest's average rating from hosts
-
-  agentBookings  AgentBooking[] @relation("AgentBookings")
-  clientBookings AgentBooking[] @relation("ClientBookings")
+  verificationStatus     String? @default("unverified")
+  preferredCommunication String? @default("email")
+  hostNotes              String?
+  averageRating          Float   @default(0)
 
   @@map("users")
 }
@@ -159,17 +157,216 @@ model UserSession {
   @@map("user_sessions")
 }
 
+// === ESCROW PAYMENT SYSTEM (NEW) ===
+
+model EscrowTransaction {
+  id String @id @default(cuid())
+
+  // User Relations
+  userId      Int
+  user        User  @relation("UserEscrowTransactions", fields: [userId], references: [id], onDelete: Cascade)
+  recipientId Int?
+  recipient   User? @relation("RecipientEscrowTransactions", fields: [recipientId], references: [id], onDelete: SetNull)
+
+  // Transaction Details
+  type        String // DEPOSIT, RELEASE, WITHDRAWAL, REFUND
+  amount      Float
+  currency    String  @default("RWF")
+  status      String  @default("PENDING") // PENDING, HELD, READY, RELEASED, REFUNDED, FAILED, CANCELLED
+  reference   String  @unique
+  description String?
+
+  // Pesapal Integration
+  escrowId   String? // Pesapal order ID
+  externalId String? // Pesapal tracking ID
+  paymentUrl String? // Pesapal checkout URL
+
+  // P2P and Transfer specific
+  isP2P            Boolean @default(false)
+  sourceEscrowId   String?
+  transferType     String? // full, partial
+  notifyBySMS      Boolean @default(false)
+
+  // Status Tracking
+  fundedAt           DateTime?
+  releasedAt         DateTime?
+  releasedBy         Int?
+  releaseReason      String?
+  disputedAt         DateTime?
+  disputedBy         Int?
+  disputeReason      String?
+  resolvedAt         DateTime?
+  resolvedBy         Int?
+  resolutionReason   String?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  refundedAt         DateTime?
+
+  // Additional Data
+  metadata Json? // Store split rules, billing info, etc.
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  notifications EscrowNotification[]
+
+  @@index([userId])
+  @@index([recipientId])
+  @@index([status])
+  @@index([type])
+  @@index([currency])
+  @@index([escrowId])
+  @@index([reference])
+  @@index([createdAt])
+  @@map("escrow_transactions")
+}
+
+model WithdrawalRequest {
+  id String @id @default(cuid())
+
+  // User
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Withdrawal Details
+  amount   Float
+  currency String @default("RWF")
+  method   String // MOBILE, BANK
+  status   String @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+
+  // Destination (stored as JSON for flexibility)
+  destination Json // { holderName, accountNumber, mobileProvider?, bankCode?, etc. }
+
+  // Processing
+  pesapalPayoutId String? // Pesapal payout request ID
+  reference       String  @unique
+  failureReason   String?
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([userId])
+  @@index([status])
+  @@index([reference])
+  @@index([createdAt])
+  @@map("withdrawal_requests")
+}
+
+model EscrowNotification {
+  id String @id @default(cuid())
+
+  // User
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Related Transaction (optional)
+  escrowTransactionId String?
+  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id], onDelete: SetNull)
+
+  // Notification Details
+  type    String // escrow_created, escrow_funded, release_requested, etc.
+  title   String
+  message String
+  data    Json? // Additional notification data
+
+  // Delivery Channels
+  channels Json // ["email", "sms", "push", "in_app"]
+
+  // Status
+  isRead Boolean   @default(false)
+  readAt DateTime?
+  sentAt DateTime?
+
+  // Delivery Status
+  emailSent Boolean @default(false)
+  smsSent   Boolean @default(false)
+  pushSent  Boolean @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([escrowTransactionId])
+  @@index([type])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("escrow_notifications")
+}
+
+// === WALLET SYSTEM (UPDATED) ===
+
+model Wallet {
+  id     String @id @default(cuid())
+  userId Int    @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Balance
+  balance  Float  @default(0)
+  currency String @default("RWF")
+
+  // Account Details
+  accountNumber String?
+
+  // Status
+  isActive   Boolean @default(true)
+  isVerified Boolean @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  transactions WalletTransaction[]
+
+  @@index([userId])
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id String @id @default(cuid())
+
+  // Wallet
+  walletId String
+  wallet   Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  // Transaction Details
+  type          String // credit, debit
+  amount        Float
+  balanceBefore Float
+  balanceAfter  Float
+
+  // References
+  reference     String
+  description   String
+  transactionId String? // Link to PaymentTransaction or EscrowTransaction
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@index([walletId])
+  @@index([reference])
+  @@index([createdAt])
+  @@map("wallet_transactions")
+}
+
+// === EXISTING MODELS (Keeping for backward compatibility) ===
+
 model Property {
   id Int @id @default(autoincrement())
 
   // Basic Information
-  name        String
-  location    String
-  upiNumber    String?
-  propertyAddress     String?
-  type        String // apartment, house, villa, condo, townhouse, studio, loft
-  category    String // entire_place, private_room, shared_room
-  description String?
+  name            String
+  location        String
+  upiNumber       String?
+  propertyAddress String?
+  type            String
+  category        String
+  description     String?
 
   // Pricing
   pricePerNight     Float
@@ -181,16 +378,16 @@ model Property {
   maxGuests Int
 
   // Features & Amenities
-  features Json // Array: ["WiFi", "Pool", "Kitchen"]
+  features Json
 
   // Media
-  images  Json // Object: {"livingRoom": ["url1"], "kitchen": ["url2"]}
-  video3D String? // URL to 3D tour video
+  images  Json
+  video3D String?
 
   // Host Information
   hostId       Int
   host         User  @relation(fields: [hostId], references: [id], onDelete: Cascade)
-  ownerDetails Json? // Owner details object (if different from host)
+  ownerDetails Json?
 
   // Availability
   availableFrom DateTime?
@@ -199,7 +396,7 @@ model Property {
   maxStay       Int?
 
   // Status & Verification
-  status        String  @default("pending") // active, inactive, pending, suspended, draft
+  status        String  @default("pending")
   isVerified    Boolean @default(false)
   isInstantBook Boolean @default(false)
 
@@ -223,11 +420,6 @@ model Property {
 
   @@index([hostId])
   @@index([status])
-  @@index([location])
-  @@index([type])
-  @@index([category])
-  @@index([pricePerNight])
-  @@index([averageRating])
   @@map("properties")
 }
 
@@ -251,22 +443,21 @@ model Booking {
   hostResponse String?
 
   // Status
-  status String @default("pending") // pending, confirmed, cancelled, completed, refunded
+  status String @default("pending")
 
   // Payment
-  paymentStatus String  @default("pending") // pending, paid, refunded
+  paymentStatus String  @default("pending")
   paymentMethod String?
   transactionId String?
 
   // Enhanced booking management
-  notes                String? // Host's private notes about this booking
-  specialRequests      String? // Guest's special requests
-  checkInInstructions  String? // Host's check-in instructions
-  checkOutInstructions String? // Host's check-out instructions
-  guestNotes           String? // Internal guest notes
-
-  cancellationReason String? // Why booking was cancelled
-  cancelledAt        DateTime? // When booking was cancelled
+  notes                    String?
+  specialRequests          String?
+  checkInInstructions      String?
+  checkOutInstructions     String?
+  guestNotes               String?
+  cancellationReason       String?
+  cancelledAt              DateTime?
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -279,7 +470,6 @@ model Booking {
   @@index([propertyId])
   @@index([guestId])
   @@index([status])
-  @@index([checkIn, checkOut])
   @@map("bookings")
 }
 
@@ -295,9 +485,9 @@ model Review {
   booking    Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
 
   // Review Content
-  rating  Int // 1-5 stars
+  rating  Int
   comment String
-  images  Json? // Array of image URLs: ["url1", "url2"]
+  images  Json?
 
   // Host Response
   response     String?
@@ -311,7 +501,7 @@ model Review {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([propertyId, userId]) // One review per user per property
+  @@unique([propertyId, userId])
   @@index([propertyId])
   @@index([userId])
   @@index([rating])
@@ -328,7 +518,7 @@ model BlockedDate {
   // Date Range
   startDate DateTime
   endDate   DateTime
-  reason    String? // "maintenance", "personal use", "blocked by host", etc.
+  reason    String?
 
   // Status
   isActive Boolean @default(true)
@@ -351,13 +541,13 @@ model PricingRule {
 
   // Rule Details
   name      String
-  type      String // "seasonal", "weekly", "monthly", "custom"
+  type      String
   startDate DateTime
   endDate   DateTime
 
   // Price Modification
-  priceModifier Float // Amount to add/subtract or percentage
-  modifierType  String // "percentage" or "fixed"
+  priceModifier Float
+  modifierType  String
 
   // Conditions
   minStay Int?
@@ -392,47 +582,26 @@ model Wishlist {
   @@map("wishlists")
 }
 
-model PropertyView {
-  id String @id @default(cuid())
-
-  // Relations
-  propertyId Int
-  userId     Int? // Null for anonymous views
-
-  // View Details
-  ipAddress String?
-  userAgent String?
-  referer   String?
-
-  // Timestamps
-  createdAt DateTime @default(now())
-
-  @@index([propertyId])
-  @@index([userId])
-  @@index([createdAt])
-  @@map("property_views")
-}
-
-// --- TOUR MODELS ---
+// === TOUR MODELS (Keeping existing structure) ===
 
 model Tour {
   id String @id @default(cuid())
 
   // Basic Information
   title            String
-  description      String // Long description
-  shortDescription String // Short summary for listings
+  description      String
+  shortDescription String
 
   // Tour Guide
   tourGuideId Int
   tourGuide   User @relation("TourGuideToTours", fields: [tourGuideId], references: [id], onDelete: Cascade)
 
   // Categories & Types
-  category String // adventure, cultural, nature, food, historical, photography, wildlife, spiritual, wellness, urban, beach, mountain
-  type     String // walking, cycling, driving, boat, helicopter, bus, train, mixed
+  category String
+  type     String
 
   // Duration & Capacity
-  duration     Float // in hours (can be decimal like 2.5 hours)
+  duration     Float
   maxGroupSize Int
   minGroupSize Int   @default(1)
 
@@ -441,18 +610,18 @@ model Tour {
   currency String @default("USD")
 
   // Media
-  images Json // Object: {"main": ["url1"], "activity": ["url2"], "landscape": ["url3"]}
+  images Json
 
   // Itinerary
-  itinerary Json // Array of itinerary items with order, title, description, duration
+  itinerary Json
 
   // Details
-  inclusions   Json // Array: ["Transportation", "Guide", "Meals"]
-  exclusions   Json // Array: ["Personal expenses", "Tips"]
-  requirements Json // Array: ["Valid ID", "Comfortable shoes"]
+  inclusions   Json
+  exclusions   Json
+  requirements Json
 
   // Difficulty & Location
-  difficulty      String // easy, moderate, challenging, extreme
+  difficulty      String
   locationCountry String
   locationState   String?
   locationCity    String
@@ -470,7 +639,7 @@ model Tour {
   views         Int     @default(0)
 
   // Tags
-  tags Json // Array: ["adventure", "family-friendly", "wildlife"]
+  tags Json
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -482,293 +651,11 @@ model Tour {
   reviews   TourReview[]
   messages  TourMessage[]
   earnings  TourEarnings[]
-  analytics TourAnalytics[]
 
   @@index([tourGuideId])
   @@index([category])
-  @@index([type])
-  @@index([difficulty])
   @@index([isActive])
-  @@index([rating])
-  @@index([locationCountry, locationCity])
-  @@index([createdAt])
   @@map("tours")
-}
-
-model TourSchedule {
-  id String @id @default(cuid())
-
-  // Tour
-  tourId      String
-  tour        Tour   @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  tourGuideId Int
-
-  // Schedule Details
-  startDate DateTime
-  endDate   DateTime
-  startTime String // HH:MM format (e.g., "09:00")
-  endTime   String // HH:MM format (e.g., "17:00")
-
-  // Availability
-  availableSlots Int
-  bookedSlots    Int     @default(0)
-  isAvailable    Boolean @default(true)
-
-  // Pricing Override
-  price        Float? // Override tour price if needed for special schedules
-  specialNotes String? // Special notes for this schedule
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  bookings TourBooking[]
-
-  @@index([tourId])
-  @@index([tourGuideId])
-  @@index([startDate, endDate])
-  @@index([isAvailable])
-  @@map("tour_schedules")
-}
-
-model TourBooking {
-  id String @id @default(cuid())
-
-  // Relations
-  userId      Int
-  user        User         @relation("GuestTourBookings", fields: [userId], references: [id], onDelete: Cascade)
-  tourId      String
-  tour        Tour         @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  scheduleId  String
-  schedule    TourSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-  tourGuideId Int
-
-  // Booking Details
-  numberOfParticipants Int
-  participants         Json // Array of participant objects with name, age, emergency contacts
-  specialRequests      String?
-
-  // Pricing
-  totalAmount Float
-  currency    String @default("USD")
-
-  // Status
-  status        String  @default("pending") // pending, confirmed, in_progress, completed, cancelled, refunded, no_show
-  paymentStatus String  @default("pending") // pending, paid, failed, refunded, partially_refunded
-  paymentId     String?
-
-  // Check-in/out
-  checkInStatus String    @default("not_checked_in") // not_checked_in, checked_in, checked_out, no_show
-  checkInTime   DateTime?
-  checkOutTime  DateTime?
-
-  // Refund
-  refundAmount Float?
-  refundReason String?
-
-  // Internal Notes
-  guestNotes String? // Internal guest notes
-
-  // Timestamps
-  bookingDate DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relations
-  reviews  TourReview[]
-  messages TourMessage[]
-  earnings TourEarnings[]
-
-  @@index([userId])
-  @@index([tourId])
-  @@index([scheduleId])
-  @@index([tourGuideId])
-  @@index([status])
-  @@index([paymentStatus])
-  @@index([bookingDate])
-  @@map("tour_bookings")
-}
-
-model TourReview {
-  id String @id @default(cuid())
-
-  // Relations
-  bookingId   String
-  booking     TourBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  userId      Int
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tourId      String
-  tour        Tour        @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  tourGuideId Int
-
-  // Review Content
-  rating         Int // 1-5 stars
-  comment        String
-  images         Json? // Array of image URLs: ["url1", "url2"]
-  pros           Json // Array of positive aspects: ["Great guide", "Amazing views"]
-  cons           Json // Array of negative aspects: ["Too long", "Expensive"]
-  wouldRecommend Boolean
-  isAnonymous    Boolean @default(false)
-
-  // Verification & Status
-  isVerified Boolean @default(true)
-  isVisible  Boolean @default(true)
-  isReported Boolean @default(false)
-
-  // Engagement
-  helpfulCount Int @default(0)
-  reportCount  Int @default(0)
-
-  // Guide Response
-  response     String?
-  responseDate DateTime?
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([bookingId, userId]) // One review per user per booking
-  @@index([userId])
-  @@index([tourId])
-  @@index([tourGuideId])
-  @@index([rating])
-  @@index([isVisible])
-  @@index([createdAt])
-  @@map("tour_reviews")
-}
-
-model TourMessage {
-  id String @id @default(cuid())
-
-  // Relations
-  senderId   Int
-  sender     User @relation("TourMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-  receiverId Int
-  receiver   User @relation("TourMessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
-
-  // Context
-  bookingId String?
-  booking   TourBooking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  tourId    String?
-  tour      Tour?        @relation(fields: [tourId], references: [id], onDelete: SetNull)
-
-  // Message Content
-  subject     String?
-  message     String
-  attachments Json? // Array of attachment URLs
-  messageType String // booking_inquiry, booking_confirmation, tour_update, general, support, system
-
-  // Status
-  isRead Boolean @default(false)
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([senderId])
-  @@index([receiverId])
-  @@index([bookingId])
-  @@index([tourId])
-  @@index([isRead])
-  @@index([createdAt])
-  @@map("tour_messages")
-}
-
-model TourNotification {
-  id String @id @default(cuid())
-
-  // User
-  userId Int
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Notification Details
-  type    String // booking_received, booking_confirmed, booking_cancelled, tour_reminder, review_received, payment_received, message_received, schedule_reminder, system_update
-  title   String
-  message String
-  data    Json? // Additional data (tour ID, booking ID, etc.)
-
-  // Status
-  isRead Boolean @default(false)
-
-  // Timestamps
-  createdAt DateTime @default(now())
-
-  @@index([userId])
-  @@index([type])
-  @@index([isRead])
-  @@index([createdAt])
-  @@map("tour_notifications")
-}
-
-model TourEarnings {
-  id String @id @default(cuid())
-
-  // Relations
-  tourGuideId Int
-  tourGuide   User        @relation(fields: [tourGuideId], references: [id], onDelete: Cascade)
-  bookingId   String
-  booking     TourBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  tourId      String
-  tour        Tour        @relation(fields: [tourId], references: [id], onDelete: Cascade)
-
-  // Financial Details
-  amount     Float // Gross amount from booking
-  commission Float // Platform commission amount
-  netAmount  Float // Amount after commission (what guide receives)
-  currency   String @default("USD")
-
-  // Status
-  status String @default("pending") // pending, approved, paid, disputed
-
-  // Payout Details
-  payoutDate    DateTime?
-  payoutMethod  String? // bank_transfer, mobile_money, wallet
-  transactionId String? // Reference to payment transaction
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([tourGuideId])
-  @@index([bookingId])
-  @@index([tourId])
-  @@index([status])
-  @@index([payoutDate])
-  @@index([createdAt])
-  @@map("tour_earnings")
-}
-
-model TourAnalytics {
-  id String @id @default(cuid())
-
-  // Relations
-  tourId String
-  tour   Tour   @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  userId Int? // Null for anonymous views
-
-  // Analytics Data
-  eventType String // view, click, booking_start, booking_complete, share, favorite
-  ipAddress String?
-  userAgent String?
-  referer   String?
-  sessionId String?
-
-  // Geo Data (optional)
-  country String?
-  city    String?
-
-  // Additional Data
-  metadata Json? // Additional event data
-
-  // Timestamps
-  createdAt DateTime @default(now())
-
-  @@index([tourId])
-  @@index([userId])
-  @@index([eventType])
-  @@index([createdAt])
-  @@map("tour_analytics")
 }
 
 model TourCategory {
@@ -790,51 +677,241 @@ model TourCategory {
   @@map("tour_categories")
 }
 
-model TourTag {
-  id         String  @id @default(cuid())
-  name       String  @unique
-  slug       String  @unique
-  color      String?
-  isActive   Boolean @default(true)
-  usageCount Int     @default(0) // Track how often this tag is used
+model TourSchedule {
+  id String @id @default(cuid())
 
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // Tour
+  tourId      String
+  tour        Tour   @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  tourGuideId Int
 
-  @@index([isActive])
-  @@index([usageCount])
-  @@map("tour_tags")
-}
+  // Schedule Details
+  startDate DateTime
+  endDate   DateTime
+  startTime String
+  endTime   String
 
-// --- PAYMENT MODELS ---
+  // Availability
+  availableSlots Int
+  bookedSlots    Int     @default(0)
+  isAvailable    Boolean @default(true)
 
-model Wallet {
-  id     String @id @default(cuid())
-  userId Int    @unique
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Balance
-  balance  Float  @default(0)
-  currency String @default("KES")
-
-  // Account Details
-  accountNumber String?
-
-  // Status
-  isActive   Boolean @default(true)
-  isVerified Boolean @default(false)
+  // Pricing Override
+  price        Float?
+  specialNotes String?
 
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  transactions WalletTransaction[]
+  bookings TourBooking[]
+
+  @@index([tourId])
+  @@index([tourGuideId])
+  @@index([startDate, endDate])
+  @@map("tour_schedules")
+}
+
+model TourBooking {
+  id String @id @default(cuid())
+
+  // Relations
+  userId      Int
+  user        User         @relation("GuestTourBookings", fields: [userId], references: [id], onDelete: Cascade)
+  tourId      String
+  tour        Tour         @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  scheduleId  String
+  schedule    TourSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  tourGuideId Int
+
+  // Booking Details
+  numberOfParticipants Int
+  participants         Json
+  specialRequests      String?
+
+  // Pricing
+  totalAmount Float
+  currency    String @default("USD")
+
+  // Status
+  status        String  @default("pending")
+  paymentStatus String  @default("pending")
+  paymentId     String?
+
+  // Check-in/out
+  checkInStatus String    @default("not_checked_in")
+  checkInTime   DateTime?
+  checkOutTime  DateTime?
+
+  // Refund
+  refundAmount Float?
+  refundReason String?
+
+  // Internal Notes
+  guestNotes String?
+
+  // Timestamps
+  bookingDate DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  reviews  TourReview[]
+  messages TourMessage[]
+  earnings TourEarnings[]
 
   @@index([userId])
-  @@map("wallets")
+  @@index([tourId])
+  @@index([scheduleId])
+  @@index([tourGuideId])
+  @@index([status])
+  @@map("tour_bookings")
 }
+
+model TourReview {
+  id String @id @default(cuid())
+
+  // Relations
+  bookingId   String
+  booking     TourBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  userId      Int
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tourId      String
+  tour        Tour        @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  tourGuideId Int
+
+  // Review Content
+  rating         Int
+  comment        String
+  images         Json?
+  pros           Json
+  cons           Json
+  wouldRecommend Boolean
+  isAnonymous    Boolean @default(false)
+
+  // Verification & Status
+  isVerified Boolean @default(true)
+  isVisible  Boolean @default(true)
+  isReported Boolean @default(false)
+
+  // Engagement
+  helpfulCount Int @default(0)
+  reportCount  Int @default(0)
+
+  // Guide Response
+  response     String?
+  responseDate DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([bookingId, userId])
+  @@index([userId])
+  @@index([tourId])
+  @@index([tourGuideId])
+  @@index([rating])
+  @@map("tour_reviews")
+}
+
+model TourMessage {
+  id String @id @default(cuid())
+
+  // Relations
+  senderId   Int
+  sender     User @relation("TourMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId Int
+  receiver   User @relation("TourMessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  // Context
+  bookingId String?
+  booking   TourBooking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  tourId    String?
+  tour      Tour?        @relation(fields: [tourId], references: [id], onDelete: SetNull)
+
+  // Message Content
+  subject     String?
+  message     String
+  attachments Json?
+  messageType String
+
+  // Status
+  isRead Boolean @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([bookingId])
+  @@index([tourId])
+  @@map("tour_messages")
+}
+
+model TourNotification {
+  id String @id @default(cuid())
+
+  // User
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Notification Details
+  type    String
+  title   String
+  message String
+  data    Json?
+
+  // Status
+  isRead Boolean @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([isRead])
+  @@map("tour_notifications")
+}
+
+model TourEarnings {
+  id String @id @default(cuid())
+
+  // Relations
+  tourGuideId Int
+  tourGuide   User        @relation(fields: [tourGuideId], references: [id], onDelete: Cascade)
+  bookingId   String
+  booking     TourBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  tourId      String
+  tour        Tour        @relation(fields: [tourId], references: [id], onDelete: Cascade)
+
+  // Financial Details
+  amount     Float
+  commission Float
+  netAmount  Float
+  currency   String @default("USD")
+
+  // Status
+  status String @default("pending")
+
+  // Payout Details
+  payoutDate    DateTime?
+  payoutMethod  String?
+  transactionId String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tourGuideId])
+  @@index([bookingId])
+  @@index([tourId])
+  @@index([status])
+  @@map("tour_earnings")
+}
+
+// === PAYMENT SYSTEM (Legacy - keeping for compatibility) ===
 
 model PaymentTransaction {
   id String @id @default(cuid())
@@ -844,20 +921,20 @@ model PaymentTransaction {
   user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Transaction Details
-  type     String // deposit, withdrawal, transfer, refund, commission, fee
-  method   String // mobile_money, bank_transfer, card, wallet, cash
+  type     String
+  method   String
   amount   Float
   currency String @default("KES")
-  status   String @default("pending") // pending, processing, completed, failed, cancelled, expired
+  status   String @default("pending")
 
   // References
   reference          String  @unique
-  externalId         String? // External system reference
-  jengaTransactionId String? // Jenga API transaction ID
+  externalId         String?
+  jengaTransactionId String?
 
   // Details
   description String?
-  metadata    Json? // Additional data
+  metadata    Json?
 
   // Fees & Charges
   charges   Float?
@@ -870,10 +947,10 @@ model PaymentTransaction {
   bankCode           String?
   accountName        String?
 
+  // Escrow Integration (NEW)
   escrowTransactionId String?
-  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id], onDelete: SetNull)
-  isEscrowBased       Boolean            @default(false)
-  escrowStatus        String? // Maps to EscrowStatus
+  isEscrowBased       Boolean @default(false)
+  escrowStatus        String?
 
   // Failure Information
   failureReason String?
@@ -891,36 +968,8 @@ model PaymentTransaction {
   @@index([type])
   @@index([method])
   @@index([reference])
-  @@index([jengaTransactionId])
   @@index([createdAt])
   @@map("payment_transactions")
-}
-
-model WalletTransaction {
-  id String @id @default(cuid())
-
-  // Wallet
-  walletId String
-  wallet   Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
-
-  // Transaction Details
-  type          String // credit, debit
-  amount        Float
-  balanceBefore Float
-  balanceAfter  Float
-
-  // References
-  reference     String
-  description   String
-  transactionId String? // Link to PaymentTransaction
-
-  // Timestamps
-  createdAt DateTime @default(now())
-
-  @@index([walletId])
-  @@index([reference])
-  @@index([createdAt])
-  @@map("wallet_transactions")
 }
 
 model BankAccount {
@@ -959,7 +1008,7 @@ model MobileMoneyAccount {
 
   // Account Details
   phoneNumber String
-  provider    String // mpesa, airtel, orange, mtn, tigo
+  provider    String
   accountName String
 
   // Status
@@ -973,476 +1022,6 @@ model MobileMoneyAccount {
   @@unique([userId, phoneNumber])
   @@index([userId])
   @@map("mobile_money_accounts")
-}
-
-// Add these models to your existing Prisma schema
-
-// --- ESCROW TRANSACTION MODEL ---
-model EscrowTransaction {
-  id String @id @default(cuid())
-
-  // User Relations
-  userId      Int
-  user        User  @relation("UserEscrowTransactions", fields: [userId], references: [id], onDelete: Cascade)
-  recipientId Int?
-  recipient   User? @relation("RecipientEscrowTransactions", fields: [recipientId], references: [id], onDelete: SetNull)
-
-  // Transaction Details
-  type        String // escrow_deposit, escrow_withdrawal, escrow_transfer, p2p_escrow, escrow_release, escrow_refund
-  amount      Float
-  currency    String  @default("USD")
-  status      String  @default("pending") // pending, funded, released, disputed, resolved, cancelled, expired
-  reference   String  @unique
-  description String?
-
-  // Escrow Provider Details
-  escrowId   String? // External escrow provider ID
-  externalId String? // External transaction ID
-  paymentUrl String? // Payment URL for funding
-
-  // Escrow Terms and Conditions
-  escrowTerms       Json? // EscrowTerms object
-  releaseConditions Json? // Array of ReleaseCondition objects
-  disputeDeadline   DateTime?
-  autoReleaseDate   DateTime?
-
-  // Transfer specific
-  sourceEscrowId String? // For escrow transfers
-  transferType   String? // full, partial
-
-  // P2P specific
-  isP2P       Boolean @default(false)
-  notifyBySMS Boolean @default(false)
-
-  // Status Tracking
-  fundedAt           DateTime?
-  releasedAt         DateTime?
-  releasedBy         Int?
-  releaseReason      String?
-  disputedAt         DateTime?
-  disputedBy         Int?
-  disputeReason      String?
-  resolvedAt         DateTime?
-  resolvedBy         Int?
-  resolutionReason   String?
-  cancelledAt        DateTime?
-  cancellationReason String?
-
-  // Fees and Charges
-  fees      Float?
-  netAmount Float?
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  disputes            EscrowDispute[]
-  notifications       EscrowNotification[]
-  milestones          EscrowMilestone[]
-  paymentTransactions PaymentTransaction[] // Add this
-  analytics           EscrowAnalytics[] // Add this
-
-  @@index([userId])
-  @@index([recipientId])
-  @@index([status])
-  @@index([type])
-  @@index([currency])
-  @@index([escrowId])
-  @@index([createdAt])
-  @@index([fundedAt])
-  @@index([releasedAt])
-  @@map("escrow_transactions")
-}
-
-// --- ESCROW DISPUTE MODEL ---
-model EscrowDispute {
-  id String @id @default(cuid())
-
-  // Relations
-  escrowTransactionId String
-  escrowTransaction   EscrowTransaction @relation(fields: [escrowTransactionId], references: [id], onDelete: Cascade)
-  disputedBy          Int
-  disputedByUser      User              @relation("DisputedByUser", fields: [disputedBy], references: [id], onDelete: Cascade)
-
-  // Dispute Details
-  disputeReason String
-  status        String  @default("open") // open, under_review, resolved, escalated, closed
-  priority      String  @default("medium") // low, medium, high, urgent
-  category      String? // non_delivery, defective_product, unauthorized_charge, etc.
-
-  // Resolution
-  resolution     Json? // Resolution object with decision, reason, etc.
-  resolvedBy     Int?
-  resolvedByUser User?     @relation("ResolvedByUser", fields: [resolvedBy], references: [id], onDelete: SetNull)
-  resolvedAt     DateTime?
-
-  // Additional Details
-  adminNotes  String? // Internal admin notes
-  publicNotes String? // Notes visible to both parties
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  evidence DisputeEvidence[]
-  messages DisputeMessage[]
-
-  @@index([escrowTransactionId])
-  @@index([disputedBy])
-  @@index([status])
-  @@index([priority])
-  @@index([createdAt])
-  @@map("escrow_disputes")
-}
-
-// --- DISPUTE EVIDENCE MODEL ---
-model DisputeEvidence {
-  id String @id @default(cuid())
-
-  // Relations
-  disputeId      String
-  dispute        EscrowDispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
-  uploadedBy     Int
-  uploadedByUser User          @relation("EvidenceUploader", fields: [uploadedBy], references: [id], onDelete: Cascade)
-
-  // Evidence Details
-  type        String // document, image, video, message, transaction_proof, screenshot
-  title       String
-  description String?
-  fileUrl     String?
-  fileName    String?
-  fileSize    Int? // in bytes
-  mimeType    String?
-
-  // Verification
-  isVerified Boolean   @default(false)
-  verifiedBy Int?
-  verifiedAt DateTime?
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([disputeId])
-  @@index([uploadedBy])
-  @@index([type])
-  @@index([createdAt])
-  @@map("dispute_evidence")
-}
-
-// --- DISPUTE MESSAGE MODEL ---
-model DisputeMessage {
-  id String @id @default(cuid())
-
-  // Relations
-  disputeId String
-  dispute   EscrowDispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
-  senderId  Int
-  sender    User          @relation("DisputeMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-
-  // Message Details
-  message     String
-  messageType String  @default("user") // user, admin, system, auto
-  isInternal  Boolean @default(false) // Only visible to admins
-
-  // Attachments
-  attachments Json? // Array of attachment URLs
-
-  // Read Status
-  isRead Boolean   @default(false)
-  readAt DateTime?
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([disputeId])
-  @@index([senderId])
-  @@index([messageType])
-  @@index([createdAt])
-  @@map("dispute_messages")
-}
-
-// --- ESCROW MILESTONE MODEL ---
-model EscrowMilestone {
-  id String @id @default(cuid())
-
-  // Relations
-  escrowTransactionId String
-  escrowTransaction   EscrowTransaction @relation(fields: [escrowTransactionId], references: [id], onDelete: Cascade)
-
-  // Milestone Details
-  title       String
-  description String
-  amount      Float
-  percentage  Float
-  order       Int    @default(1)
-
-  // Status and Dates
-  status          String    @default("pending") // pending, completed, failed, skipped
-  dueDate         DateTime?
-  completedAt     DateTime?
-  completedBy     Int?
-  completedByUser User?     @relation("MilestoneCompleter", fields: [completedBy], references: [id], onDelete: SetNull)
-
-  // Evidence and Verification
-  evidence         Json? // Array of evidence URLs or data
-  requiresApproval Boolean   @default(true)
-  approvedBy       Int?
-  approvedAt       DateTime?
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([escrowTransactionId])
-  @@index([status])
-  @@index([dueDate])
-  @@index([order])
-  @@map("escrow_milestones")
-}
-
-// --- ESCROW NOTIFICATION MODEL ---
-model EscrowNotification {
-  id String @id @default(cuid())
-
-  // Relations
-  userId              Int
-  user                User               @relation("EscrowNotificationUser", fields: [userId], references: [id], onDelete: Cascade)
-  escrowTransactionId String?
-  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id], onDelete: SetNull)
-
-  // Notification Details
-  type    String // escrow_created, escrow_funded, release_requested, dispute_created, milestone_completed, etc.
-  title   String
-  message String
-  data    Json? // Additional notification data
-
-  // Delivery Channels
-  channels Json // Array: ["email", "sms", "push", "in_app"]
-
-  // Status
-  isRead Boolean   @default(false)
-  readAt DateTime?
-  sentAt DateTime?
-
-  // Delivery Status
-  emailSent Boolean @default(false)
-  smsSent   Boolean @default(false)
-  pushSent  Boolean @default(false)
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([userId])
-  @@index([escrowTransactionId])
-  @@index([type])
-  @@index([isRead])
-  @@index([createdAt])
-  @@map("escrow_notifications")
-}
-
-// --- ESCROW TEMPLATE MODEL ---
-model EscrowTemplate {
-  id String @id @default(cuid())
-
-  // Owner
-  userId Int
-  user   User @relation("EscrowTemplateOwner", fields: [userId], references: [id], onDelete: Cascade)
-
-  // Template Details
-  name         String
-  description  String?
-  type         String // escrow_deposit, p2p_escrow, etc.
-  defaultTerms Json // EscrowTerms object
-
-  // Settings
-  isPublic Boolean @default(false)
-  isActive Boolean @default(true)
-
-  // Usage Statistics
-  usageCount Int       @default(0)
-  lastUsedAt DateTime?
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([userId])
-  @@index([type])
-  @@index([isPublic])
-  @@index([isActive])
-  @@index([usageCount])
-  @@map("escrow_templates")
-}
-
-// --- ESCROW ANALYTICS MODEL ---
-model EscrowAnalytics {
-  id String @id @default(cuid())
-
-  // Relations
-  escrowTransactionId String?
-  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id], onDelete: SetNull)
-  userId              Int?
-  user                User?              @relation("EscrowAnalyticsUser", fields: [userId], references: [id], onDelete: SetNull)
-
-  // Event Details
-  eventType String // view, create, fund, release, dispute, etc.
-  eventData Json? // Additional event data
-
-  // Context
-  ipAddress String?
-  userAgent String?
-  referer   String?
-  sessionId String?
-
-  // Geographic Data
-  country  String?
-  city     String?
-  timezone String?
-
-  // Timestamps
-  createdAt DateTime @default(now())
-
-  @@index([escrowTransactionId])
-  @@index([userId])
-  @@index([eventType])
-  @@index([createdAt])
-  @@index([country])
-  @@map("escrow_analytics")
-}
-
-// --- ESCROW FEE STRUCTURE MODEL ---
-model EscrowFeeStructure {
-  id String @id @default(cuid())
-
-  // Fee Configuration
-  type     String // escrow_deposit, p2p_escrow, etc.
-  currency String
-  feeType  String // percentage, fixed, tiered
-
-  // Percentage Fees
-  percentage Float?
-  minFee     Float?
-  maxFee     Float?
-
-  // Fixed Fees
-  fixedAmount Float?
-
-  // Tiered Fees
-  tiers Json? // Array of tier objects
-
-  // Additional Fees
-  disputeFee          Float?
-  expeditedReleaseFee Float?
-  cancellationFee     Float?
-
-  // Settings
-  isActive      Boolean   @default(true)
-  effectiveFrom DateTime  @default(now())
-  effectiveTo   DateTime?
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([type])
-  @@index([currency])
-  @@index([isActive])
-  @@index([effectiveFrom])
-  @@map("escrow_fee_structures")
-}
-
-// --- ESCROW LIMIT MODEL ---
-model EscrowLimit {
-  id String @id @default(cuid())
-
-  // User
-  userId Int  @unique
-  user   User @relation("UserEscrowLimits", fields: [userId], references: [id], onDelete: Cascade)
-
-  // Limits Configuration
-  currency String @default("USD")
-
-  // Transaction Limits
-  minTransactionAmount Float @default(1)
-  maxTransactionAmount Float @default(100000)
-
-  // Daily Limits
-  maxDailyAmount       Float @default(10000)
-  maxDailyTransactions Int   @default(10)
-
-  // Monthly Limits
-  maxMonthlyAmount       Float @default(100000)
-  maxMonthlyTransactions Int   @default(100)
-
-  // Holding Period Limits
-  minHoldingDays Int @default(1)
-  maxHoldingDays Int @default(365)
-
-  // KYC Requirements
-  requiresKYC Boolean @default(false)
-  kycLevel    String  @default("basic") // basic, intermediate, advanced
-
-  // Usage Tracking
-  dailyUsedAmount         Float    @default(0)
-  dailyUsedTransactions   Int      @default(0)
-  monthlyUsedAmount       Float    @default(0)
-  monthlyUsedTransactions Int      @default(0)
-  lastResetDate           DateTime @default(now())
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([userId])
-  @@index([currency])
-  @@map("escrow_limits")
-}
-
-// --- BULK ESCROW OPERATION MODEL ---
-model BulkEscrowOperation {
-  id String @id @default(cuid())
-
-  // Creator
-  userId Int
-  user   User @relation("BulkEscrowCreator", fields: [userId], references: [id], onDelete: Cascade)
-
-  // Operation Details
-  templateId        String?
-  operationType     String // bulk_deposit, bulk_p2p, bulk_release
-  totalTransactions Int
-  totalAmount       Float
-  currency          String  @default("USD")
-
-  // Status
-  status       String @default("processing") // processing, completed, partial, failed
-  successCount Int    @default(0)
-  failureCount Int    @default(0)
-
-  // Configuration
-  commonTerms  Json? // Common escrow terms for all transactions
-  scheduleDate DateTime?
-
-  // Results
-  results Json? // Array of individual transaction results
-
-  // Error Handling
-  errorSummary Json? // Summary of errors encountered
-
-  // Timestamps
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  completedAt DateTime?
-
-  @@index([userId])
-  @@index([status])
-  @@index([operationType])
-  @@index([createdAt])
-  @@map("bulk_escrow_operations")
 }
 
 model PaymentSettings {
@@ -1460,7 +1039,7 @@ model PaymentSettings {
   defaultMobileNumber String?
 
   // Notifications
-  notificationPreferences Json // Object: {"email": true, "sms": false, ...}
+  notificationPreferences Json
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -1480,8 +1059,8 @@ model Payout {
   // Payout Details
   amount   Float
   currency String @default("USD")
-  status   String @default("pending") // pending, processing, completed, failed
-  method   String // bank_transfer, mobile_money, wallet
+  status   String @default("pending")
+  method   String
 
   // Period covered by this payout
   periodStart DateTime
@@ -1507,7 +1086,6 @@ model Payout {
 
   @@index([hostId])
   @@index([status])
-  @@index([periodStart, periodEnd])
   @@map("payouts")
 }
 
@@ -1523,9 +1101,9 @@ model HostEarning {
   property   Property @relation("PropertyEarnings", fields: [propertyId], references: [id], onDelete: Cascade)
 
   // Financial details
-  grossAmount Float // Total booking amount
-  platformFee Float // Platform commission
-  hostEarning Float // What host receives
+  grossAmount Float
+  platformFee Float
+  hostEarning Float
   currency    String @default("USD")
 
   // Payout tracking
@@ -1533,18 +1111,17 @@ model HostEarning {
   payout   Payout? @relation("PayoutEarnings", fields: [payoutId], references: [id], onDelete: SetNull)
 
   // Status
-  status String @default("pending") // pending, earned, paid_out
+  status String @default("pending")
 
   // Timestamps
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  earnedAt  DateTime? // When booking was completed
+  earnedAt  DateTime?
 
   @@index([hostId])
   @@index([bookingId])
   @@index([propertyId])
   @@index([status])
-  @@index([earnedAt])
   @@map("host_earnings")
 }
 
@@ -1554,8 +1131,8 @@ model AgentBooking {
   agent          User     @relation("AgentBookings", fields: [agentId], references: [id], onDelete: Cascade)
   clientId       Int
   client         User     @relation("ClientBookings", fields: [clientId], references: [id], onDelete: Cascade)
-  bookingType    String // 'property' or 'tour'
-  bookingId      String // Reference to actual booking
+  bookingType    String
+  bookingId      String
   commission     Float
   commissionRate Float
   status         String   @default("active")

@@ -3,7 +3,6 @@ import express from 'express';
 import cors from 'cors';
 import { config } from './config/config';
 import authRoutes from './routes/auth.routes';
-import paymentRoutes from './routes/payment.routes';
 import propertyRoutes from './routes/property.routes';
 import bookingRoutes from './routes/booking.routes';
 import uploadRoutes from './routes/upload.routes';
@@ -58,7 +57,7 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/payments', paymentRoutes);
+app.use('/api/payments', require('./routes/escrow.routes').default);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/bookings', bookingRoutes);
