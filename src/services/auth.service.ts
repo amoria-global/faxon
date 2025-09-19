@@ -283,7 +283,7 @@ async getUserDocuments(userId: number): Promise<{
     documentVerificationStatus?: string;
     missingDocuments?: string[];
   }> {
-    const user = await prisma.user.findUnique({
+    const user: any = await prisma.user.findUnique({
       where: { id: userId }
     });
 
