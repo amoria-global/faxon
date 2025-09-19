@@ -8,8 +8,8 @@ node_modules
 
 .env.example
 
-/src/payment.service.ts
-/src/payment.routes.ts
-/src/payment.middleware.ts
-/src/payment.controller.ts
-/src/payment.types.ts
+/src/services/payment.service.ts
+/src/routes/payment.routes.ts
+/src/middleware/payment.middleware.ts
+/src/controllers/payment.controller.ts
+/src/types/payment.types.ts
