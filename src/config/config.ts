@@ -75,9 +75,9 @@ export const config = {
     
     // Default split rules for bookings
     defaultSplitRules: {
-      host: parseFloat(process.env.DEFAULT_HOST_SPLIT || '70'), // 70% to service provider
-      agent: parseFloat(process.env.DEFAULT_AGENT_SPLIT || '20'), // 20% to agent/affiliate
-      platform: parseFloat(process.env.DEFAULT_PLATFORM_SPLIT || '10') // 10% to platform
+      host: parseFloat(process.env.DEFAULT_HOST_SPLIT || '78'), // 70% to service provider
+      agent: parseFloat(process.env.DEFAULT_AGENT_SPLIT || '19.81'), // 20% to agent/affiliate
+      platform: parseFloat(process.env.DEFAULT_PLATFORM_SPLIT || '2.19') // 10% to platform
     },
     
     // Escrow fee configuration (charged to payer)

@@ -2852,12 +2852,12 @@ private async getAgentCommissionRate(agentId: number): Promise<number> {
     select: { id: true } // Could include commissionRate field
   });
 
-  return 3.75; // Default 5% commission rate
+  return 2.19; // Default 5% commission rate
 }
 
 private calculateBookingCommission(bookingValue: number, agentId: number): number {
   // This would typically fetch the agent's commission rate
-  const commissionRate = 3.75; // Default 5%
+  const commissionRate = 2.19; // Default 5%
   return bookingValue * (commissionRate / 100);
 }
 
