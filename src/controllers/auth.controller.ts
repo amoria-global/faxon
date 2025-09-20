@@ -739,6 +739,68 @@ async updateProfileImage(req: Request, res: Response, next: NextFunction) {
     }
   }
 
+// --- KYC METHODS ---
+async submitKYC(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: 'User not authenticated' });
+    }
+
+    const { personalDetails, addressDocumentUrl } = req.body;
+    
+    if (!personalDetails) {
+      return res.status(400).json({ 
+        message: 'Personal details are required' 
+      });
+    }
+
+    // Validate required fields
+    const { fullName, dateOfBirth, nationality, address, phoneNumber, email } = personalDetails;
+    if (!fullName || !dateOfBirth || !nationality || !address || !phoneNumber || !email) {
+      return res.status(400).json({ 
+        message: 'All personal details fields are required' 
+      });
+    }
+
+    const result = await authService.submitKYC(
+      parseInt(req.user.userId),
+      personalDetails,
+      addressDocumentUrl
+    );
+
+    res.json({
+      success: true,
+      data: result,
+      message: 'KYC submitted successfully'
+    });
+  } catch (error: any) {
+    res.status(400).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+}
+
+async getKYCStatus(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: 'User not authenticated' });
+    }
+
+    const status = await authService.getKYCStatus(parseInt(req.user.userId));
+    
+    res.json({
+      success: true,
+      data: status
+    });
+  } catch (error: any) {
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+}
+
   async getUserStatistics(req: Request, res: Response, next: NextFunction) {
     try {
       const stats = await authService.getUserStatistics();

@@ -129,6 +129,10 @@ export interface UserInfo {
   last_login?: string;
   total_sessions?: number;
   twoFactorEnabled?: boolean;
+  kycCompleted?: boolean;
+  kycStatus?: string;
+  kycSubmittedAt?: string;
+  addressDocument?: string;
 }
 
 export interface UpdateUserProfileDto {
