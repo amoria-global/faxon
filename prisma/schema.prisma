@@ -76,6 +76,12 @@ model User {
   updatedAt DateTime  @updatedAt
   lastLogin DateTime?
 
+  // KYC Fields
+  kycCompleted     Boolean   @default(false)
+  kycSubmittedAt   DateTime?
+  kycStatus        String    @default("pending") // pending, approved, rejected
+  addressDocument  String?   // URL to address verification document
+
   // Forgot Password Fields
   resetPasswordOtp     String?
   resetPasswordExpires DateTime?

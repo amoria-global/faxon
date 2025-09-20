@@ -68,6 +68,10 @@ router.post('/admin/users/:id/suspend', adminOnly, authController.adminSuspendUs
 router.post('/admin/users/:id/activate', adminOnly, authController.adminActivateUser);
 router.post('/admin/users/:id/reset-password', adminOnly, authController.adminResetUserPassword);
 
+// KYC Routes
+router.post('/kyc/submit', authenticate, authController.submitKYC);
+router.get('/kyc/status', authenticate, authController.getKYCStatus);
+
 // --- ROLE-BASED ROUTES (for future use) ---
 // Example: Host-specific endpoints
 router.get('/host/properties', authorize('host', 'admin'), (req, res) => {

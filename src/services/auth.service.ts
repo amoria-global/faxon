@@ -1063,6 +1063,75 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
     return { temporaryPassword };
   }
 
+  // --- KYC METHODS ---
+async submitKYC(
+  userId: number, 
+  personalDetails: any, 
+  addressDocumentUrl?: string
+): Promise<{ user: UserInfo; requiresDocumentUpload: boolean }> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Update user with KYC data
+  const updatedUser = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      // Update name fields
+      firstName: personalDetails.fullName.split(' ')[0] || user.firstName,
+      lastName: personalDetails.fullName.split(' ').slice(1).join(' ') || user.lastName,
+      
+      // Update contact info
+      phone: personalDetails.phoneNumber,
+      email: personalDetails.email,
+      
+      // Update address
+      street: personalDetails.address,
+      country: personalDetails.nationality,
+      
+      // KYC specific fields
+      kycCompleted: true,
+      kycSubmittedAt: new Date(),
+      kycStatus: 'pending',
+      addressDocument: addressDocumentUrl,
+      
+      // Update verification status
+      // verificationStatus: 'pending'
+    }
+  });
+
+  return {
+    user: this.transformToUserInfo(updatedUser),
+    requiresDocumentUpload: !addressDocumentUrl
+  };
+}
+
+async getKYCStatus(userId: number): Promise<{
+  kycCompleted: boolean;
+  kycStatus: string;
+  kycSubmittedAt?: string;
+  requiresDocumentUpload: boolean;
+}> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  return {
+    kycCompleted: user.kycCompleted,
+    kycStatus: user.kycStatus || 'pending',
+    kycSubmittedAt: user.kycSubmittedAt?.toISOString(),
+    requiresDocumentUpload: !user.addressDocument
+  };
+}
+
   async getUserStatistics(): Promise<any> {
     const [totalUsers, usersByType, usersByStatus, recentRegistrations] = await Promise.all([
       prisma.user.count(),
@@ -1219,7 +1288,11 @@ private async generateTokens(userId: number, email: string, userType: string) {
       updated_at: user.updatedAt.toISOString(),
       last_login: user.lastLogin?.toISOString(),
       total_sessions: user.totalSessions,
-      twoFactorEnabled: user.twoFactorEnabled
+      twoFactorEnabled: user.twoFactorEnabled,
+      kycCompleted: user.kycCompleted,
+      kycStatus: user.kycStatus,
+      kycSubmittedAt: user.kycSubmittedAt?.toISOString(),
+      addressDocument: user.addressDocument
     };
   }
 
