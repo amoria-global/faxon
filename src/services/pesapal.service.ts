@@ -15,10 +15,19 @@ import {
   PesapalWebhookData
 } from '../types/pesapal.types';
 
+interface IPNRegistration {
+  ipn_id: string;
+  url: string;
+  registered_at: Date;
+  expires_at?: Date;
+}
+
 export class PesapalService {
   private client: AxiosInstance;
   private config: PesapalConfig;
   private credentials: PesapalCredentials = {};
+  private ipnRegistration: IPNRegistration | null = null;
+  private ipnRegistrationPromise: Promise<string> | null = null;
 
   constructor(config: PesapalConfig) {
     this.config = config;
@@ -111,13 +120,123 @@ export class PesapalService {
     }
   }
 
+  // === IPN MANAGEMENT ===
+  
+  private async getValidIPNId(): Promise<string> {
+    try {
+      // If we already have a registration request in progress, wait for it
+      if (this.ipnRegistrationPromise) {
+        return await this.ipnRegistrationPromise;
+      }
+
+      // Check if current IPN registration is still valid
+      if (this.ipnRegistration && this.isIPNValid(this.ipnRegistration)) {
+        return this.ipnRegistration.ipn_id;
+      }
+
+      // Create a new registration promise to prevent multiple concurrent registrations
+      this.ipnRegistrationPromise = this.registerIPNUrl();
+      
+      try {
+        const ipnId = await this.ipnRegistrationPromise;
+        return ipnId;
+      } finally {
+        // Clear the promise once completed (success or failure)
+        this.ipnRegistrationPromise = null;
+      }
+    } catch (error: any) {
+      console.error('Failed to get valid IPN ID:', error);
+      throw new Error(`IPN registration failed: ${error.message}`);
+    }
+  }
+
+  private async registerIPNUrl(): Promise<string> {
+    try {
+      console.log('Registering IPN URL with Pesapal...');
+      
+      const ipnUrl = this.config.callbackUrl.replace('/callback', '/ipn'); // Use IPN-specific endpoint
+      
+      const registrationData = {
+        url: ipnUrl,
+        ipn_notification_type: 'GET'
+      };
+
+      const response = await this.client.post('/api/URLSetup/RegisterIPN', registrationData);
+
+      if (response.data.error) {
+        throw new Error(`IPN registration error: ${response.data.error.message}`);
+      }
+
+      if (!response.data.ipn_id) {
+        throw new Error('IPN registration did not return an IPN ID');
+      }
+
+      // Cache the registration
+      this.ipnRegistration = {
+        ipn_id: response.data.ipn_id,
+        url: ipnUrl,
+        registered_at: new Date(),
+        expires_at: response.data.expires_at ? new Date(response.data.expires_at) : undefined
+      };
+
+      console.log(`IPN URL registered successfully. IPN ID: ${response.data.ipn_id}`);
+      
+      return response.data.ipn_id;
+    } catch (error: any) {
+      console.error('IPN registration failed:', error);
+      throw new Error(
+        error.response?.data?.error?.message || 
+        error.message || 
+        'Failed to register IPN URL'
+      );
+    }
+  }
+
+  private isIPNValid(registration: IPNRegistration): boolean {
+    // Check if registration is recent (valid for 24 hours)
+    const maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    const age = Date.now() - registration.registered_at.getTime();
+    
+    if (age > maxAge) {
+      return false;
+    }
+
+    // Check if it has an expiry date and it's still valid
+    if (registration.expires_at) {
+      return registration.expires_at.getTime() > Date.now();
+    }
+
+    return true;
+  }
+
+  async getRegisteredIPNs(): Promise<any[]> {
+    try {
+      const response = await this.client.get('/api/URLSetup/GetIpnList');
+      return response.data || [];
+    } catch (error: any) {
+      console.error('Failed to get registered IPNs:', error);
+      return [];
+    }
+  }
+
   // === CHECKOUT (DEPOSIT) OPERATIONS ===
   
   async createCheckout(request: PesapalCheckoutRequest): Promise<PesapalCheckoutResponse> {
     try {
+      // Ensure we have a valid IPN ID
+      const ipnId = await this.getValidIPNId();
+      
+      // Add the IPN ID to the request
+      const checkoutRequestWithIPN = {
+        ...request,
+        notification_id: ipnId
+      };
+
+      console.log('Creating Pesapal checkout with IPN ID:', ipnId);
+
       const response = await this.client.post<PesapalCheckoutResponse>(
         '/api/Transactions/SubmitOrderRequest',
-        request
+        checkoutRequestWithIPN
       );
 
       if (response.data.error) {
@@ -381,7 +500,7 @@ export class PesapalService {
 
   // === HEALTH CHECK ===
   
-  async healthCheck(): Promise<{ healthy: boolean; message?: string }> {
+  async healthCheck(): Promise<{ healthy: boolean; message?: string; ipnStatus?: string }> {
     try {
       const token = await this.getValidToken();
       
@@ -392,9 +511,19 @@ export class PesapalService {
         };
       }
 
+      // Check IPN status
+      let ipnStatus = 'unknown';
+      try {
+        await this.getValidIPNId();
+        ipnStatus = 'registered';
+      } catch (error) {
+        ipnStatus = 'failed';
+      }
+
       return {
         healthy: true,
-        message: 'Pesapal service is healthy'
+        message: 'Pesapal service is healthy',
+        ipnStatus
       };
     } catch (error: any) {
       return {
@@ -402,5 +531,20 @@ export class PesapalService {
         message: error.message || 'Health check failed'
       };
     }
+  }
+
+  // === MANUAL IPN MANAGEMENT (for debugging) ===
+  
+  async forceRegisterIPN(): Promise<string> {
+    // Clear cached registration
+    this.ipnRegistration = null;
+    this.ipnRegistrationPromise = null;
+    
+    // Force re-registration
+    return await this.getValidIPNId();
+  }
+
+  getCurrentIPNInfo(): IPNRegistration | null {
+    return this.ipnRegistration;
   }
 }
