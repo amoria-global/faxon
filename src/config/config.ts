@@ -14,7 +14,7 @@ export const config = {
   brevoApiKey: process.env.BREVO_API_KEY || '',
   brevoSenderEmail: process.env.BREVO_SENDER_EMAIL || '',
 
-  // PRIMARY: Pesapal Escrow Integration (NEW)
+  // PRIMARY: Pesapal Escrow Integration (NEW) - WITH AUTO IPN REGISTRATION
   pesapal: {
     consumerKey: process.env.PESAPAL_CONSUMER_KEY!,
     consumerSecret: process.env.PESAPAL_CONSUMER_SECRET!,
@@ -25,9 +25,15 @@ export const config = {
     ),
     environment: (process.env.NODE_ENV === 'production' ? 'production' : 'sandbox') as 'production' | 'sandbox',
     webhookSecret: process.env.PESAPAL_WEBHOOK_SECRET!,
-    callbackUrl: process.env.PESAPAL_CALLBACK_URL || 'https://jambolush.com/api/escrow/callback',
-    notificationId: process.env.PESAPAL_NOTIFICATION_ID || '',
+    callbackUrl: process.env.PESAPAL_CALLBACK_URL || 'http://localhost:5000/api/pesapal/callback',
+    ipnUrl: process.env.PESAPAL_IPN_URL || 'http://localhost:5000/api/pesapal/ipn', // IPN endpoint (different from callback)
     merchantAccount: process.env.PESAPAL_MERCHANT_ACCOUNT!,
+    
+    // AUTO IPN REGISTRATION SETTINGS
+    autoRegisterIPN: process.env.PESAPAL_AUTO_REGISTER_IPN !== 'false', // Enabled by default
+    ipnCacheDuration: parseInt(process.env.PESAPAL_IPN_CACHE_DURATION || '86400000'), // 24 hours in milliseconds
+    ipnRetryAttempts: parseInt(process.env.PESAPAL_IPN_RETRY_ATTEMPTS || '3'),
+    ipnRetryDelay: parseInt(process.env.PESAPAL_IPN_RETRY_DELAY || '5000'), // 5 seconds
     
     // Pesapal-specific escrow settings
     timeout: parseInt(process.env.PESAPAL_TIMEOUT || '30000'), // 30 seconds
@@ -75,9 +81,9 @@ export const config = {
     
     // Default split rules for bookings
     defaultSplitRules: {
-      host: parseFloat(process.env.DEFAULT_HOST_SPLIT || '78'), // 70% to service provider
-      agent: parseFloat(process.env.DEFAULT_AGENT_SPLIT || '19.81'), // 20% to agent/affiliate
-      platform: parseFloat(process.env.DEFAULT_PLATFORM_SPLIT || '2.19') // 10% to platform
+      host: parseFloat(process.env.DEFAULT_HOST_SPLIT || '78.95'), // 70% to service provider
+      agent: parseFloat(process.env.DEFAULT_AGENT_SPLIT || '4.39'), // 20% to agent/affiliate
+      platform: parseFloat(process.env.DEFAULT_PLATFORM_SPLIT || '4.39') // 10% to platform
     },
     
     // Escrow fee configuration (charged to payer)
@@ -352,7 +358,8 @@ export const config = {
       escrowExpiryCheck: process.env.ESCROW_EXPIRY_CHECK_SCHEDULE || '0 0 0 * * *', // Daily at midnight
       notificationRetry: process.env.NOTIFICATION_RETRY_SCHEDULE || '0 */5 * * * *', // Every 5 minutes
       webhookRetry: process.env.WEBHOOK_RETRY_SCHEDULE || '0 */2 * * * *', // Every 2 minutes
-      analyticsUpdate: process.env.ANALYTICS_UPDATE_SCHEDULE || '0 0 1 * * *' // Daily at 1 AM
+      analyticsUpdate: process.env.ANALYTICS_UPDATE_SCHEDULE || '0 0 1 * * *', // Daily at 1 AM
+      ipnHealthCheck: process.env.IPN_HEALTH_CHECK_SCHEDULE || '0 0 */12 * * *' // Every 12 hours
     }
   },
 
@@ -362,6 +369,7 @@ export const config = {
     enableEscrowLogs: process.env.ENABLE_ESCROW_LOGS !== 'false',
     enablePaymentLogs: process.env.ENABLE_PAYMENT_LOGS !== 'false',
     enableWebhookLogs: process.env.ENABLE_WEBHOOK_LOGS !== 'false',
+    enableIPNLogs: process.env.ENABLE_IPN_LOGS !== 'false', // New: IPN registration logging
     logSensitiveData: process.env.LOG_SENSITIVE_DATA === 'true' && process.env.NODE_ENV !== 'production',
     
     // File logging
@@ -436,7 +444,7 @@ export const config = {
   }
 };
 
-// Enhanced Configuration Validation
+// Enhanced Configuration Validation with IPN Auto-Registration
 export function validateConfig() {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -452,6 +460,24 @@ export function validateConfig() {
   const missingPesapalVars = requiredPesapalVars.filter(varName => !process.env[varName]);
   if (missingPesapalVars.length > 0) {
     errors.push(`Missing critical Pesapal environment variables: ${missingPesapalVars.join(', ')}`);
+  }
+
+  // Validate Pesapal URLs for auto-registration
+  if (!config.pesapal.callbackUrl || !config.pesapal.callbackUrl.includes('http')) {
+    errors.push('PESAPAL_CALLBACK_URL must be a valid HTTP/HTTPS URL');
+  }
+
+  // Auto-registration specific validation
+  if (config.pesapal.autoRegisterIPN) {
+    if (!config.pesapal.ipnUrl || !config.pesapal.ipnUrl.includes('http')) {
+      warnings.push('Auto IPN registration enabled but IPN URL is invalid. Using callback URL as fallback.');
+    }
+    console.log('✅ Auto IPN registration is enabled');
+  } else {
+    // If auto-registration is disabled, check for manual IPN ID
+    if (!process.env.PESAPAL_IPN_ID) {
+      warnings.push('Auto IPN registration disabled and no manual PESAPAL_IPN_ID provided');
+    }
   }
 
   // Optional Jenga validation (only if enabled)
@@ -497,6 +523,11 @@ export function validateConfig() {
     if (!config.security.corsOrigins.some(origin => origin.includes('jambolush.com'))) {
       warnings.push('No jambolush.com domain in CORS origins for production');
     }
+
+    // Production should use HTTPS URLs
+    if (!config.pesapal.callbackUrl.startsWith('https://')) {
+      warnings.push('Production environment should use HTTPS for callback URLs');
+    }
   }
 
   // Display results
@@ -515,6 +546,7 @@ export function validateConfig() {
   console.log(`🌍 Supported currencies: ${config.currencies.supported.join(', ')}`);
   console.log(`💰 Default currency: ${config.currencies.default}`);
   console.log(`🔒 Escrow payments: ${config.features.enableEscrowPayments ? 'Enabled (Pesapal)' : 'Disabled'}`);
+  console.log(`🔄 Auto IPN registration: ${config.pesapal.autoRegisterIPN ? 'Enabled' : 'Disabled'}`);
   console.log(`🏦 Jenga payments: ${config.features.enableJengaPayments ? 'Enabled' : 'Disabled'}`);
   console.log(`📧 Email notifications: ${config.features.enableEmailNotifications ? 'Enabled' : 'Disabled'}`);
 }
@@ -551,6 +583,7 @@ export const configUtils = {
   // Get webhook URLs
   getWebhookUrls: () => ({
     pesapal: config.pesapal.callbackUrl,
+    pesapalIpn: config.pesapal.ipnUrl,
     jenga: config.jenga.callbackUrl
   }),
 
@@ -558,7 +591,8 @@ export const configUtils = {
   getPaymentProvider: () => ({
     primary: 'pesapal',
     secondary: config.features.enableJengaPayments ? 'jenga' : null,
-    escrowEnabled: config.features.enableEscrowPayments
+    escrowEnabled: config.features.enableEscrowPayments,
+    autoIPNRegistration: config.pesapal.autoRegisterIPN
   }),
 
   // Format currency amount based on currency config
@@ -626,7 +660,26 @@ export const configUtils = {
       businessHours: `${startTime} - ${endTime}`,
       workingDays: config.regional.businessHours.workingDays.join(', ')
     };
-  }
+  },
+
+  // IPN configuration helpers
+  getIPNConfiguration: () => ({
+    autoRegister: config.pesapal.autoRegisterIPN,
+    ipnUrl: config.pesapal.ipnUrl,
+    callbackUrl: config.pesapal.callbackUrl,
+    cacheDuration: config.pesapal.ipnCacheDuration,
+    retryAttempts: config.pesapal.ipnRetryAttempts,
+    retryDelay: config.pesapal.ipnRetryDelay
+  }),
+
+  // Get all environment URLs for debugging
+  getAllUrls: () => ({
+    callback: config.pesapal.callbackUrl,
+    ipn: config.pesapal.ipnUrl,
+    webhook: config.pesapal.callbackUrl,
+    client: config.clientUrl,
+    base: config.pesapal.baseUrl
+  })
 };
 
 export default config;

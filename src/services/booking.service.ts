@@ -180,6 +180,7 @@ export class BookingService {
     } catch (blockError) {
       console.error('Failed to create blocked dates:', blockError);
       // Continue even if blocked dates creation fails
+      throw new Error('Failed to create blocked dates: ' + blockError);
     }
 
     // Update property total bookings

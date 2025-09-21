@@ -146,5 +146,15 @@ router.get('/agent/dashboard/enhanced', validateAgent, propertyController.getEnh
 router.put('/agent/own/properties/:id', validateAgent, propertyController.updateProperty);
 router.delete('/agent/own/properties/:id', validateAgent, propertyController.deleteProperty);
 router.post('/agent/own/properties/:id/images', validateAgent, propertyController.uploadPropertyImages);
+// Add these routes to your existing property routes file
+// Insert these after the existing agent routes
+
+// --- ENHANCED AGENT KPI ROUTES ---
+router.get('/agent/dashboard/enhanced', validateAgent, propertyController.getEnhancedAgentDashboard);
+router.get('/agent/kpis/additional', validateAgent, propertyController.getAdditionalAgentKPIs);
+router.get('/agent/performance/trends', validateAgent, propertyController.getAgentPerformanceTrends);
+router.get('/agent/competitive/metrics', validateAgent, propertyController.getAgentCompetitiveMetrics);
+router.get('/agent/clients/segmentation', validateAgent, propertyController.getAgentClientSegmentation);
+router.get('/agent/kpis/individual/:kpi', validateAgent, propertyController.getIndividualAgentKPI);
 
 export default router;

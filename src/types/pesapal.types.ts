@@ -42,7 +42,7 @@ export interface PesapalCheckoutRequest {
   amount: number;
   description: string;
   callback_url: string;
-  notification_id: string;
+  notification_id?: string;
   billing_address: {
     email_address: string;
     phone_number?: string;
@@ -110,7 +110,7 @@ export interface PesapalPayoutResponse {
 export interface PesapalWebhookData {
   OrderTrackingId: string;
   OrderMerchantReference: string;
-  OrderNotificationType: 'IPNCHANGE';
+  OrderNotificationType: any | 'IPNCHANGE';
 }
 
 export interface PesapalTransactionStatus {
@@ -156,6 +156,12 @@ export interface SplitRules {
   platform: number;
 }
 
+export interface SplitAmounts {
+  host: number;
+  agent: number;
+  platform: number;
+}
+
 export interface EscrowParticipant {
   id: number;
   role: 'GUEST' | 'HOST' | 'AGENT' | 'PLATFORM';
@@ -163,6 +169,32 @@ export interface EscrowParticipant {
   firstName: string;
   lastName: string;
   phone?: string;
+}
+
+// === METADATA TYPES ===
+
+export interface EscrowMetadata {
+  splitRules?: SplitRules;
+  splitAmounts?: SplitAmounts;
+  agentId?: number;
+  billingInfo?: BillingInfo;
+  [key: string]: any; // Allow additional metadata
+}
+
+export interface BillingInfo {
+  email: string;
+  phone?: string;
+  firstName?: string;
+  lastName?: string;
+  countryCode?: string;
+}
+
+export interface WithdrawalDestination {
+  holderName: string;
+  accountNumber: string;
+  mobileProvider?: MobileProvider;
+  bankCode?: string;
+  countryCode?: string;
 }
 
 // === REQUEST/RESPONSE DTOs ===
@@ -175,13 +207,7 @@ export interface CreateDepositDto {
   hostId: number;
   agentId?: number;
   splitRules: SplitRules;
-  billingInfo: {
-    email: string;
-    phone?: string;
-    firstName?: string;
-    lastName?: string;
-    countryCode?: string;
-  };
+  billingInfo: BillingInfo;
 }
 
 export interface ReleaseEscrowDto {
@@ -192,13 +218,7 @@ export interface ReleaseEscrowDto {
 export interface WithdrawDto {
   amount: number;
   method: PayoutMethod;
-  destination: {
-    holderName: string;
-    accountNumber: string;
-    mobileProvider?: MobileProvider;
-    bankCode?: string;
-    countryCode?: string;
-  };
+  destination: WithdrawalDestination;
   reference: string;
   particulars?: string;
 }
@@ -208,6 +228,10 @@ export interface RefundDto {
   amount?: number; // For partial refunds
   reason: string;
 }
+
+// === WITHDRAWAL STATUS TYPES ===
+
+export type WithdrawalStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
 // === CORE MODELS ===
 
@@ -222,7 +246,7 @@ export interface EscrowTransaction {
   currency: string;
   reference: string;
   description?: string;
-  metadata?: string;
+  metadata?: string; // JSON string in database, parsed as EscrowMetadata in application
   
   // Pesapal identifiers
   pesapalOrderId?: string;
@@ -231,11 +255,7 @@ export interface EscrowTransaction {
   
   // Split configuration
   splitRules: SplitRules;
-  splitAmounts?: {
-    host: number;
-    agent: number;
-    platform: number;
-  };
+  splitAmounts?: SplitAmounts;
   
   // Status tracking
   heldAt?: Date;
@@ -245,14 +265,14 @@ export interface EscrowTransaction {
   failedAt?: Date;
   
   // Additional data
-  billingInfo?: Record<string, any>;
+  billingInfo?: BillingInfo;
   failureReason?: string;
   
   // Timestamps
   createdAt: Date;
   updatedAt: Date;
   
-  // Relations
+  // Relations (populated by application logic)
   guest?: EscrowParticipant;
   host?: EscrowParticipant;
   agent?: EscrowParticipant;
@@ -274,14 +294,14 @@ export interface WithdrawalRequest {
   amount: number;
   currency: string;
   method: PayoutMethod;
-  destination: Record<string, any>;
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
-  pesapalPayoutId?: string | any;
+  destination: WithdrawalDestination;
+  status: WithdrawalStatus;
+  pesapalPayoutId?: string;
   reference: string;
-  failureReason?: string | any;
+  failureReason?: string;
   createdAt: Date;
   updatedAt: Date;
-  completedAt?: Date | any;
+  completedAt?: Date;
 }
 
 // === API RESPONSE TYPES ===
@@ -303,6 +323,20 @@ export interface EscrowErrorResponse {
 }
 
 export type EscrowApiResponse<T = any> = EscrowSuccessResponse<T> | EscrowErrorResponse;
+
+// === PAGINATION TYPES ===
+
+export interface PaginationMeta {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  pagination: PaginationMeta;
+}
 
 // === ANALYTICS & REPORTING ===
 
@@ -353,33 +387,117 @@ export interface EscrowLimits {
   updatedAt: Date;
 }
 
+export interface PlatformFees {
+  deposit: {
+    percentage: number;
+    fixed: number;
+    min: number;
+    max: number;
+  };
+  withdrawal: {
+    mobile: number;
+    bank: number;
+  };
+  refund: {
+    percentage: number;
+    fixed: number;
+  };
+}
+
+export interface PlatformLimits {
+  minDeposit: number;
+  maxDeposit: number;
+  minWithdrawal: number;
+  maxWithdrawal: number;
+  dailyLimit: number;
+  monthlyLimit: number;
+}
+
 export interface PlatformSettings {
   defaultSplitRules: SplitRules;
   supportedCurrencies: string[];
   supportedCountries: string[];
   supportedMobileProviders: MobileProvider[];
-  fees: {
-    deposit: {
-      percentage: number;
-      fixed: number;
-      min: number;
-      max: number;
-    };
-    withdrawal: {
-      mobile: number;
-      bank: number;
-    };
-    refund: {
-      percentage: number;
-      fixed: number;
-    };
-  };
-  limits: {
-    minDeposit: number;
-    maxDeposit: number;
-    minWithdrawal: number;
-    maxWithdrawal: number;
-    dailyLimit: number;
-    monthlyLimit: number;
-  };
+  fees: PlatformFees;
+  limits: PlatformLimits;
+}
+
+// === WEBHOOK VALIDATION TYPES ===
+
+export interface WebhookValidationResult {
+  isValid: boolean;
+  error?: string;
+}
+
+// === PHONE NUMBER VALIDATION TYPES ===
+
+export interface PhoneValidationResult {
+  isValid: boolean;
+  formattedNumber?: string;
+  provider?: string;
+  errors?: string[];
+}
+
+// === BANK ACCOUNT VALIDATION TYPES ===
+
+export interface BankValidationResult {
+  isValid: boolean;
+  errors?: string[];
+}
+
+// === HEALTH CHECK TYPES ===
+
+export interface ServiceHealthCheck {
+  healthy: boolean;
+  message?: string;
+  ipnStatus?: string;
+}
+
+export interface PaymentSystemHealth {
+  healthy: boolean;
+  pesapalStatus: ServiceHealthCheck;
+  ipnStatus?: string;
+  message?: string;
+}
+
+// === TRANSACTION QUERY TYPES ===
+
+export interface TransactionQueryOptions {
+  userId?: number;
+  status?: EscrowTransactionStatus;
+  type?: EscrowTransactionType;
+  page?: number;
+  limit?: number;
+  startDate?: Date;
+  endDate?: Date;
+}
+
+export interface TransactionQueryResult {
+  transactions: EscrowTransaction[];
+  pagination: PaginationMeta;
+}
+
+// === EMAIL NOTIFICATION TYPES ===
+
+export interface EmailNotificationData {
+  user: EscrowParticipant;
+  transaction?: EscrowTransaction;
+  withdrawal?: WithdrawalRequest;
+  checkoutUrl?: string;
+  status?: EscrowTransactionStatus;
+  refundAmount?: number;
+}
+
+// === AUDIT LOG TYPES ===
+
+export interface AuditLogEntry {
+  id: string;
+  entityType: 'TRANSACTION' | 'WALLET' | 'WITHDRAWAL';
+  entityId: string;
+  action: string;
+  oldValue?: any;
+  newValue?: any;
+  userId?: number;
+  timestamp: Date;
+  metadata?: Record<string, any>;
 }

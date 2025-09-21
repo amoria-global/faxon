@@ -131,6 +131,16 @@ model User {
   hostNotes              String?
   averageRating          Float   @default(0)
 
+  agentLeads            Lead[]                @relation("AgentLeads")
+  agentInquiries        Inquiry[]             @relation("AgentInquiries")
+  clientInquiries       Inquiry[]             @relation("ClientInquiries")
+  agentReviews          AgentReview[]         @relation("AgentReviews")
+  clientReviews         AgentReview[]         @relation("ClientReviews")
+  propertyViews         PropertyView[]        @relation("UserPropertyViews")
+  agentMetrics          AgentPerformanceMetric[] @relation("AgentMetrics")
+  agentInteractions     ClientInteraction[]   @relation("AgentInteractions")
+  clientInteractions    ClientInteraction[]   @relation("ClientInteractions")
+
   @@map("users")
 }
 
@@ -185,7 +195,9 @@ model EscrowTransaction {
   // Pesapal Integration
   escrowId   String? // Pesapal order ID
   externalId String? // Pesapal tracking ID
-  paymentUrl String? // Pesapal checkout URL
+  pesapalOrderId    String? // Add this
+  pesapalTrackingId String? // Add this
+  paymentUrl        String?
 
   // P2P and Transfer specific
   isP2P            Boolean @default(false)
@@ -423,7 +435,9 @@ model Property {
   pricingRules PricingRule[]
   wishlistedBy Wishlist[]
   hostEarnings HostEarning[] @relation("PropertyEarnings")
-
+  
+  propertyViews         PropertyView[]        @relation("PropertyViews")
+  
   @@index([hostId])
   @@index([status])
   @@map("properties")
@@ -1150,3 +1164,307 @@ model AgentBooking {
   @@index([clientId])
   @@map("agent_bookings")
 }
+
+// Add these models to your existing Prisma schema for Enhanced Agent KPIs
+
+// === LEAD TRACKING (for Conversion Rate KPI) ===
+model Lead {
+  id String @id @default(cuid())
+
+  // Agent who received the lead
+  agentId Int
+  agent   User @relation("AgentLeads", fields: [agentId], references: [id], onDelete: Cascade)
+
+  // Lead Information
+  source      String // website, referral, social_media, direct, etc.
+  type        String // property_inquiry, booking_request, general_inquiry
+  status      String @default("new") // new, contacted, qualified, converted, lost
+  priority    String @default("medium") // low, medium, high, urgent
+
+  // Lead Details
+  clientName    String?
+  clientEmail   String?
+  clientPhone   String?
+  propertyId    Int?
+  requirements  Json? // What the client is looking for
+  budget        Float?
+  timeline      String? // when they need the service
+
+  // Tracking
+  convertedAt   DateTime? // When lead became a booking
+  bookingId     String? // Reference to created booking
+  lostReason    String? // Why lead was lost
+  notes         String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agentId])
+  @@index([status])
+  @@index([source])
+  @@index([createdAt])
+  @@map("leads")
+}
+
+// === INQUIRY TRACKING (for Response Time KPI) ===
+model Inquiry {
+  id String @id @default(cuid())
+
+  // Agent who received the inquiry
+  agentId Int
+  agent   User @relation("AgentInquiries", fields: [agentId], references: [id], onDelete: Cascade)
+
+  // Client who made the inquiry
+  clientId Int?
+  client   User? @relation("ClientInquiries", fields: [clientId], references: [id], onDelete: SetNull)
+
+  // Inquiry Details
+  type        String // email, phone, chat, in_person
+  subject     String?
+  message     String
+  propertyId  Int?
+  isUrgent    Boolean @default(false)
+
+  // Response Tracking
+  isResponded   Boolean   @default(false)
+  respondedAt   DateTime?
+  responseTime  Int? // Time to respond in minutes
+  responseMethod String? // email, phone, chat
+  resolution    String? // resolved, escalated, follow_up_needed
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agentId])
+  @@index([clientId])
+  @@index([isResponded])
+  @@index([createdAt])
+  @@map("inquiries")
+}
+
+// === AGENT REVIEWS (for Client Satisfaction KPI) ===
+model AgentReview {
+  id String @id @default(cuid())
+
+  // Agent being reviewed
+  agentId Int
+  agent   User @relation("AgentReviews", fields: [agentId], references: [id], onDelete: Cascade)
+
+  // Client who left the review
+  clientId Int
+  client   User @relation("ClientReviews", fields: [clientId], references: [id], onDelete: Cascade)
+
+  // Review Details
+  rating      Int // 1-5 stars
+  comment     String?
+  categories  Json? // breakdown by category (communication, professionalism, results, etc.)
+  
+  // Context
+  bookingId   String? // Related booking
+  serviceType String? // property_management, buying, selling, renting
+
+  // Review Aspects (for detailed analysis)
+  communicationRating   Int?
+  professionalismRating Int?
+  knowledgeRating      Int?
+  responsivenessRating Int?
+  resultsRating        Int?
+
+  // Agent Response
+  response     String?
+  responseDate DateTime?
+
+  // Status
+  isVisible  Boolean @default(true)
+  isReported Boolean @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([agentId, clientId, bookingId])
+  @@index([agentId])
+  @@index([clientId])
+  @@index([rating])
+  @@index([createdAt])
+  @@map("agent_reviews")
+}
+
+// === PROPERTY VIEWS TRACKING (for Views to Booking Ratio KPI) ===
+model PropertyView {
+  id String @id @default(cuid())
+
+  // Property being viewed
+  propertyId Int
+  property   Property @relation("PropertyViews", fields: [propertyId], references: [id], onDelete: Cascade)
+
+  // User who viewed (if logged in)
+  userId Int?
+  user   User? @relation("UserPropertyViews", fields: [userId], references: [id], onDelete: SetNull)
+
+  // View Details
+  sessionId   String? // For anonymous users
+  ipAddress   String?
+  userAgent   String?
+  referrer    String? // Where they came from
+  duration    Int? // How long they viewed in seconds
+  source      String? // search, direct, referral, social, agent_shared
+
+  // Device & Location
+  device      String? // mobile, desktop, tablet
+  country     String?
+  city        String?
+
+  // Conversion Tracking
+  convertedToInquiry Boolean @default(false)
+  convertedToBooking Boolean @default(false)
+  inquiryId          String?
+  bookingId          String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@index([propertyId])
+  @@index([userId])
+  @@index([sessionId])
+  @@index([createdAt])
+  @@map("property_views")
+}
+
+// === AGENT PERFORMANCE METRICS (for advanced analytics) ===
+model AgentPerformanceMetric {
+  id String @id @default(cuid())
+
+  // Agent
+  agentId Int
+  agent   User @relation("AgentMetrics", fields: [agentId], references: [id], onDelete: Cascade)
+
+  // Metric Details
+  metricType  String // conversion_rate, response_time, retention_rate, etc.
+  value       Float
+  unit        String? // percentage, minutes, dollars, etc.
+  period      String // daily, weekly, monthly, quarterly, yearly
+  periodStart DateTime
+  periodEnd   DateTime
+
+  // Context
+  propertyCount Int?
+  clientCount   Int?
+  bookingCount  Int?
+  metadata      Json? // Additional metric-specific data
+
+  // Comparison
+  marketAverage    Float?
+  competitorRank   Int?
+  improvementRate  Float? // vs previous period
+
+  // Timestamps
+  calculatedAt DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([agentId, metricType, period, periodStart])
+  @@index([agentId])
+  @@index([metricType])
+  @@index([period])
+  @@index([periodStart])
+  @@map("agent_performance_metrics")
+}
+
+// === CLIENT INTERACTION TRACKING (for relationship management) ===
+model ClientInteraction {
+  id String @id @default(cuid())
+
+  // Agent and Client
+  agentId  Int
+  agent    User @relation("AgentInteractions", fields: [agentId], references: [id], onDelete: Cascade)
+  clientId Int
+  client   User @relation("ClientInteractions", fields: [clientId], references: [id], onDelete: Cascade)
+
+  // Interaction Details
+  type        String // call, meeting, email, chat, showing, signing
+  duration    Int? // Duration in minutes
+  outcome     String? // positive, neutral, negative, no_response
+  nextAction  String? // follow_up, schedule_showing, send_contract, etc.
+  dueDate     DateTime?
+
+  // Context
+  propertyId  Int?
+  bookingId   String?
+  notes       String?
+  
+  // Satisfaction
+  clientSatisfaction Int? // 1-5 rating from client
+  agentNotes         String?
+
+  // Timestamps
+  scheduledAt DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([agentId])
+  @@index([clientId])
+  @@index([type])
+  @@index([scheduledAt])
+  @@index([createdAt])
+  @@map("client_interactions")
+}
+
+// === MARKET DATA (for competitive analysis) ===
+model MarketData {
+  id String @id @default(cuid())
+
+  // Location
+  region String
+  city   String?
+  area   String?
+
+  // Metrics
+  averagePropertyPrice    Float?
+  averageCommissionRate   Float?
+  averageResponseTime     Float? // in hours
+  averageConversionRate   Float? // percentage
+  averageRetentionRate    Float? // percentage
+  totalActiveAgents       Int?
+  totalActiveProperties   Int?
+  marketVolume           Float? // total transactions
+
+  // Time Period
+  period      String // monthly, quarterly, yearly
+  periodStart DateTime
+  periodEnd   DateTime
+
+  // Source
+  dataSource String // internal, external_api, survey, etc.
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([region, period, periodStart])
+  @@index([region])
+  @@index([period])
+  @@index([periodStart])
+  @@map("market_data")
+}
+
+// === UPDATE USER MODEL RELATIONS ===
+// Add these relations to your existing User model:
+
+// Enhanced KPI relations (add to User model)
+//   agentLeads            Lead[]                @relation("AgentLeads")
+//   agentInquiries        Inquiry[]             @relation("AgentInquiries")
+//   clientInquiries       Inquiry[]             @relation("ClientInquiries")
+//   agentReviews          AgentReview[]         @relation("AgentReviews")
+//   clientReviews         AgentReview[]         @relation("ClientReviews")
+//   propertyViews         PropertyView[]        @relation("UserPropertyViews")
+//   agentMetrics          AgentPerformanceMetric[] @relation("AgentMetrics")
+//   agentInteractions     ClientInteraction[]   @relation("AgentInteractions")
+//   clientInteractions    ClientInteraction[]   @relation("ClientInteractions")
+
+// === UPDATE PROPERTY MODEL RELATIONS ===
+// Add these relations to your existing Property model:
+
+//   propertyViews         PropertyView[]        @relation("PropertyViews")

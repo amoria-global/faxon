@@ -6,7 +6,7 @@ node_modules
 
 /src/generated/prisma
 
-.env.example
+.env.local
 
 /src/services/payment.service.ts
 /src/routes/payment.routes.ts

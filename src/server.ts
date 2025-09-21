@@ -64,6 +64,7 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/tours', require('./routes/tours.routes').default);
 app.use('/api/notifications', notificationRoutes); 
 app.use('/api/help', helpRoutes);
+app.use('/api/pesapal', require('./routes/pesapal.callback').default);
 
 // Health check
 app.get('/health', (req, res) => {

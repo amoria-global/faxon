@@ -21,6 +21,7 @@ import {
   EscrowLimits
 } from '../types/pesapal.types';
 import { EmailService } from './email.service';
+import config from '../config/config';
 
 const prisma = new PrismaClient();
 
@@ -70,14 +71,13 @@ export class EscrowService {
         billingInfo: depositData.billingInfo
       });
 
-      // Create Pesapal checkout request
+      // Create Pesapal checkout request (without notification_id - auto-registration will handle it)
       const checkoutRequest: PesapalCheckoutRequest = {
         id: merchantReference,
         currency: depositData.currency,
         amount: this.pesapalService.formatAmount(depositData.amount),
         description: depositData.description || `Payment for booking ${merchantReference}`,
-        callback_url: `${process.env.BASE_URL}/api/payments/callback`,
-        notification_id: process.env.PESAPAL_NOTIFICATION_ID!,
+        callback_url: `${config.pesapal.callbackUrl}`,
         billing_address: {
           email_address: depositData.billingInfo.email,
           phone_number: depositData.billingInfo.phone,
@@ -87,6 +87,9 @@ export class EscrowService {
         }
       };
 
+      console.log('Creating Pesapal checkout with request:', JSON.stringify(checkoutRequest, null, 2));
+
+      // The PesapalService will automatically handle IPN registration
       const checkoutResponse = await this.pesapalService.createCheckout(checkoutRequest);
 
       // Update transaction with Pesapal order details
@@ -105,7 +108,53 @@ export class EscrowService {
 
     } catch (error: any) {
       console.error('Create deposit failed:', error);
-      throw new Error(error.message || 'Failed to create deposit');
+      
+      // Enhanced error handling with better error categorization
+      let errorMessage = 'Failed to create deposit';
+      let errorCode = 'DEPOSIT_CREATION_FAILED';
+      
+      if (error.message?.includes('IPN registration failed')) {
+        errorMessage = 'Payment system configuration error. Please try again later.';
+        errorCode = 'IPN_REGISTRATION_FAILED';
+      } else if (error.message?.includes('authentication failed')) {
+        errorMessage = 'Payment authentication failed. Please contact support.';
+        errorCode = 'PAYMENT_AUTH_FAILED';
+      } else if (error.response?.data?.error?.message) {
+        errorMessage = `Payment Error: ${error.response.data.error.message}`;
+        errorCode = 'PESAPAL_API_ERROR';
+      } else if (error.response?.status) {
+        errorMessage = `Payment service error (${error.response.status})`;
+        errorCode = 'PAYMENT_SERVICE_ERROR';
+        
+        // Specific handling for common HTTP errors
+        switch (error.response.status) {
+          case 404:
+            errorMessage = 'Payment service endpoint not found. Please contact support.';
+            break;
+          case 401:
+            errorMessage = 'Payment authentication failed. Please contact support.';
+            break;
+          case 403:
+            errorMessage = 'Payment access denied. Please contact support.';
+            break;
+          case 429:
+            errorMessage = 'Too many payment requests. Please try again in a few minutes.';
+            break;
+          case 500:
+          case 502:
+          case 503:
+            errorMessage = 'Payment service temporarily unavailable. Please try again later.';
+            break;
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      const enhancedError = new Error(errorMessage);
+      (enhancedError as any).code = errorCode;
+      (enhancedError as any).originalError = error;
+      
+      throw enhancedError;
     }
   }
 
@@ -388,6 +437,34 @@ export class EscrowService {
       createdAt: wallet.createdAt,
       updatedAt: wallet.updatedAt
     };
+  }
+
+  // === PAYMENT SYSTEM HEALTH CHECK ===
+
+  async checkPaymentSystemHealth(): Promise<{
+    healthy: boolean;
+    pesapalStatus: any;
+    ipnStatus?: string;
+    message?: string;
+  }> {
+    try {
+      const pesapalHealth = await this.pesapalService.healthCheck();
+      
+      return {
+        healthy: pesapalHealth.healthy,
+        pesapalStatus: pesapalHealth,
+        ipnStatus: pesapalHealth.ipnStatus,
+        message: pesapalHealth.healthy 
+          ? 'Payment system is operational' 
+          : 'Payment system issues detected'
+      };
+    } catch (error: any) {
+      return {
+        healthy: false,
+        pesapalStatus: { healthy: false, error: error.message },
+        message: 'Payment system health check failed'
+      };
+    }
   }
 
   // === HELPER METHODS ===
