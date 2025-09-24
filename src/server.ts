@@ -1,4 +1,3 @@
-//server.ts
 import express from 'express';
 import cors from 'cors';
 import { config } from './config/config';
@@ -9,6 +8,8 @@ import uploadRoutes from './routes/upload.routes';
 import withdrawalRoutes from './routes/withdrawal.routes';
 import notificationRoutes from './routes/notification.routes'; 
 import helpRoutes from './routes/help.routes';
+import smsTestRoutes from './routes/sms.test.routes'; // Add this import
+import emailTestRoutes from './routes/email.test.routes';
 
 const app = express();
 
@@ -67,6 +68,9 @@ app.use('/api/tours', require('./routes/tours.routes').default);
 app.use('/api/notifications', notificationRoutes); 
 app.use('/api/help', helpRoutes);
 app.use('/api/pesapal', require('./routes/pesapal.callback').default);
+app.use('/api/sms', smsTestRoutes); // Add SMS test routes
+app.use('/api/sms', smsTestRoutes); // Add SMS test routes
+app.use('/api/brevo/email', emailTestRoutes); // Email test routes
 
 // Health check
 app.get('/health', (req, res) => {

@@ -505,6 +505,48 @@ async updateProfileImage(req: Request, res: Response, next: NextFunction) {
     }
   }
 
+  // --- PUBLIC EMAIL STATUS CHECK ---
+  async checkEmailStatus(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { email } = req.params;
+      
+      if (!email) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Email is required' 
+        });
+      }
+
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Invalid email format' 
+        });
+      }
+
+      const result = await authService.checkEmailStatus(email);
+      
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error: any) {
+      console.error('Error checking email status:', error);
+      res.status(500).json({ 
+        success: false,
+        message: 'Server error while checking email status',
+        data: {
+          exists: false,
+          hasPassword: false,
+          message: 'Server error occurred',
+          nextAction: 'signup'
+        }
+      });
+    }
+  }
+
   async getUserById(req: Request, res: Response, next: NextFunction) {
     try {
       // Check if user is admin or accessing their own data

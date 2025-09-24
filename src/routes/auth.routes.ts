@@ -13,6 +13,10 @@ router.post('/google', authController.googleAuth);
 router.post('/apple', authController.appleAuth);
 router.post('/refresh-token', authController.refreshToken);
 
+// --- PUBLIC EMAIL CHECK ---
+router.get('/check-email/:email', authController.checkEmailStatus);
+
+
 // --- FORGOT PASSWORD ROUTES ---
 router.post('/forgot-password', authController.forgotPassword);
 router.post('/verify-otp', authController.verifyOtp);

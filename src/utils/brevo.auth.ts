@@ -1,4 +1,4 @@
-import axios from 'axios';
+import * as Brevo from '@getbrevo/brevo';
 import { config } from '../config/config';
 
 interface BrevoContact {
@@ -9,22 +9,6 @@ interface BrevoContact {
     SMS?: string;
   };
   listIds?: number[];
-}
-
-interface BrevoEmailData {
-  sender: {
-    name: string;
-    email: string;
-  };
-  to: Array<{
-    email: string;
-    name?: string;
-  }>;
-  subject: string;
-  htmlContent: string;
-  textContent?: string;
-  templateId?: number;
-  params?: Record<string, any>;
 }
 
 interface MailingContext {
@@ -53,153 +37,512 @@ interface MailingContext {
   };
 }
 
+interface BrevoErrorResponse {
+  code?: string;
+  message?: string;
+  details?: any;
+}
+
+interface BrevoApiError extends Error {
+  response?: {
+    status?: number;
+    statusText?: string;
+    body?: BrevoErrorResponse;
+  };
+  code?: string;
+}
+
+interface BatchEmailResult {
+  successful: number;
+  failed: Array<{ email: string; error: string; type: string }>;
+}
+
 export class BrevoMailingService {
-  private apiKey: string;
-  private apiUrl = 'https://api.brevo.com/v3';
+  private transactionalEmailsApi: Brevo.TransactionalEmailsApi;
+  private contactsApi: Brevo.ContactsApi;
   private defaultSender: { name: string; email: string };
 
   constructor() {
-    this.apiKey = config.brevoApiKey;
-    this.defaultSender = {
-      name: 'Jambolush Security',
-      email: config.brevoSenderEmail
-    };
+    try {
+      // Initialize APIs
+      this.transactionalEmailsApi = new Brevo.TransactionalEmailsApi();
+      this.contactsApi = new Brevo.ContactsApi();
+
+      // Validate configuration
+      if (!config.brevoApiKey) {
+        throw new Error('Brevo API key is required but not configured');
+      }
+
+      if (!config.brevoSenderEmail) {
+        throw new Error('Brevo sender email is required but not configured');
+      }
+
+      // Set API key for transactional emails
+      this.transactionalEmailsApi.setApiKey(
+        Brevo.TransactionalEmailsApiApiKeys.apiKey, 
+        config.brevoApiKey
+      );
+
+      // Set API key for contacts
+      this.contactsApi.setApiKey(
+        Brevo.ContactsApiApiKeys.apiKey, 
+        config.brevoApiKey
+      );
+
+      this.defaultSender = {
+        name: 'Jambolush',
+        email: config.brevoSenderEmail
+      };
+
+    } catch (error: any) {
+      throw error;
+    }
   }
 
-  private async makeRequest(endpoint: string, data: any, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST') {
+  // --- ERROR HANDLING UTILITIES ---
+  private logBrevoError(context: string, error: BrevoApiError, additionalData?: any): void {
+    const errorInfo = {
+      service: 'BrevoMailingService',
+      context,
+      timestamp: new Date().toISOString(),
+      error: {
+        message: error.message,
+        code: error.code,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      },
+      brevoResponse: error.response ? {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        body: error.response.body,
+      } : null,
+      additionalData: additionalData ? JSON.stringify(additionalData) : null,
+    };
+
+    console.error('Brevo API Error:', JSON.stringify(errorInfo, null, 2));
+  }
+
+  private handleBrevoError(context: string, error: BrevoApiError, additionalData?: any): Error {
+    this.logBrevoError(context, error, additionalData);
+
+    // Handle specific Brevo error codes
+    if (error.response?.status) {
+      switch (error.response.status) {
+        case 400:
+          return new Error(`Invalid request to Brevo API: ${error.response.body?.message || error.message}`);
+        case 401:
+          return new Error('Brevo API authentication failed - check your API key configuration');
+        case 402:
+          return new Error('Brevo account has insufficient credits - please add credits to your account');
+        case 403:
+          return new Error('Brevo API access forbidden - check your account permissions and plan limits');
+        case 404:
+          return new Error(`Brevo resource not found: ${error.response.body?.message || error.message}`);
+        case 429:
+          return new Error('Brevo API rate limit exceeded - please retry after some time');
+        case 500:
+        case 502:
+        case 503:
+          return new Error('Brevo service temporarily unavailable - please retry later');
+        default:
+          return new Error(`Brevo API error (${error.response.status}): ${error.response.body?.message || error.message}`);
+      }
+    }
+
+    // Handle network errors
+    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      return new Error('Unable to connect to Brevo API - check your internet connection');
+    }
+
+    if (error.code === 'ETIMEDOUT') {
+      return new Error('Brevo API request timed out - please retry');
+    }
+
+    // Default error
+    return new Error(`Brevo API error: ${error.message}`);
+  }
+
+  // Retry logic for critical operations
+  private async withRetry<T>(
+    operation: () => Promise<T>,
+    context: string,
+    maxRetries: number = 3,
+    backoffMs: number = 1000
+  ): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error: any) {
+        lastError = error;
+        
+        // Don't retry on certain error types (client errors)
+        if (error.response?.status && [400, 401, 403, 404].includes(error.response.status)) {
+          throw this.handleBrevoError(context, error);
+        }
+
+        if (attempt < maxRetries) {
+          const delay = backoffMs * Math.pow(2, attempt - 1);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    throw this.handleBrevoError(`${context} (failed after ${maxRetries} attempts)`, lastError);
+  }
+
+  // Health check method
+  async checkBrevoConnection(): Promise<boolean> {
     try {
-      const response = await axios({
-        method,
-        url: `${this.apiUrl}${endpoint}`,
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'api-key': this.apiKey
-        },
-        data
-      });
-      return response.data;
+      await this.contactsApi.getContacts(1, 0);
+      return true;
     } catch (error: any) {
-      console.error('Brevo API Error:', error.response?.data || error.message);
-      throw new Error(`Failed to send email: ${error.response?.data?.message || error.message}`);
+      this.logBrevoError('healthCheck', error);
+      return false;
     }
   }
 
   // --- CONTACT MANAGEMENT ---
   async createOrUpdateContact(contact: BrevoContact): Promise<void> {
-    await this.makeRequest('/contacts', contact, 'POST');
+    try {
+      // Validate contact data
+      if (!contact.email || !this.isValidEmail(contact.email)) {
+        throw new Error(`Invalid email address: ${contact.email}`);
+      }
+
+      const createContactRequest = {
+        email: contact.email,
+        attributes: contact.attributes,
+        ...(contact.listIds && { listIds: contact.listIds })
+      };
+
+      await this.withRetry(
+        () => this.contactsApi.createContact(createContactRequest),
+        'createOrUpdateContact',
+        3
+      );
+
+    } catch (error: any) {
+      const enhancedError = this.handleBrevoError(
+        'createOrUpdateContact',
+        error,
+        { 
+          contactEmail: contact.email, 
+          listIds: contact.listIds,
+          attributeKeys: Object.keys(contact.attributes)
+        }
+      );
+      throw enhancedError;
+    }
   }
 
   // --- EMAIL SENDING METHODS ---
-  async sendTransactionalEmail(emailData: BrevoEmailData): Promise<string> {
-    const response = await this.makeRequest('/smtp/email', emailData);
-    return response.messageId;
+  async sendTransactionalEmail(emailData: {
+    sender: { name: string; email: string };
+    to: Array<{ email: string; name?: string }>;
+    subject: string;
+    htmlContent: string;
+    textContent?: string;
+    templateId?: number;
+    params?: Record<string, any>;
+  }): Promise<string> {
+    try {
+      // Validate email data
+      this.validateEmailData(emailData);
+
+      const sendEmailRequest: any = {
+        sender: emailData.sender,
+        to: emailData.to,
+        subject: emailData.subject,
+        htmlContent: emailData.htmlContent,
+        ...(emailData.textContent && { textContent: emailData.textContent }),
+        ...(emailData.templateId && { templateId: emailData.templateId }),
+        ...(emailData.params && { params: emailData.params })
+      };
+
+      const response: any = await this.withRetry(
+        () => this.transactionalEmailsApi.sendTransacEmail(sendEmailRequest),
+        'sendTransactionalEmail',
+        3
+      );
+
+      const messageId = response.messageId || '';
+      return messageId;
+    } catch (error: any) {
+      const enhancedError = this.handleBrevoError(
+        'sendTransactionalEmail',
+        error,
+        {
+          recipientCount: emailData.to.length,
+          recipients: emailData.to.map(r => r.email).join(', '),
+          subject: emailData.subject,
+          templateId: emailData.templateId,
+          sender: emailData.sender.email,
+          hasHtmlContent: !!emailData.htmlContent,
+          hasTextContent: !!emailData.textContent
+        }
+      );
+      throw enhancedError;
+    }
+  }
+
+  private validateEmailData(emailData: any): void {
+    if (!emailData.to || !Array.isArray(emailData.to) || emailData.to.length === 0) {
+      throw new Error('Email recipients are required');
+    }
+
+    for (const recipient of emailData.to) {
+      if (!recipient.email || !this.isValidEmail(recipient.email)) {
+        throw new Error(`Invalid recipient email: ${recipient.email}`);
+      }
+    }
+
+    if (!emailData.subject || emailData.subject.trim().length === 0) {
+      throw new Error('Email subject is required');
+    }
+
+    if (!emailData.htmlContent || emailData.htmlContent.trim().length === 0) {
+      throw new Error('Email HTML content is required');
+    }
+
+    if (!emailData.sender || !emailData.sender.email || !this.isValidEmail(emailData.sender.email)) {
+      throw new Error(`Invalid sender email: ${emailData.sender?.email}`);
+    }
+  }
+
+  private isValidEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
   }
 
   // --- AUTHENTICATION EMAIL METHODS ---
 
   async sendWelcomeEmail(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `Welcome to ${context.company.name} - Your Journey Begins Here!`,
-      htmlContent: this.getWelcomeTemplate(context),
-      textContent: this.getWelcomeTextTemplate(context)
-    };
+    try {
+      const emailData = {
+        sender: this.defaultSender,
+        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+        subject: `Welcome to ${context.company.name} - Your Journey Begins Here!`,
+        htmlContent: this.getWelcomeTemplate(context),
+        textContent: this.getWelcomeTextTemplate(context)
+      };
 
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Welcome email sent to ${context.user.email}`);
+      await this.sendTransactionalEmail(emailData);
+    } catch (error: any) {
+      throw error;
+    }
   }
 
   async sendEmailVerification(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `Verify Your ${context.company.name} Account`,
-      htmlContent: this.getEmailVerificationTemplate(context),
-      textContent: this.getEmailVerificationTextTemplate(context)
-    };
+    try {
+      if (!context.verification?.code) {
+        throw new Error('Verification code is required for email verification');
+      }
 
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Email verification sent to ${context.user.email}`);
+      const emailData = {
+        sender: this.defaultSender,
+        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+        subject: `Verify Your ${context.company.name} Account`,
+        htmlContent: this.getEmailVerificationTemplate(context),
+        textContent: this.getEmailVerificationTextTemplate(context)
+      };
+
+      await this.sendTransactionalEmail(emailData);
+    } catch (error: any) {
+      throw error;
+    }
   }
 
   async sendPasswordResetOTP(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `Your ${context.company.name} Password Reset Code`,
-      htmlContent: this.getPasswordResetTemplate(context),
-      textContent: this.getPasswordResetTextTemplate(context)
-    };
+    try {
+      if (!context.verification?.code) {
+        throw new Error('Verification code is required for password reset');
+      }
 
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Password reset OTP sent to ${context.user.email}`);
+      const emailData = {
+        sender: this.defaultSender,
+        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+        subject: `Your ${context.company.name} Password Reset Code`,
+        htmlContent: this.getPasswordResetTemplate(context),
+        textContent: this.getPasswordResetTextTemplate(context)
+      };
+
+      await this.sendTransactionalEmail(emailData);
+    } catch (error: any) {
+      throw error;
+    }
   }
 
   async sendPasswordChangedNotification(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `${context.company.name} Password Changed Successfully`,
-      htmlContent: this.getPasswordChangedTemplate(context),
-      textContent: this.getPasswordChangedTextTemplate(context)
-    };
+    try {
+      const emailData = {
+        sender: this.defaultSender,
+        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+        subject: `${context.company.name} Password Changed Successfully`,
+        htmlContent: this.getPasswordChangedTemplate(context),
+        textContent: this.getPasswordChangedTextTemplate(context)
+      };
 
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Password changed notification sent to ${context.user.email}`);
+      await this.sendTransactionalEmail(emailData);
+    } catch (error: any) {
+      throw error;
+    }
   }
 
   async sendLoginNotification(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `New Login to Your ${context.company.name} Account`,
-      htmlContent: this.getLoginNotificationTemplate(context),
-      textContent: this.getLoginNotificationTextTemplate(context)
-    };
+    try {
+      const emailData = {
+        sender: this.defaultSender,
+        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+        subject: `New Login to Your ${context.company.name} Account`,
+        htmlContent: this.getLoginNotificationTemplate(context),
+        textContent: this.getLoginNotificationTextTemplate(context)
+      };
 
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Login notification sent to ${context.user.email}`);
+      await this.sendTransactionalEmail(emailData);
+    } catch (error: any) {
+      throw error;
+    }
   }
 
   async sendSuspiciousActivityAlert(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `Suspicious Activity Detected - ${context.company.name} Security Alert`,
-      htmlContent: this.getSuspiciousActivityTemplate(context),
-      textContent: this.getSuspiciousActivityTextTemplate(context)
-    };
+    try {
+      const emailData = {
+        sender: this.defaultSender,
+        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+        subject: `Suspicious Activity Detected - ${context.company.name} Security Alert`,
+        htmlContent: this.getSuspiciousActivityTemplate(context),
+        textContent: this.getSuspiciousActivityTextTemplate(context)
+      };
 
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Suspicious activity alert sent to ${context.user.email}`);
+      await this.sendTransactionalEmail(emailData);
+    } catch (error: any) {
+      throw error;
+    }
   }
 
   async sendAccountStatusChange(context: MailingContext, status: 'suspended' | 'reactivated'): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `${status === 'suspended' ? 'Account Suspended' : 'Account Reactivated'} - ${context.company.name}`,
-      htmlContent: this.getAccountStatusTemplate(context, status),
-      textContent: this.getAccountStatusTextTemplate(context, status)
-    };
+    try {
+      const emailData = {
+        sender: this.defaultSender,
+        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+        subject: `${status === 'suspended' ? 'Account Suspended' : 'Account Reactivated'} - ${context.company.name}`,
+        htmlContent: this.getAccountStatusTemplate(context, status),
+        textContent: this.getAccountStatusTextTemplate(context, status)
+      };
 
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Account ${status} notification sent to ${context.user.email}`);
+      await this.sendTransactionalEmail(emailData);
+    } catch (error: any) {
+      throw error;
+    }
   }
 
   async sendProfileUpdateNotification(context: MailingContext): Promise<void> {
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `Profile Updated - ${context.company.name}`,
-      htmlContent: this.getProfileUpdateTemplate(context),
-      textContent: this.getProfileUpdateTextTemplate(context)
+    try {
+      const emailData = {
+        sender: this.defaultSender,
+        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+        subject: `Profile Updated - ${context.company.name}`,
+        htmlContent: this.getProfileUpdateTemplate(context),
+        textContent: this.getProfileUpdateTextTemplate(context)
+      };
+
+      await this.sendTransactionalEmail(emailData);
+    } catch (error: any) {
+      throw error;
+    }
+  }
+
+  // --- TEMPLATE SENDER USING TEMPLATE ID ---
+  async sendTemplateEmail(
+    templateId: number, 
+    context: MailingContext, 
+    subject: string,
+    params?: Record<string, any>
+  ): Promise<void> {
+    try {
+      if (!templateId || templateId <= 0) {
+        throw new Error('Valid template ID is required');
+      }
+
+      const emailData = {
+        sender: this.defaultSender,
+        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+        subject: subject,
+        templateId: templateId,
+        htmlContent: '', // Required but will be overridden by template
+        params: {
+          firstName: context.user.firstName,
+          lastName: context.user.lastName,
+          companyName: context.company.name,
+          companyWebsite: context.company.website,
+          ...params
+        }
+      };
+
+      await this.sendTransactionalEmail(emailData);
+    } catch (error: any) {
+      throw error;
+    }
+  }
+
+  // --- BATCH OPERATIONS ---
+  async sendBatchEmails(emails: Array<{
+    context: MailingContext;
+    type: 'welcome' | 'verification' | 'passwordReset' | 'passwordChanged' | 'loginNotification' | 'suspiciousActivity' | 'accountStatus' | 'profileUpdate';
+    additionalData?: any;
+  }>): Promise<BatchEmailResult> {
+    const results: BatchEmailResult = {
+      successful: 0,
+      failed: []
     };
 
-    await this.sendTransactionalEmail(emailData);
-    console.log(`Profile update notification sent to ${context.user.email}`);
+    for (const emailRequest of emails) {
+      try {
+        switch (emailRequest.type) {
+          case 'welcome':
+            await this.sendWelcomeEmail(emailRequest.context);
+            break;
+          case 'verification':
+            await this.sendEmailVerification(emailRequest.context);
+            break;
+          case 'passwordReset':
+            await this.sendPasswordResetOTP(emailRequest.context);
+            break;
+          case 'passwordChanged':
+            await this.sendPasswordChangedNotification(emailRequest.context);
+            break;
+          case 'loginNotification':
+            await this.sendLoginNotification(emailRequest.context);
+            break;
+          case 'suspiciousActivity':
+            await this.sendSuspiciousActivityAlert(emailRequest.context);
+            break;
+          case 'accountStatus':
+            const status = emailRequest.additionalData?.status || 'suspended';
+            await this.sendAccountStatusChange(emailRequest.context, status);
+            break;
+          case 'profileUpdate':
+            await this.sendProfileUpdateNotification(emailRequest.context);
+            break;
+          default:
+            throw new Error(`Unknown email type: ${emailRequest.type}`);
+        }
+        results.successful++;
+      } catch (error: any) {
+        results.failed.push({
+          email: emailRequest.context.user.email,
+          error: error.message,
+          type: emailRequest.type
+        });
+      }
+    }
+
+    if (results.failed.length > 0) {
+      console.error('Failed emails:', JSON.stringify(results.failed, null, 2));
+    }
+
+    return results;
   }
 
   // --- MODERNIZED EMAIL TEMPLATES ---
@@ -229,9 +572,9 @@ export class BrevoMailingService {
         padding: 20px;
       }
       
-      /* Main card container - similar to login form */
+      /* Main card container */
       .email-container {
-        background: rgba(255, 255, 255, 0.9);
+        background: rgba(255, 255, 255, 0.95);
         backdrop-filter: blur(8px);
         border-radius: 24px;
         box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
@@ -240,7 +583,7 @@ export class BrevoMailingService {
         transition: all 0.5s ease;
       }
       
-      /* Navy gradient header - original colors */
+      /* Header */
       .header {
         background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
         padding: 40px 30px;
@@ -277,7 +620,7 @@ export class BrevoMailingService {
         z-index: 1;
       }
       
-      /* Content section within the same card */
+      /* Content section */
       .content {
         padding: 40px 30px;
         background: rgba(255, 255, 255, 0.95);
@@ -333,7 +676,7 @@ export class BrevoMailingService {
       .button {
         display: inline-block;
         background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
-        color: #ffffffff;
+        color: #ffffff;
         text-decoration: none;
         padding: 14px 28px;
         border-radius: 12px;
@@ -356,7 +699,7 @@ export class BrevoMailingService {
         margin: 32px 0;
       }
       
-      /* Info card for login details - navy background with white text */
+      /* Info card */
       .info-card {
         background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
         border: 1px solid rgba(255, 255, 255, 0.2);
@@ -459,7 +802,7 @@ export class BrevoMailingService {
         margin: 32px 0;
       }
       
-      /* Footer within the same card - original navy colors */
+      /* Footer */
       .footer {
         background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
         color: white;
@@ -496,34 +839,21 @@ export class BrevoMailingService {
       }
       
       .footer-links a:hover {
-        color: #52e000ff;
+        color: #52e000;
       }
       
       .footer-text {
         font-size: 13px;
-        color: #ffffffff;
+        color: #ffffff;
         line-height: 1.5;
         position: relative;
         z-index: 1;
       }
       
       .footer-email {
-        color: #23f8edff;
+        color: #23f8ed;
         font-weight: 500;
         text-decoration: none;
-      }
-      
-      .security-badge {
-        display: inline-flex;
-        align-items: center;
-        background: rgba(219, 234, 254, 0.9);
-        color: #1e40af;
-        padding: 6px 12px;
-        border-radius: 20px;
-        font-size: 13px;
-        font-weight: 500;
-        margin-top: 16px;
-        backdrop-filter: blur(4px);
       }
       
       .feature-list {
@@ -607,58 +937,59 @@ export class BrevoMailingService {
           <div class="email-container">
             <div class="header">
               <div class="logo">${context.company.name}</div>
-              <div class="header-subtitle">Welcome to the Future</div>
+              <div class="header-subtitle">Your Real Estate Journey Starts Here</div>
             </div>
             
             <div class="content">
               <div class="greeting">Welcome, ${context.user.firstName}!</div>
               
               <div class="message">
-                We're thrilled to have you join the <strong>${context.company.name}</strong> community! Your account has been successfully created, and you're now part of something extraordinary.
+                Congratulations! You've successfully joined <strong>${context.company.name}</strong> – Rwanda's premier real estate platform. We're excited to help you discover exceptional properties and connect with the best opportunities in the market.
               </div>
               
               <div class="alert-box alert-success">
-                <div class="alert-title">Account Created Successfully</div>
-                <div class="alert-text">You're all set to explore our platform and discover amazing properties.</div>
+                <div class="alert-title">Account Successfully Created</div>
+                <div class="alert-text">Your account is ready. Start exploring premium real estate listings, connect with verified agents, and discover your dream property.</div>
               </div>
               
               <div class="message">
-                Here's what you can do next:
+                What's next? Here's how to get started:
               </div>
               
               <ul class="feature-list">
-                <li>Complete your profile to personalize your experience</li>
-                <li>Explore our features and discover what's possible</li>
-                <li>Connect with our community of property enthusiasts</li>
-                <li>Start browsing exclusive properties in your area</li>
+                <li>Complete your profile to receive personalized property recommendations</li>
+                <li>Browse our extensive collection of verified property listings</li>
+                <li>Connect with certified real estate professionals</li>
+                <li>Set up property alerts for your preferred locations and budget</li>
+                <li>Access exclusive market insights and property valuations</li>
               </ul>
               
               <div class="button-center">
-                <a href="${context.company.website}/dashboard" class="button">
-                  Start Your Journey
+                <a href="https://jambolush.com" class="button">
+                  Explore Properties Now
                 </a>
               </div>
               
               <div class="divider"></div>
               
               <div style="text-align: center; color: #6b7280;">
-                <p>Need help getting started? We're here for you!</p>
+                <p>Need assistance finding the perfect property?</p>
                 <p style="margin-top: 8px;">
-                  <a href="${context.company.website}/support" style="color: #083A85; text-decoration: none; font-weight: 500;">Visit Support Center</a>
+                  <a href="https://app.jambolush.com/all/support" style="color: #083A85; text-decoration: none; font-weight: 500;">Contact Our Property Experts</a>
                 </p>
               </div>
             </div>
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}/dashboard">Dashboard</a>
-                <a href="${context.company.website}/support">Support</a>
-                <a href="${context.company.website}/privacy">Privacy</a>
+                <a href="https://jambolush.com">Browse Properties</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
+                <a href="https://jambolush.com/all/privacy-policy">Privacy</a>
               </div>
               <div class="footer-text">
-                © ${new Date().getFullYear()} ${context.company.name}. Crafted with passion for innovation.
+                © ${new Date().getFullYear()} ${context.company.name}. Connecting you to Rwanda's finest properties.
                 <br>
-                This email was sent to ${context.user.email}
+                This welcome email was sent to ${context.user.email}
               </div>
             </div>
           </div>
@@ -683,14 +1014,14 @@ export class BrevoMailingService {
           <div class="email-container">
             <div class="header">
               <div class="logo">${context.company.name}</div>
-              <div class="header-subtitle">Security First</div>
+              <div class="header-subtitle">Email Verification Required</div>
             </div>
             
             <div class="content">
               <div class="greeting">Almost There, ${context.user.firstName}!</div>
               
               <div class="message">
-                To complete your account setup and ensure the security of your ${context.company.name} account, please verify your email address using the code below.
+                To complete your ${context.company.name} account setup and start browsing premium real estate listings, please verify your email address using the code below.
               </div>
               
               <div class="highlight-box">
@@ -700,27 +1031,27 @@ export class BrevoMailingService {
               </div>
               
               <div class="message">
-                Enter this code in your verification screen to activate your account. This code is unique to you and should not be shared with anyone.
+                Enter this 6-digit code on the verification page to activate your account and gain full access to all ${context.company.name} features. This code is unique and secure – please don't share it with anyone.
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/verify-email" class="button">
-                  Verify Email Address
+                <a href="https://jambolush.com/all/account-verification" class="button">
+                  Verify Email Now
                 </a>
               </div>
               
               <div class="alert-box alert-warning">
                 <div class="alert-title">Security Notice</div>
                 <div class="alert-text">
-                  If you didn't create this account, please ignore this email or contact our support team.
+                  If you didn't create a ${context.company.name} account, please ignore this email. If you continue receiving these emails, contact our support team.
                 </div>
               </div>
             </div>
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}/support">Need Help?</a>
-                <a href="${context.company.website}/security">Security Center</a>
+                <a href="https://app.jambolush.com/all/support">Need Help?</a>
+                <a href="https://app.jambolush.com/all/security">Security Center</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. Your security is our priority.
@@ -750,14 +1081,14 @@ export class BrevoMailingService {
           <div class="email-container">
             <div class="header">
               <div class="logo">${context.company.name}</div>
-              <div class="header-subtitle">Password Reset</div>
+              <div class="header-subtitle">Password Reset Request</div>
             </div>
             
             <div class="content">
               <div class="greeting">Password Reset Request</div>
               
               <div class="message">
-                Hi ${context.user.firstName}, we received a request to reset your ${context.company.name} account password. Use the verification code below to proceed with resetting your password.
+                Hi ${context.user.firstName}, we received a request to reset the password for your ${context.company.name} account. Use the verification code below to create a new password and regain access to your property search.
               </div>
               
               <div class="highlight-box">
@@ -767,12 +1098,12 @@ export class BrevoMailingService {
               </div>
               
               <div class="message">
-                Enter this code in the password reset form to create a new password. For your security, this code can only be used once.
+                Enter this code on the password reset page to create a new secure password. For your security, this code can only be used once and will expire after the time shown above.
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/reset-password" class="button">
-                  Reset Password
+                <a href="https://jambolush.com/all/forgotpw" class="button">
+                  Reset Password Now
                 </a>
               </div>
               
@@ -788,15 +1119,15 @@ export class BrevoMailingService {
                   </div>
                   <div class="info-row">
                     <span class="info-label">Device</span>
-                    <span class="info-value">${context.security.device || 'Unknown'}</span>
+                    <span class="info-value">${context.security.device || 'Unknown Device'}</span>
                   </div>
                   <div class="info-row">
                     <span class="info-label">Location</span>
-                    <span class="info-value">${context.security.location || 'Unknown'}</span>
+                    <span class="info-value">${context.security.location || 'Unknown Location'}</span>
                   </div>
                   <div class="info-row">
                     <span class="info-label">IP Address</span>
-                    <span class="info-value">${context.security.ipAddress || 'Unknown'}</span>
+                    <span class="info-value">${context.security.ipAddress || 'Not Available'}</span>
                   </div>
                 </div>
               ` : ''}
@@ -804,17 +1135,17 @@ export class BrevoMailingService {
               <div class="alert-box alert-error">
                 <div class="alert-title">Didn't Request This?</div>
                 <div class="alert-text">
-                  If you didn't request a password reset, please ignore this email or 
-                  <a href="mailto:${context.company.supportEmail}" style="color: #dc2626; text-decoration: none; font-weight: 500;">contact our security team</a> immediately.
+                  If you didn't request a password reset, your account may be at risk. Please ignore this email and 
+                  <a href="mailto:${context.company.supportEmail}" style="color: #dc2626; text-decoration: none; font-weight: 500;">contact our security team</a> immediately to protect your account.
                 </div>
               </div>
             </div>
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}/support">Support</a>
-                <a href="${context.company.website}/security">Security</a>
-                <a href="${context.company.website}/login">Login</a>
+                <a href="https://app.jambolush.com/all/support">Support</a>
+                <a href="https://app.jambolush.com/all/security">Security</a>
+                <a href="https://app.jambolush.com/all/login">Login</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. Protecting your account 24/7.
@@ -844,19 +1175,19 @@ export class BrevoMailingService {
           <div class="email-container">
             <div class="header">
               <div class="logo">${context.company.name}</div>
-              <div class="header-subtitle">Security Update</div>
+              <div class="header-subtitle">Security Update Confirmed</div>
             </div>
             
             <div class="content">
               <div class="greeting">Password Updated Successfully</div>
               
               <div class="message">
-                Hi ${context.user.firstName}, this is a confirmation that your ${context.company.name} account password was successfully changed.
+                Hi ${context.user.firstName}, this confirms that your ${context.company.name} account password was successfully changed. Your account security has been strengthened and you can continue accessing all property listings and features.
               </div>
               
               <div class="alert-box alert-success">
-                <div class="alert-title">Password Changed Successfully</div>
-                <div class="alert-text">Your account security has been updated and all other sessions have been logged out.</div>
+                <div class="alert-title">Security Enhancement Complete</div>
+                <div class="alert-text">Your new password is now active. All other login sessions have been automatically logged out for your security.</div>
               </div>
               
               ${context.security ? `
@@ -871,46 +1202,46 @@ export class BrevoMailingService {
                   </div>
                   <div class="info-row">
                     <span class="info-label">Device</span>
-                    <span class="info-value">${context.security.device || 'Unknown'}</span>
+                    <span class="info-value">${context.security.device || 'Unknown Device'}</span>
                   </div>
                   <div class="info-row">
                     <span class="info-label">Browser</span>
-                    <span class="info-value">${context.security.browser || 'Unknown'}</span>
+                    <span class="info-value">${context.security.browser || 'Unknown Browser'}</span>
                   </div>
                   <div class="info-row">
                     <span class="info-label">Location</span>
-                    <span class="info-value">${context.security.location || 'Unknown'}</span>
+                    <span class="info-value">${context.security.location || 'Unknown Location'}</span>
                   </div>
                 </div>
               ` : ''}
               
               <div class="message">
-                Your password change is now active across all your devices. For security reasons, you've been logged out of all other sessions. You can log back in using your new password.
+                You can now sign in using your new password. For security reasons, you may need to log in again on your other devices. This helps ensure only you have access to your property searches and saved favorites.
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/login" class="button">
-                  Sign In Now
+                <a href="https://app.jambolush.com/all/login" class="button">
+                  Sign In to Your Account
                 </a>
               </div>
               
               <div class="alert-box alert-error">
                 <div class="alert-title">Didn't Make This Change?</div>
                 <div class="alert-text">
-                  If you didn't change your password, your account may be compromised. 
-                  <a href="mailto:${context.company.supportEmail}" style="color: #dc2626; text-decoration: none; font-weight: 500;">Contact our security team immediately</a>.
+                  If you didn't change your password, your account security may be compromised. 
+                  <a href="mailto:${context.company.supportEmail}" style="color: #dc2626; text-decoration: none; font-weight: 500;">Contact our security team immediately</a> – we'll help secure your account right away.
                 </div>
               </div>
             </div>
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}/security">Security Center</a>
-                <a href="${context.company.website}/support">Support</a>
-                <a href="${context.company.website}/login">Login</a>
+                <a href="https://app.jambolush.com/all/security">Security Center</a>
+                <a href="https://app.jambolush.com/all/support">Support</a>
+                <a href="https://app.jambolush.com/all/login">Login</a>
               </div>
               <div class="footer-text">
-                © ${new Date().getFullYear()} ${context.company.name}. Your security is our mission.
+                © ${new Date().getFullYear()} ${context.company.name}. Your security enables your success.
                 <br>
                 This security notification was sent to ${context.user.email}
               </div>
@@ -934,21 +1265,17 @@ export class BrevoMailingService {
     </head>
     <body>
       <div class="email-wrapper">
-        <!-- Single card container similar to login form -->
         <div class="email-container">
-          
-          <!-- Header section within the card -->
           <div class="header">
             <div class="logo">${context.company.name}</div>
-            <div class="header-subtitle">Login Alert</div>
+            <div class="header-subtitle">Login Security Alert</div>
           </div>
           
-          <!-- Content section within the same card -->
           <div class="content">
-            <div class="greeting">New Login Detected</div>
+            <div class="greeting">New Account Access Detected</div>
             
             <div class="message">
-              Hi ${context.user.firstName}, we detected a new sign-in to your ${context.company.name} account. If this was you, no action is needed.
+              Hi ${context.user.firstName}, we noticed a new sign-in to your ${context.company.name} account. This login alert helps keep your property search and personal information secure. If this was you, no action is required.
             </div>
             
             ${context.security ? `
@@ -975,33 +1302,33 @@ export class BrevoMailingService {
                 </div>
                 <div class="info-row">
                   <span class="info-label">IP Address</span>
-                  <span class="info-value">${context.security.ipAddress || 'Unknown'}</span>
+                  <span class="info-value">${context.security.ipAddress || 'Not Available'}</span>
                 </div>
               </div>
             ` : ''}
             
             <div class="alert-box alert-success">
-              <div class="alert-title">Was This You?</div>
+              <div class="alert-title">Recognize This Activity?</div>
               <div class="alert-text">
-                If you recognize this activity, you can safely ignore this email.
+                If you just signed in from this device and location, you can safely ignore this security notification. We send these alerts to help protect your account.
               </div>
             </div>
             
             <div class="button-center">
-              <a href="${context.company.website}/security/sessions" class="button">
-                Review Account Activity
+              <a href="https://app.jambolush.com/all/security/sessions" class="button">
+                Review All Login Activity
               </a>
             </div>
             
             <div class="alert-box alert-error">
-              <div class="alert-title">Unrecognized Login?</div>
+              <div class="alert-title">Don't Recognize This Login?</div>
               <div class="alert-text">
-                If you don't recognize this activity:
+                If this wasn't you, secure your account immediately by:
                 <ul style="margin: 8px 0; padding-left: 20px;">
-                  <li>Change your password immediately</li>
-                  <li>Review your account activity</li>
-                  <li>Enable two-factor authentication</li>
-                  <li><a href="mailto:${context.company.supportEmail}" style="color: #dc2626; text-decoration: none; font-weight: 500;">Contact our security team</a></li>
+                  <li>Changing your password right away</li>
+                  <li>Reviewing all recent account activity</li>
+                  <li>Enabling two-factor authentication</li>
+                  <li><a href="mailto:${context.company.supportEmail}" style="color: #dc2626; text-decoration: none; font-weight: 500;">Contacting our security team</a></li>
                 </ul>
               </div>
             </div>
@@ -1009,27 +1336,25 @@ export class BrevoMailingService {
             <div class="divider"></div>
             
             <div style="text-align: center; color: #6b7280;">
-              <p>Questions about your account activity?</p>
+              <p>Questions about your account security?</p>
               <p style="margin-top: 8px;">
-                <a href="mailto:${context.company.supportEmail}" style="color: #0d9488; text-decoration: none; font-weight: 500;">Contact Support Team</a>
+                <a href="mailto:${context.company.supportEmail}" style="color: #083A85; text-decoration: none; font-weight: 500;">Get Help from Our Security Team</a>
               </p>
             </div>
           </div>
           
-          <!-- Footer section within the same card -->
           <div class="footer">
             <div class="footer-links">
-              <a href="${context.company.website}/security">Security</a>
-              <a href="${context.company.website}/settings">Settings</a>
-              <a href="${context.company.website}/support">Support</a>
+              <a href="https://app.jambolush.com/all/security">Security</a>
+              <a href="https://app.jambolush.com/all/settings">Settings</a>
+              <a href="https://app.jambolush.com/all/support">Support</a>
             </div>
             <div class="footer-text">
-              © ${new Date().getFullYear()} ${context.company.name}. Monitoring your security 24/7.
+              © ${new Date().getFullYear()} ${context.company.name}. Protecting your property journey 24/7.
               <br>
               This security alert was sent to <span class="footer-email">${context.user.email}</span>
             </div>
           </div>
-          
         </div>
       </div>
     </body>
@@ -1057,28 +1382,28 @@ export class BrevoMailingService {
           <div class="email-container">
             <div class="header header-critical">
               <div class="logo">${context.company.name}</div>
-              <div class="header-subtitle">Security Alert</div>
+              <div class="header-subtitle">Urgent Security Alert</div>
             </div>
             
             <div class="content">
               <div class="greeting" style="color: #dc2626;">Suspicious Activity Detected</div>
               
               <div class="message">
-                <strong>Urgent:</strong> ${context.user.firstName}, we've detected suspicious activity on your ${context.company.name} account that requires your immediate attention.
+                <strong>Immediate Action Required:</strong> ${context.user.firstName}, our security systems have detected unusual activity on your ${context.company.name} account that requires your immediate attention to protect your property searches and personal information.
               </div>
               
               <div class="alert-box alert-error">
                 <div class="alert-title">Security Threat Detected</div>
                 <div class="alert-text">
-                  Multiple failed login attempts or unusual access patterns detected from an unrecognized location.
+                  We've identified multiple failed login attempts or unusual access patterns from an unrecognized location. This could indicate someone is trying to access your account without permission.
                 </div>
               </div>
               
               ${context.security ? `
                 <div class="info-card" style="border-color: #dc2626;">
                   <div class="info-card-header" style="color: #dc2626;">
-                    <span class="info-card-icon">🔍</span>
-                    Suspicious Activity Details
+                    <span class="info-card-icon">🚨</span>
+                    Threat Detection Details
                   </div>
                   <div class="info-row">
                     <span class="info-label">Detected</span>
@@ -1090,7 +1415,7 @@ export class BrevoMailingService {
                   </div>
                   <div class="info-row">
                     <span class="info-label">Source IP</span>
-                    <span class="info-value">${context.security.ipAddress || 'Unknown'}</span>
+                    <span class="info-value">${context.security.ipAddress || 'Unknown Source'}</span>
                   </div>
                   <div class="info-row">
                     <span class="info-label">Location</span>
@@ -1100,39 +1425,40 @@ export class BrevoMailingService {
               ` : ''}
               
               <div class="message">
-                <strong>Immediate Actions Required:</strong>
+                <strong>Protect Your Account Now:</strong>
               </div>
               
               <ul class="feature-list">
-                <li>Change your password immediately</li>
-                <li>Enable two-factor authentication if not already active</li>
-                <li>Review your recent account activity</li>
-                <li>Check for any unauthorized changes</li>
+                <li>Change your password immediately to a strong, unique password</li>
+                <li>Enable two-factor authentication for enhanced security</li>
+                <li>Review all recent account activity and saved property searches</li>
+                <li>Check for any unauthorized changes to your profile or preferences</li>
+                <li>Sign out of all devices and sign back in with your new password</li>
               </ul>
               
               <div class="button-center">
-                <a href="${context.company.website}/security/change-password" class="button" style="background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);">
+                <a href="https://app.jambolush.com/all/security/change-password" class="button" style="background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);">
                   Secure My Account Now
                 </a>
               </div>
               
               <div class="alert-box alert-error">
-                <div class="alert-title">Need Immediate Help?</div>
+                <div class="alert-title">Need Emergency Help?</div>
                 <div class="alert-text">
-                  If you suspect your account has been compromised, contact our security team immediately at 
-                  <a href="mailto:${context.company.supportEmail}" style="color: #dc2626; text-decoration: none; font-weight: 500;">${context.company.supportEmail}</a>
+                  If you believe your account has been compromised or you notice any unauthorized property inquiries, contact our emergency security team immediately at 
+                  <a href="mailto:${context.company.supportEmail}" style="color: #dc2626; text-decoration: none; font-weight: 500;">${context.company.supportEmail}</a>. We're here 24/7 to help secure your account.
                 </div>
               </div>
             </div>
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}/security">Security Center</a>
-                <a href="${context.company.website}/support">Emergency Support</a>
-                <a href="${context.company.website}/settings">Account Settings</a>
+                <a href="https://app.jambolush.com/all/security">Security Center</a>
+                <a href="https://app.jambolush.com/all/support">Emergency Support</a>
+                <a href="https://app.jambolush.com/all/settings">Account Settings</a>
               </div>
               <div class="footer-text">
-                © ${new Date().getFullYear()} ${context.company.name}. Your security is our top priority.
+                © ${new Date().getFullYear()} ${context.company.name}. Your security enables your success.
                 <br>
                 This critical security alert was sent to ${context.user.email}
               </div>
@@ -1146,8 +1472,8 @@ export class BrevoMailingService {
 
   private getAccountStatusTemplate(context: MailingContext, status: 'suspended' | 'reactivated'): string {
     const isSuspended = status === 'suspended';
-    const headerClass = isSuspended ? 'header-critical' : '';
-    const title = isSuspended ? 'Account Suspended' : 'Account Reactivated';
+    const headerClass = isSuspended ? 'header-critical' : 'header-success';
+    const title = isSuspended ? 'Account Temporarily Suspended' : 'Account Successfully Reactivated';
     
     return `
       <!DOCTYPE html>
@@ -1178,14 +1504,14 @@ export class BrevoMailingService {
               <div class="greeting">${title}</div>
               
               <div class="message">
-                Hi ${context.user.firstName}, this is an important update regarding your ${context.company.name} account status.
+                Hi ${context.user.firstName}, this is an important update regarding your ${context.company.name} account status and access to our real estate platform.
               </div>
               
               ${isSuspended ? `
                 <div class="alert-box alert-error">
-                  <div class="alert-title">Account Suspended</div>
+                  <div class="alert-title">Account Access Temporarily Restricted</div>
                   <div class="alert-text">
-                    Your account has been temporarily suspended due to security concerns or policy violations.
+                    Your account has been temporarily suspended due to potential security concerns or policy violations. This is a precautionary measure to protect your information and our community.
                   </div>
                 </div>
                 
@@ -1194,37 +1520,40 @@ export class BrevoMailingService {
                 </div>
                 
                 <ul class="feature-list" style="color: #6b7280;">
-                  <li style="color: #6b7280;">You cannot access your account or its features</li>
-                  <li style="color: #6b7280;">All active sessions have been terminated</li>
-                  <li style="color: #6b7280;">Your data remains secure and protected</li>
+                  <li style="color: #6b7280;">Temporary restriction from accessing property listings and account features</li>
+                  <li style="color: #6b7280;">All active sessions have been securely terminated</li>
+                  <li style="color: #6b7280;">Your personal data and saved properties remain protected</li>
+                  <li style="color: #6b7280;">No unauthorized access to your account information</li>
                 </ul>
                 
                 <div class="button-center">
-                  <a href="${context.company.website}/appeal" class="button" style="background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);">
-                    Submit Appeal
+                  <a href="https://app.jambolush.com/all/appeal" class="button" style="background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);">
+                    Submit Account Appeal
                   </a>
                 </div>
               ` : `
                 <div class="alert-box alert-success">
-                  <div class="alert-title">Welcome Back!</div>
+                  <div class="alert-title">Welcome Back to ${context.company.name}!</div>
                   <div class="alert-text">
-                    Your account has been successfully reactivated and you can now access all features.
+                    Your account has been successfully reactivated. You now have full access to all property listings, search features, and premium services.
                   </div>
                 </div>
                 
                 <div class="message">
-                  <strong>You can now:</strong>
+                  <strong>You can now enjoy:</strong>
                 </div>
                 
                 <ul class="feature-list">
-                  <li>Access your full account and all features</li>
-                  <li>Continue where you left off</li>
-                  <li>Enjoy the complete ${context.company.name} experience</li>
+                  <li>Full access to all property listings and advanced search</li>
+                  <li>Reconnect with your saved properties and favorites</li>
+                  <li>Contact verified agents and schedule property visits</li>
+                  <li>Receive personalized property recommendations</li>
+                  <li>Access exclusive market insights and property valuations</li>
                 </ul>
                 
                 <div class="button-center">
-                  <a href="${context.company.website}/login" class="button">
-                    Access Your Account
+                  <a href="https://app.jambolush.com/all/login" class="button">
+                    Access Your Account Now
                   </a>
                 </div>
               `}
@@ -1232,21 +1561,21 @@ export class BrevoMailingService {
               <div class="divider"></div>
               
               <div style="text-align: center; color: #6b7280;">
-                <p>Questions about your account status?</p>
+                <p>Questions about your account status or need assistance?</p>
                 <p style="margin-top: 8px;">
-                  <a href="mailto:${context.company.supportEmail}" style="color: #083A85; text-decoration: none; font-weight: 500;">Contact Support Team</a>
+                  <a href="mailto:${context.company.supportEmail}" style="color: #083A85; text-decoration: none; font-weight: 500;">Contact Our Support Team</a>
                 </p>
               </div>
             </div>
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}/support">Support</a>
-                <a href="${context.company.website}/terms">Terms</a>
-                <a href="${context.company.website}/privacy">Privacy</a>
+                <a href="https://app.jambolush.com/all/support">Support</a>
+                <a href="https://app.jambolush.com/all/terms">Terms of Service</a>
+                <a href="https://jambolush.com/all/privacy-policy">Privacy Policy</a>
               </div>
               <div class="footer-text">
-                © ${new Date().getFullYear()} ${context.company.name}. Committed to fair and transparent policies.
+                © ${new Date().getFullYear()} ${context.company.name}. Committed to fair and transparent service.
                 <br>
                 This account status update was sent to ${context.user.email}
               </div>
@@ -1273,26 +1602,26 @@ export class BrevoMailingService {
           <div class="email-container">
             <div class="header">
               <div class="logo">${context.company.name}</div>
-              <div class="header-subtitle">Profile Update</div>
+              <div class="header-subtitle">Profile Successfully Updated</div>
             </div>
             
             <div class="content">
-              <div class="greeting">Profile Updated Successfully</div>
+              <div class="greeting">Profile Changes Confirmed</div>
               
               <div class="message">
-                Hi ${context.user.firstName}, your ${context.company.name} profile has been successfully updated with your recent changes.
+                Hi ${context.user.firstName}, your ${context.company.name} profile has been successfully updated with your recent changes. These updates will help us provide you with more personalized property recommendations and improved service.
               </div>
               
               <div class="alert-box alert-success">
-                <div class="alert-title">Changes Saved Successfully</div>
-                <div class="alert-text">Your profile information has been updated and is now active across all services.</div>
+                <div class="alert-title">Changes Successfully Applied</div>
+                <div class="alert-text">Your updated profile information is now active across all ${context.company.name} services, including property search, agent communications, and recommendation algorithms.</div>
               </div>
               
               ${context.security ? `
                 <div class="info-card">
                   <div class="info-card-header">
                     <span class="info-card-icon">📊</span>
-                    Update Details
+                    Update Summary
                   </div>
                   <div class="info-row">
                     <span class="info-label">Updated</span>
@@ -1300,51 +1629,51 @@ export class BrevoMailingService {
                   </div>
                   <div class="info-row">
                     <span class="info-label">Device</span>
-                    <span class="info-value">${context.security.device || 'Unknown'}</span>
+                    <span class="info-value">${context.security.device || 'Unknown Device'}</span>
                   </div>
                   <div class="info-row">
                     <span class="info-label">Location</span>
-                    <span class="info-value">${context.security.location || 'Unknown'}</span>
+                    <span class="info-value">${context.security.location || 'Unknown Location'}</span>
                   </div>
                 </div>
               ` : ''}
               
               <div class="message">
-                Your updated information is now active across all ${context.company.name} services. If you need to make additional changes, you can always update your profile from your account settings.
+                Your updated information helps our platform deliver more relevant property suggestions and connect you with the right real estate opportunities. If you need to make additional changes, you can always update your profile from your account settings.
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/profile" class="button">
-                  View Profile
+                <a href="https://app.jambolush.com/all/profile" class="button">
+                  View Updated Profile
                 </a>
               </div>
               
               <div class="info-card" style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border-color: #0ea5e9;">
                 <div class="info-card-header" style="color: #0369a1;">
                   <span class="info-card-icon">💡</span>
-                  Pro Tip
+                  Optimization Tip
                 </div>
                 <div style="color: #0c4a6e; font-size: 14px; line-height: 1.5;">
-                  Keep your profile information up to date to get the most personalized experience from ${context.company.name}.
+                  Keep your profile information current to receive the most accurate property valuations and location-based recommendations. Updated preferences help us match you with properties that truly fit your needs.
                 </div>
               </div>
               
               <div style="text-align: center; color: #6b7280; margin-top: 24px;">
-                <p>Didn't make these changes?</p>
+                <p>Notice any unauthorized profile changes?</p>
                 <p style="margin-top: 4px;">
-                  <a href="mailto:${context.company.supportEmail}" style="color: #083A85; text-decoration: none; font-weight: 500;">Report unauthorized changes</a>
+                  <a href="mailto:${context.company.supportEmail}" style="color: #083A85; text-decoration: none; font-weight: 500;">Report Security Concerns</a>
                 </p>
               </div>
             </div>
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}/profile">Profile</a>
-                <a href="${context.company.website}/settings">Settings</a>
-                <a href="${context.company.website}/support">Support</a>
+                <a href="https://app.jambolush.com/all/profile">Profile</a>
+                <a href="https://app.jambolush.com/all/settings">Settings</a>
+                <a href="https://app.jambolush.com/all/support">Support</a>
               </div>
               <div class="footer-text">
-                © ${new Date().getFullYear()} ${context.company.name}. Empowering your digital identity.
+                © ${new Date().getFullYear()} ${context.company.name}. Personalizing your property journey.
                 <br>
                 This profile update notification was sent to ${context.user.email}
               </div>
@@ -1361,64 +1690,74 @@ export class BrevoMailingService {
     return `
 Welcome to ${context.company.name}, ${context.user.firstName}!
 
-We're thrilled to have you join our community. Your account has been successfully created and you're now part of something extraordinary.
+Congratulations! You've successfully joined Rwanda's premier real estate platform. We're excited to help you discover exceptional properties and connect with the best opportunities in the market.
 
-Start your journey: ${context.company.website}/dashboard
+Start exploring premium properties: https://app.jambolush.com
 
-Need help? Visit our support center: ${context.company.website}/support
+What's next:
+• Complete your profile for personalized recommendations
+• Browse verified property listings
+• Connect with certified real estate professionals
+• Set up property alerts for your preferred locations
+
+Need assistance? Contact our property experts: https://app.jambolush.com/all/support
 
 © ${new Date().getFullYear()} ${context.company.name}
-This email was sent to ${context.user.email}
+Connecting you to Rwanda's finest properties.
+This welcome email was sent to ${context.user.email}
     `.trim();
   }
 
   private getEmailVerificationTextTemplate(context: MailingContext): string {
     return `
-Email Verification - ${context.company.name}
+Email Verification Required - ${context.company.name}
 
-Hi ${context.user.firstName}, please verify your email address using the code below:
+Hi ${context.user.firstName}, please verify your email address to access premium real estate listings.
 
 Verification Code: ${context.verification?.code}
 Code expires in: ${context.verification?.expiresIn}
 
-Verify at: ${context.company.website}/verify-email
+Verify at: https://jambolush.com/all/account-verification
 
 If you didn't create this account, please ignore this email.
 
 © ${new Date().getFullYear()} ${context.company.name}
+Your security is our priority.
     `.trim();
   }
 
   private getPasswordResetTextTemplate(context: MailingContext): string {
     return `
-Password Reset - ${context.company.name}
+Password Reset Request - ${context.company.name}
 
-Hi ${context.user.firstName}, use this code to reset your password:
+Hi ${context.user.firstName}, use this code to reset your password and regain access to your property search:
 
 Reset Code: ${context.verification?.code}
 Expires in: ${context.verification?.expiresIn}
 
-Reset at: ${context.company.website}/reset-password
+Reset at: https://jambolush.com/all/forgotpw
 
-If you didn't request this, please ignore this email or contact support at ${context.company.supportEmail}.
+If you didn't request this, please ignore this email or contact security at ${context.company.supportEmail}.
 
 © ${new Date().getFullYear()} ${context.company.name}
+Protecting your account 24/7.
     `.trim();
   }
 
   private getPasswordChangedTextTemplate(context: MailingContext): string {
     return `
-Password Changed - ${context.company.name}
+Password Changed Successfully - ${context.company.name}
 
-Hi ${context.user.firstName}, your password was successfully changed.
+Hi ${context.user.firstName}, your password was successfully changed. Your account security has been strengthened.
 
 Changed: ${context.security?.timestamp ? new Date(context.security.timestamp).toLocaleString() : 'Recently'}
 
+You can now sign in: https://app.jambolush.com/all/login
+
 If you didn't make this change, contact security immediately at ${context.company.supportEmail}.
 
-Sign in: ${context.company.website}/login
-
 © ${new Date().getFullYear()} ${context.company.name}
+Your security enables your success.
     `.trim();
   }
 
@@ -1426,69 +1765,153 @@ Sign in: ${context.company.website}/login
     return `
 New Login Detected - ${context.company.name}
 
-Hi ${context.user.firstName}, we detected a new sign-in to your account.
+Hi ${context.user.firstName}, we detected a new sign-in to your account to help keep your property search secure.
 
 Time: ${context.security?.timestamp ? new Date(context.security.timestamp).toLocaleString() : 'Recently'}
-Device: ${context.security?.device || 'Unknown'}
-Location: ${context.security?.location || 'Unknown'}
+Device: ${context.security?.device || 'Unknown Device'}
+Location: ${context.security?.location || 'Unknown Location'}
 
 If you don't recognize this activity, secure your account immediately:
-${context.company.website}/security
+https://app.jambolush.com/all/security
 
 © ${new Date().getFullYear()} ${context.company.name}
+Protecting your property journey 24/7.
     `.trim();
   }
 
   private getSuspiciousActivityTextTemplate(context: MailingContext): string {
     return `
-SECURITY ALERT - ${context.company.name}
+URGENT SECURITY ALERT - ${context.company.name}
 
-${context.user.firstName}, suspicious activity detected on your account.
+${context.user.firstName}, suspicious activity detected on your account. Immediate action required.
 
 Secure your account immediately:
-1. Change your password: ${context.company.website}/security/change-password
+1. Change your password: https://app.jambolush.com/all/security/change-password
 2. Enable two-factor authentication
 3. Review account activity
-
-Emergency support: ${context.company.supportEmail}
+4. Contact emergency support: ${context.company.supportEmail}
 
 © ${new Date().getFullYear()} ${context.company.name}
+Your security enables your success.
     `.trim();
   }
 
   private getAccountStatusTextTemplate(context: MailingContext, status: 'suspended' | 'reactivated'): string {
-    const action = status === 'suspended' ? 'suspended' : 'reactivated';
-    const url = status === 'suspended' ? '/appeal' : '/login';
+    const action = status === 'suspended' ? 'temporarily suspended' : 'successfully reactivated';
+    const url = status === 'suspended' ? '/all/appeal' : '/all/login';
+    const message = status === 'suspended' 
+      ? 'Your account access has been temporarily restricted due to security concerns or policy violations. Submit an appeal:'
+      : 'Welcome back! Your account is now active with full access to all property listings. Sign in:';
     
     return `
 Account ${action.toUpperCase()} - ${context.company.name}
 
-Hi ${context.user.firstName}, your account has been ${action}.
+Hi ${context.user.firstName}, your ${context.company.name} account has been ${action}.
 
-${status === 'suspended' 
-  ? `Your account access has been temporarily restricted. Submit an appeal: ${context.company.website}${url}`
-  : `Welcome back! Your account is now active. Sign in: ${context.company.website}${url}`
-}
+${message} https://app.jambolush.com${url}
 
 Questions? Contact support: ${context.company.supportEmail}
 
 © ${new Date().getFullYear()} ${context.company.name}
+Committed to fair and transparent service.
     `.trim();
   }
 
   private getProfileUpdateTextTemplate(context: MailingContext): string {
     return `
-Profile Updated - ${context.company.name}
+Profile Successfully Updated - ${context.company.name}
 
-Hi ${context.user.firstName}, your profile has been successfully updated.
+Hi ${context.user.firstName}, your profile has been successfully updated. These changes will help us provide more personalized property recommendations.
 
 Updated: ${context.security?.timestamp ? new Date(context.security.timestamp).toLocaleString() : 'Recently'}
 
-View profile: ${context.company.website}/profile
+View profile: https://app.jambolush.com/all/profile
 
 If you didn't make these changes, report it: ${context.company.supportEmail}
 
 © ${new Date().getFullYear()} ${context.company.name}
+Personalizing your property journey.
     `.trim();
+  }
+
+  // --- UTILITY METHODS ---
+  
+  /**
+   * Get service statistics
+   */
+  async getServiceStats(): Promise<{
+    isHealthy: boolean;
+    lastHealthCheck: string;
+    emailsSentToday?: number;
+    apiKeyValid: boolean;
+  }> {
+    try {
+      const isHealthy = await this.checkBrevoConnection();
+      return {
+        isHealthy,
+        lastHealthCheck: new Date().toISOString(),
+        apiKeyValid: isHealthy
+      };
+    } catch (error: any) {
+      return {
+        isHealthy: false,
+        lastHealthCheck: new Date().toISOString(),
+        apiKeyValid: false
+      };
+    }
+  }
+
+  /**
+   * Test email functionality with a simple test email
+   */
+  async sendTestEmail(recipientEmail: string): Promise<boolean> {
+    try {
+      if (!this.isValidEmail(recipientEmail)) {
+        throw new Error(`Invalid test recipient email: ${recipientEmail}`);
+      }
+
+      const testEmailData = {
+        sender: this.defaultSender,
+        to: [{ email: recipientEmail, name: 'Test User' }],
+        subject: 'Jambolush Service Test Email',
+        htmlContent: `
+          <html>
+            <body style="font-family: Arial, sans-serif; padding: 20px;">
+              <h2 style="color: #083A85;">Test Email Successful</h2>
+              <p>This is a test email from the Jambolush Mailing Service.</p>
+              <p><strong>Sent at:</strong> ${new Date().toLocaleString()}</p>
+              <p style="color: #666; font-size: 12px;">
+                If you received this email, the Brevo integration is working correctly.
+              </p>
+            </body>
+          </html>
+        `,
+        textContent: `
+Test Email Successful
+
+This is a test email from the Jambolush Mailing Service.
+Sent at: ${new Date().toLocaleString()}
+
+If you received this email, the Brevo integration is working correctly.
+        `.trim()
+      };
+
+      await this.sendTransactionalEmail(testEmailData);
+      return true;
+    } catch (error: any) {
+      return false;
+    }
+  }
+
+  /**
+   * Cleanup method for graceful shutdown
+   */
+  async cleanup(): Promise<void> {
+    try {
+      // Perform any necessary cleanup operations
+      // For Brevo SDK, there's typically no explicit cleanup needed
+    } catch (error: any) {
+      console.error('Error during cleanup:', error.message);
+    }
   }
 }

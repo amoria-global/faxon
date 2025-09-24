@@ -35,6 +35,7 @@ export interface RegisterDto {
   verificationDocument?: string; // URL to uploaded document
   companyName?: string; // For employed tour guides
   employmentContract?: string;
+  preferredCommunication?: string; // 'email' | 'sms' | 'phone' | 'whatsapp' | 'all'
 }
 
 export interface LoginDto {

@@ -12,6 +12,7 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@getbrevo/brevo": "^3.0.1",
     "@prisma/client": "^6.16.2",
     "@types/multer": "^2.0.0",
     "@types/uuid": "^11.0.0",
