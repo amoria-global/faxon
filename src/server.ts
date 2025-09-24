@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.routes';
 import propertyRoutes from './routes/property.routes';
 import bookingRoutes from './routes/booking.routes';
 import uploadRoutes from './routes/upload.routes';
+import withdrawalRoutes from './routes/withdrawal.routes';
 import notificationRoutes from './routes/notification.routes'; 
 import helpRoutes from './routes/help.routes';
 
@@ -58,6 +59,7 @@ app.use((req, res, next) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/payments', require('./routes/escrow.routes').default);
+app.use('/api/payments/withdrawal', withdrawalRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/bookings', bookingRoutes);

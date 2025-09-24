@@ -372,6 +372,23 @@ model WalletTransaction {
   @@map("wallet_transactions")
 }
 
+model SmsLog {
+  id          String   @id @default(cuid())
+  userId      Int
+  phoneNumber String
+  messageType String   // 'withdrawal_otp', 'notification', etc.
+  status      String   // 'sent', 'failed', 'delivered'
+  messageId   String?
+  metadata    Json?    // Additional data like amount, currency
+  error       String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([messageType])
+  @@index([createdAt])
+  @@map("sms_logs")
+}
+
 // === EXISTING MODELS (Keeping for backward compatibility) ===
 
 model Property {
