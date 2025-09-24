@@ -9,6 +9,7 @@ export const config = {
   clientUrl: process.env.CLIENT_URL || 'https://jambolush.com',
   supportEmail: process.env.SUPPORT_EMAIL || 'support@jambolush.com',
   companyLogo: 'https://jambolush.com/favicon.ico',
+  companyPhone: process.env.COMPANY_PHONE || '+250788437347',
 
   // Brevo API
   brevoApiKey: process.env.BREVO_API_KEY || '',
@@ -280,7 +281,7 @@ export const config = {
     // SMS settings (Africa's Talking - popular in East Africa)
     sms: {
       provider: process.env.SMS_PROVIDER || 'africastalking',
-      apiKey: process.env.SMS_API_KEY || '',
+      apiKey: process.env.BREVO_SMS_API_KEY || '',
       username: process.env.SMS_USERNAME || 'jambolush',
       from: process.env.SMS_FROM || 'JAMBOLUSH',
       enabled: process.env.SMS_NOTIFICATIONS_ENABLED === 'true'
