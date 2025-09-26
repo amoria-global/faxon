@@ -320,7 +320,56 @@ export class AuthController {
     }
   }
 
-async updateProfileImage(req: Request, res: Response, next: NextFunction) {
+// --- ENHANCED PROFILE ENDPOINTS FOR SETTINGS ---
+  async updateMe(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'User not authenticated'
+        });
+      }
+
+      const user = await authService.updateUserProfile(parseInt(req.user.userId), req.body, req);
+
+      res.json({
+        success: true,
+        data: user,
+        message: 'Profile updated successfully'
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
+
+  async getMe(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'User not authenticated'
+        });
+      }
+
+      const user = await authService.getUserProfile(parseInt(req.user.userId));
+
+      res.json({
+        success: true,
+        data: user,
+        message: 'Profile retrieved successfully'
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
+
+  async updateProfileImage(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.user?.userId) {
         return res.status(401).json({ message: 'User not authenticated' });
@@ -361,20 +410,136 @@ async updateProfileImage(req: Request, res: Response, next: NextFunction) {
   async changePassword(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.user?.userId) {
-        return res.status(401).json({ message: 'User not authenticated' });
+        return res.status(401).json({
+          success: false,
+          message: 'User not authenticated'
+        });
       }
 
       const { currentPassword, newPassword, confirmPassword } = req.body;
-      if (!newPassword || !confirmPassword) {
-        return res.status(400).json({ 
-          message: 'New password and confirm password are required' 
+
+      // Enhanced validation
+      const validationErrors: string[] = [];
+
+      if (!currentPassword) validationErrors.push('Current password is required');
+      if (!newPassword) validationErrors.push('New password is required');
+      if (!confirmPassword) validationErrors.push('Confirm password is required');
+
+      if (newPassword && newPassword.length < 8) {
+        validationErrors.push('Password must be at least 8 characters long');
+      }
+
+      if (newPassword && !/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(newPassword)) {
+        validationErrors.push('Password validation failed: must contain at least one uppercase letter, one lowercase letter, and one number');
+      }
+
+      if (newPassword && confirmPassword && newPassword !== confirmPassword) {
+        validationErrors.push('New passwords do not match');
+      }
+
+      if (validationErrors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password must contain at least one uppercase letter, one lowercase letter, and one number',
+          errors: validationErrors
         });
       }
 
       await authService.changePassword(parseInt(req.user.userId), req.body, req);
-      res.json({ message: 'Password changed successfully' });
+
+      res.json({
+        success: true,
+        message: 'Password changed successfully',
+        data: { passwordChanged: true }
+      });
     } catch (error: any) {
-      res.status(400).json({ message: error.message });
+      let statusCode = 400;
+
+      if (error.message.includes('Current password is incorrect')) {
+        statusCode = 401;
+      } else if (error.message.includes('rate limit')) {
+        statusCode = 429;
+      }
+
+      res.status(statusCode).json({
+        success: false,
+        message: error.message,
+        errors: [error.message]
+      });
+    }
+  }
+
+  // Profile-specific password change for settings page
+  async changePasswordFromProfile(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'User not authenticated',
+          errors: ['Authentication required']
+        });
+      }
+
+      const { currentPassword, newPassword, confirmPassword } = req.body;
+
+      // Enhanced validation specific to profile context
+      const validationErrors: string[] = [];
+
+      if (!currentPassword) validationErrors.push('Current password is required');
+      if (!newPassword) validationErrors.push('New password is required');
+      if (!confirmPassword) validationErrors.push('Confirm password is required');
+
+      if (newPassword && newPassword.length < 8) {
+        validationErrors.push('Password must be at least 8 characters long');
+      }
+
+      if (newPassword && !/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(newPassword)) {
+        validationErrors.push('Password validation failed: must contain at least one uppercase letter, one lowercase letter, and one number');
+      }
+
+      if (newPassword && confirmPassword && newPassword !== confirmPassword) {
+        validationErrors.push('New passwords do not match');
+      }
+
+      if (validationErrors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password must contain at least one uppercase letter, one lowercase letter, and one number',
+          errors: validationErrors
+        });
+      }
+
+      await authService.changePassword(parseInt(req.user.userId), req.body, req);
+
+      // Get updated user data for frontend
+      const updatedUser = await authService.getUserProfile(parseInt(req.user.userId));
+
+      res.json({
+        success: true,
+        message: 'Password changed successfully. You have been logged out of other devices for security.',
+        data: {
+          passwordChanged: true,
+          user: updatedUser
+        }
+      });
+    } catch (error: any) {
+      let statusCode = 400;
+      let errorCode: string | undefined;
+
+      if (error.message.includes('Current password is incorrect')) {
+        statusCode = 401;
+        errorCode = 'INVALID_CURRENT_PASSWORD';
+      } else if (error.message.includes('rate limit') || error.message.includes('too many')) {
+        statusCode = 429;
+        errorCode = 'RATE_LIMITED';
+      }
+
+      res.status(statusCode).json({
+        success: false,
+        message: error.message,
+        errors: [error.message],
+        code: errorCode
+      });
     }
   }
 

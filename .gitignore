@@ -13,3 +13,5 @@ node_modules
 /src/middleware/payment.middleware.ts
 /src/controllers/payment.controller.ts
 /src/types/payment.types.ts
+
+/dist

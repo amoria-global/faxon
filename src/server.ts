@@ -1,3 +1,4 @@
+// src/server.ts
 import express from 'express';
 import cors from 'cors';
 import { config } from './config/config';
@@ -6,8 +7,9 @@ import propertyRoutes from './routes/property.routes';
 import bookingRoutes from './routes/booking.routes';
 import uploadRoutes from './routes/upload.routes';
 import withdrawalRoutes from './routes/withdrawal.routes';
-import notificationRoutes from './routes/notification.routes'; 
+import notificationRoutes from './routes/notification.routes';
 import helpRoutes from './routes/help.routes';
+import settingsRoutes from './routes/settings.routes';
 import smsTestRoutes from './routes/sms.test.routes'; // Add this import
 import emailTestRoutes from './routes/email.test.routes';
 import adminRoutes from './routes/admin.routes';
@@ -70,8 +72,9 @@ app.use('/api/properties', propertyRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/tours', require('./routes/tours.routes').default);
-app.use('/api/notifications', notificationRoutes); 
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/help', helpRoutes);
+app.use('/api/settings', settingsRoutes);
 app.use('/api/pesapal', require('./routes/pesapal.callback').default);
 app.use('/api/sms', smsTestRoutes); // Add SMS test routes
 app.use('/api/sms', smsTestRoutes); // Add SMS test routes

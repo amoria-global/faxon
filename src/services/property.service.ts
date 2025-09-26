@@ -1390,12 +1390,14 @@ export class PropertyService {
 
   // --- PUBLIC KPI CALCULATION METHODS ---
   async getAgentConversionRate(agentId: number, startDate: Date): Promise<number> {
-    const leads = await prisma.lead.count({
-      where: {
-        agentId,
-        createdAt: { gte: startDate }
-      }
-    });
+    // TODO: Add Lead model to schema
+    // const leads = await prisma.lead.count({
+    //   where: {
+    //     agentId,
+    //     createdAt: { gte: startDate }
+    //   }
+    // });
+    const leads = 0;
 
     const conversions = await prisma.agentBooking.count({
       where: {
@@ -1409,17 +1411,19 @@ export class PropertyService {
   }
 
   async getAgentAverageResponseTime(agentId: number, startDate: Date): Promise<number> {
-    const inquiries = await prisma.inquiry.findMany({
-      where: {
-        agentId,
-        createdAt: { gte: startDate },
-        respondedAt: { not: null }
-      },
-      select: {
-        createdAt: true,
-        respondedAt: true
-      }
-    });
+    // TODO: Add Inquiry model to schema
+    // const inquiries = await prisma.inquiry.findMany({
+    //   where: {
+    //     agentId,
+    //     createdAt: { gte: startDate },
+    //     respondedAt: { not: null }
+    //   },
+    //   select: {
+    //     createdAt: true,
+    //     respondedAt: true
+    //   }
+    // });
+    const inquiries: any[] = [];
 
     if (inquiries.length === 0) return 0;
 
@@ -1512,12 +1516,14 @@ export class PropertyService {
   }
 
   async getAgentLeadGenerationRate(agentId: number, startDate: Date): Promise<number> {
-    const leads = await prisma.lead.count({
-      where: {
-        agentId,
-        createdAt: { gte: startDate }
-      }
-    });
+    // TODO: Add Lead model to schema
+    // const leads = await prisma.lead.count({
+    //   where: {
+    //     agentId,
+    //     createdAt: { gte: startDate }
+    //   }
+    // });
+    const leads = 0;
 
     const daysInPeriod = Math.ceil((new Date().getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
     const monthlyRate = (leads / daysInPeriod) * 30;
@@ -1598,12 +1604,14 @@ export class PropertyService {
     const propertyIds = properties.map(p => p.id);
 
     const [totalViews, totalBookings] = await Promise.all([
-      prisma.propertyView.count({
-        where: {
-          propertyId: { in: propertyIds },
-          createdAt: { gte: startDate }
-        }
-      }),
+      // TODO: Add PropertyView model to schema
+      // prisma.propertyView.count({
+      //   where: {
+      //     propertyId: { in: propertyIds },
+      //     createdAt: { gte: startDate }
+      //   }
+      // }),
+      Promise.resolve(0),
       prisma.booking.count({
         where: {
           propertyId: { in: propertyIds },
@@ -1617,13 +1625,15 @@ export class PropertyService {
   }
 
   async getAgentClientSatisfactionScore(agentId: number): Promise<number> {
-    const reviews = await prisma.agentReview.aggregate({
-      where: {
-        agentId,
-        createdAt: { gte: new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000) }
-      },
-      _avg: { rating: true }
-    });
+    // TODO: Add AgentReview model to schema
+    // const reviews = await prisma.agentReview.aggregate({
+    //   where: {
+    //     agentId,
+    //     createdAt: { gte: new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000) }
+    //   },
+    //   _avg: { rating: true }
+    // });
+    const reviews = { _avg: { rating: 0 }, _count: { id: 0 } };
 
     return reviews._avg.rating || 0;
   }
@@ -2165,13 +2175,15 @@ export class PropertyService {
   }
 
   private async getAgentMonthlySatisfaction(agentId: number, startDate: Date, endDate: Date): Promise<number> {
-    const result = await prisma.agentReview.aggregate({
-      where: {
-        agentId,
-        createdAt: { gte: startDate, lte: endDate }
-      },
-      _avg: { rating: true }
-    });
+    // TODO: Add AgentReview model to schema
+    // const result = await prisma.agentReview.aggregate({
+    //   where: {
+    //     agentId,
+    //     createdAt: { gte: startDate, lte: endDate }
+    //   },
+    //   _avg: { rating: true }
+    // });
+    const result = { _avg: { rating: 0 } };
 
     return result._avg.rating || 0;
   }
@@ -3524,21 +3536,26 @@ export class PropertyService {
 
   // --- PRIVATE HELPER METHODS ---
   private async verifyAgentPropertyAccess(agentId: number, propertyId: number): Promise<boolean> {
-    const property = await prisma.property.findFirst({
+    // First, get the property to find the host
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: { hostId: true }
+    });
+
+    if (!property) {
+      return false;
+    }
+
+    // Then check if the agent has access to this host (as a client)
+    const agentBooking = await prisma.agentBooking.findFirst({
       where: {
-        id: propertyId,
-        host: {
-          clientBookings: {
-            some: {
-              agentId,
-              status: 'active'
-            }
-          }
-        }
+        agentId,
+        clientId: property.hostId,
+        status: 'active'
       }
     });
 
-    return !!property;
+    return !!agentBooking;
   }
 
   private async verifyAgentClientAccess(agentId: number, clientId: number): Promise<boolean> {

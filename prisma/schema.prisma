@@ -125,7 +125,6 @@ model UserSession {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@index([sessionToken])
   @@map("user_sessions")
 }
 
@@ -937,7 +936,6 @@ model PropertyView {
   property           Property @relation("PropertyViews", fields: [propertyId], references: [id], onDelete: Cascade)
   user               User?    @relation("UserPropertyViews", fields: [userId], references: [id])
 
-  @@index([propertyId])
   @@index([userId])
   @@index([sessionId])
   @@index([createdAt])
@@ -1152,7 +1150,7 @@ model ActivityLog {
 }
 
 model connected_accounts {
-  id          String    @id
+  id          String   @id @default(cuid()) // ADD @default(cuid())
   userId      Int
   provider    String
   providerId  String
@@ -1162,7 +1160,7 @@ model connected_accounts {
   lastUsed    DateTime?
   metadata    Json?
   createdAt   DateTime  @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime @updatedAt // ADD @updatedAt
   users       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, provider])
@@ -1172,21 +1170,21 @@ model connected_accounts {
 }
 
 model user_settings {
-  id            String   @id
+  id            String   @id @default(cuid())
   userId        Int      @unique
   notifications Json     @default("{\"sms\": true, \"email\": true, \"quietHours\": {\"enabled\": false, \"endTime\": \"08:00\", \"timezone\": \"UTC\", \"startTime\": \"22:00\"}, \"bookingUpdates\": true, \"propertyAlerts\": true, \"securityAlerts\": true, \"marketingEmails\": false, \"priceDropAlerts\": true, \"preferredChannel\": \"email\", \"pushNotifications\": false, \"systemNotifications\": true}")
   security      Json     @default("{\"dataSharing\": false, \"sessionTimeout\": 30, \"analyticsOptOut\": false, \"twoFactorMethod\": \"sms\", \"twoFactorEnabled\": false, \"maxActiveSessions\": 5, \"profileVisibility\": \"public\", \"loginNotifications\": true, \"suspiciousActivityAlerts\": true, \"passwordChangeNotifications\": true}")
   general       Json     @default("{\"currency\": \"USD\", \"language\": \"en\", \"timezone\": \"UTC\", \"dateFormat\": \"MM/DD/YYYY\", \"timeFormat\": \"12h\", \"compactMode\": false, \"marketingConsent\": false, \"accountDeactivated\": false, \"showActivityStatus\": true, \"dataProcessingConsent\": true}")
   appearance    Json     @default("{\"theme\": \"light\", \"fontSize\": \"medium\", \"colorScheme\": \"default\", \"compactMode\": false}")
   createdAt     DateTime @default(now())
-  updatedAt     DateTime
+  updatedAt     DateTime @updatedAt
   users         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
 
 model user_verifications {
-  id                        String    @id
+  id                        String    @id @default(uuid()) // Auto-generate UUID
   userId                    Int
   emailVerified             Boolean   @default(false)
   phoneVerified             Boolean   @default(false)
@@ -1201,7 +1199,7 @@ model user_verifications {
   emailVerificationAttempts Int       @default(0)
   phoneVerificationAttempts Int       @default(0)
   createdAt                 DateTime  @default(now())
-  updatedAt                 DateTime
+  updatedAt                 DateTime  @updatedAt // Auto-update on changes
   users                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([emailVerified])
