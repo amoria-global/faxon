@@ -43,9 +43,9 @@ export class SettingsService {
       phoneVerifiedAt?: string;
     };
   }> {
-    let userSettings = await prisma.userSettings.findUnique({
+    let userSettings = await prisma.user_settings.findUnique({
       where: { userId },
-      include: { user: true }
+      include: { users: true }
     });
 
     // Create default settings if they don't exist
@@ -78,7 +78,7 @@ export class SettingsService {
    */
   async updateSettings(userId: number, updates: UpdateSettingsDto, req?: any): Promise<UserSettings> {
     // Get current settings or create default ones
-    let currentSettings = await prisma.userSettings.findUnique({
+    let currentSettings = await prisma.user_settings.findUnique({
       where: { userId }
     });
 
@@ -115,17 +115,17 @@ export class SettingsService {
     }
 
     // Update settings in database
-    const updatedSettings = await prisma.userSettings.update({
+    const updatedSettings = await prisma.user_settings.update({
       where: { userId },
       data: updateData,
-      include: { user: true }
+      include: { users: true }
     });
 
     // Send notification for security-related changes
     if (updates.security && Object.keys(updates.security).length > 0) {
       try {
         await this.authService.sendNotifications(
-          updatedSettings.user,
+          updatedSettings.users,
           'profile_update',
           req
         );
@@ -142,7 +142,7 @@ export class SettingsService {
    */
   async resetSettings(userId: number): Promise<UserSettings> {
     // Delete existing settings
-    await prisma.userSettings.deleteMany({
+    await prisma.user_settings.deleteMany({
       where: { userId }
     });
 
@@ -232,26 +232,30 @@ export class SettingsService {
    * Get user verification status
    */
   async getVerificationStatus(userId: number): Promise<AccountVerification> {
-    let verification = await prisma.userVerification.findFirst({
-      where: { userId }
+  let verification = await prisma.user_verifications.findFirst({
+    where: { userId }
+  });
+
+  if (!verification) {
+    verification = await prisma.user_verifications.create({
+      data: {
+        userId,
+        // Provide other required fields based on your schema
+        // If id is auto-generated, you might not need it
+        // If updatedAt has a default, you might not need it
+      }
     });
-
-    if (!verification) {
-      verification = await prisma.userVerification.create({
-        data: { userId }
-      });
-    }
-
-    return {
-      emailVerified: verification.emailVerified,
-      phoneVerified: verification.phoneVerified,
-      emailVerifiedAt: verification.emailVerifiedAt?.toISOString(),
-      phoneVerifiedAt: verification.phoneVerifiedAt?.toISOString(),
-      lastEmailVerificationSent: verification.lastEmailVerificationSent?.toISOString(),
-      lastPhoneVerificationSent: verification.lastPhoneVerificationSent?.toISOString()
-    };
   }
 
+  return {
+    emailVerified: verification.emailVerified,
+    phoneVerified: verification.phoneVerified,
+    emailVerifiedAt: verification.emailVerifiedAt?.toISOString(),
+    phoneVerifiedAt: verification.phoneVerifiedAt?.toISOString(),
+    lastEmailVerificationSent: verification.lastEmailVerificationSent?.toISOString(),
+    lastPhoneVerificationSent: verification.lastPhoneVerificationSent?.toISOString()
+  };
+}
   /**
    * Send verification code with enhanced rate limiting and better error messages
    */
@@ -284,12 +288,12 @@ export class SettingsService {
     }
 
     // Get or create verification record
-    let verification = await prisma.userVerification.findFirst({
+    let verification = await prisma.user_verifications.findFirst({
       where: { userId }
     });
 
     if (!verification) {
-      verification = await prisma.userVerification.create({
+      verification = await prisma.user_verifications.create({
         data: { userId }
       });
     }
@@ -353,7 +357,7 @@ export class SettingsService {
       updateData.phoneVerificationAttempts = attempts + 1;
     }
 
-    await prisma.userVerification.update({
+    await prisma.user_verifications.update({
       where: { id: verification.id },
       data: updateData
     });
@@ -406,7 +410,7 @@ export class SettingsService {
    * Verify code
    */
   async verifyCode(userId: number, type: 'email' | 'phone', code: string): Promise<SettingsResponse> {
-    const verification = await prisma.userVerification.findFirst({
+    const verification = await prisma.user_verifications.findFirst({
       where: { userId }
     });
 
@@ -442,7 +446,7 @@ export class SettingsService {
       [`${type}CodeExpires`]: null
     };
 
-    await prisma.userVerification.update({
+    await prisma.user_verifications.update({
       where: { id: verification.id },
       data: updateData
     });
@@ -475,7 +479,7 @@ export class SettingsService {
     connectedAt: string;
     lastUsed?: string;
   }[]> {
-    const accounts = await prisma.connectedAccount.findMany({
+    const accounts = await prisma.connected_accounts.findMany({
       where: {
         userId,
         provider: 'google' // Only return Google accounts
@@ -485,7 +489,7 @@ export class SettingsService {
 
     // Check real Google OAuth connection status
     const connectedAccounts = await Promise.all(
-      accounts.map(async (account) => {
+      accounts.map(async (account: any) => {
         // Check if the OAuth token is still valid
         let realConnectionStatus = account.connected;
 
@@ -499,7 +503,7 @@ export class SettingsService {
           realConnectionStatus = false;
 
           // Update the database
-          await prisma.connectedAccount.update({
+          await prisma.connected_accounts.update({
             where: { id: account.id },
             data: { connected: false }
           });
@@ -531,7 +535,7 @@ export class SettingsService {
       }
 
       // Check if Google account is already connected to this user
-      const existingConnection = await prisma.connectedAccount.findFirst({
+      const existingConnection = await prisma.connected_accounts.findFirst({
         where: {
           userId,
           provider: 'google',
@@ -544,7 +548,7 @@ export class SettingsService {
       }
 
       // Check if this Google account is connected to another user
-      const otherUserConnection = await prisma.connectedAccount.findFirst({
+      const otherUserConnection = await prisma.connected_accounts.findFirst({
         where: {
           email,
           provider: 'google',
@@ -560,7 +564,7 @@ export class SettingsService {
       let connectedAccount;
       if (existingConnection) {
         // Reactivate existing connection
-        connectedAccount = await prisma.connectedAccount.update({
+        connectedAccount = await prisma.connected_accounts.update({
           where: { id: existingConnection.id },
           data: {
             connected: true,
@@ -574,7 +578,7 @@ export class SettingsService {
         // Extract provider ID from email or use email as provider ID
         const providerId = email.split('@')[0] + '_' + Date.now();
 
-        connectedAccount = await prisma.connectedAccount.create({
+        connectedAccount = await prisma.connected_accounts.create({
           data: {
             userId,
             provider: 'google',
@@ -609,7 +613,7 @@ export class SettingsService {
    * Disconnect account by provider
    */
   async disconnectAccountByProvider(userId: number, provider: string): Promise<SettingsResponse> {
-    const account = await prisma.connectedAccount.findFirst({
+    const account = await prisma.connected_accounts.findFirst({
       where: {
         userId,
         provider,
@@ -621,7 +625,7 @@ export class SettingsService {
       throw new Error(`No connected ${provider} account found`);
     }
 
-    await prisma.connectedAccount.update({
+    await prisma.connected_accounts.update({
       where: { id: account.id },
       data: {
         connected: false,
@@ -643,7 +647,7 @@ export class SettingsService {
    * Disconnect account by ID
    */
   async disconnectAccount(userId: number, accountId: string): Promise<SettingsResponse> {
-    const account = await prisma.connectedAccount.findFirst({
+    const account = await prisma.connected_accounts.findFirst({
       where: {
         id: accountId,
         userId
@@ -654,7 +658,7 @@ export class SettingsService {
       throw new Error('Connected account not found');
     }
 
-    await prisma.connectedAccount.update({
+    await prisma.connected_accounts.update({
       where: { id: accountId },
       data: {
         connected: false,
@@ -726,9 +730,9 @@ export class SettingsService {
       }
     };
 
-    return await prisma.userSettings.create({
+    return await prisma.user_settings.create({
       data: defaultSettings,
-      include: { user: true }
+      include: { users: true }
     });
   }
 
@@ -775,7 +779,7 @@ export class SettingsService {
     });
 
     // Update settings to reflect deactivation
-    await prisma.userSettings.updateMany({
+    await prisma.user_settings.updateMany({
       where: { userId },
       data: {
         general: {
@@ -881,7 +885,7 @@ export class SettingsService {
     });
 
     // Update settings to reflect deletion scheduling
-    const currentSettings = await prisma.userSettings.findUnique({
+    const currentSettings = await prisma.user_settings.findUnique({
       where: { userId }
     });
 
@@ -893,7 +897,7 @@ export class SettingsService {
         deletionDate: deletionDate.toISOString()
       };
 
-      await prisma.userSettings.update({
+      await prisma.user_settings.update({
         where: { id: currentSettings.id },
         data: {
           general: updatedGeneral
@@ -908,7 +912,7 @@ export class SettingsService {
     });
 
     // Disconnect all connected accounts
-    await prisma.connectedAccount.updateMany({
+    await prisma.connected_accounts.updateMany({
       where: { userId },
       data: { connected: false }
     });
