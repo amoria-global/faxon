@@ -97,7 +97,7 @@ export class AuthService {
   }
 
   // --- DUAL NOTIFICATION SYSTEM ---
-  private async sendNotifications(
+  async sendNotifications(
     user: any,
     notificationType: 'welcome' | 'login' | 'password_reset' | 'password_changed' | 
                      'suspicious_activity' | 'account_status' | 'profile_update' | 

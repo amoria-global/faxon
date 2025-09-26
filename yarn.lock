@@ -3133,11 +3133,7 @@ utils-merge@1.0.1:
 
 uuid@*, uuid@^13.0.0:
   version "13.0.0"
-<<<<<<< Updated upstream
-  resolved "https://registry.yarnpkg.com/uuid/-/uuid-13.0.0.tgz#263dc341b19b4d755eb8fe36b78d95a6b65707e8"
-=======
   resolved "https://registry.npmjs.org/uuid/-/uuid-13.0.0.tgz"
->>>>>>> Stashed changes
   integrity sha512-XQegIaBTVUjSHliKqcnFqYypAd4S+WCYt5NIeRs6w/UAry7z8Y9j5ZwRRL4kzq9U3sD6v+85er9FvkEaBpji2w==
 
 uuid@^9.0.1:
