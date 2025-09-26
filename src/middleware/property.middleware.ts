@@ -459,19 +459,25 @@ export const validateAgentPropertyAccess = async (req: AuthenticatedRequest, res
     });
 
     // Check 2: Client relationship (agent manages for client)
-    const clientProperty = await prisma.property.findFirst({
-      where: {
-        id: propertyId,
-        host: {
-          clientBookings: {
-            some: {
-              agentId: agentId,
-              status: 'active'
-            }
-          }
-        }
-      }
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: { hostId: true }
     });
+
+    let clientProperty = null;
+    if (property) {
+      // Check if agent has access to this host as a client
+      const agentBooking = await prisma.agentBooking.findFirst({
+        where: {
+          agentId: agentId,
+          clientId: property.hostId,
+          status: 'active'
+        }
+      });
+      if (agentBooking) {
+        clientProperty = property;
+      }
+    }
 
     if (!directOwnership && !clientProperty) {
       res.status(403).json({

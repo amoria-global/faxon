@@ -28,9 +28,9 @@ router.use(authenticate); // All routes below require authentication
 
 // Profile Management
 router.get('/me', authController.getCurrentUser);
-router.put('/me', authController.updateProfile);
+router.put('/me', authController.updateMe);
 router.put('/me/image', authController.updateProfileImage);
-router.put('/me/password', authController.changePassword);
+router.put('/me/password', authController.changePasswordFromProfile);
 
 router.put('/me/document-url', authController.updateDocumentUrl);
 router.get('/me/documents', authController.getUserDocuments);
