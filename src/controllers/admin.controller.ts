@@ -1520,6 +1520,24 @@ export class AdminController {
     }
   }
 
+  async createService(req: Request, res: Response, next: NextFunction) {
+    try {
+      const serviceData: any = req.body;
+      const adminId = (req as any).user?.id;
+
+      const result = await adminService.createService(serviceData);
+      
+      res.status(201).json({
+        success: true,
+        data: result,
+        message: 'Service created successfully',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
   async updateService(req: Request, res: Response, next: NextFunction) {
     try {
       const serviceId = parseInt(req.params.id);
@@ -1558,6 +1576,54 @@ export class AdminController {
     }
   }
 
+  async deleteService(req: Request, res: Response, next: NextFunction) {
+    try {
+      const serviceId: any = parseInt(req.params.id);
+      const adminId = (req as any).user?.id;
+
+      if (!serviceId) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_SERVICE_ID',
+            message: 'Valid service ID is required'
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      await adminService.deleteService(serviceId);
+      
+      res.json({
+        success: true,
+        message: 'Service deleted successfully',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+
+  async createPartner(req: Request, res: Response, next: NextFunction) {
+    try {
+      const partnerData: any = req.body;
+      const adminId = (req as any).user?.id;
+
+      const result = await adminService.createPartner(partnerData, adminId);
+      
+      res.status(201).json({
+        success: true,
+        data: result,
+        message: 'Partner created successfully',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+
   async updatePartner(req: Request, res: Response, next: NextFunction) {
     try {
       const partnerId = parseInt(req.params.id);
@@ -1574,6 +1640,141 @@ export class AdminController {
     }
   }
 
+   async deletePartner(req: Request, res: Response, next: NextFunction) {
+    try {
+      const partnerId: any = parseInt(req.params.id);
+      const adminId = (req as any).user?.id;
+
+      if (!partnerId) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_PARTNER_ID',
+            message: 'Valid partner ID is required'
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      await adminService.deletePartner(partnerId, adminId);
+      
+      res.json({
+        success: true,
+        message: 'Partner deleted successfully',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+    // === PRODUCT MANAGEMENT ===
+  
+  async getProducts(req: Request, res: Response, next: NextFunction) {
+    try {
+      const pagination: any = {
+        page: parseInt(req.query.page as string) || 1,
+        limit: parseInt(req.query.limit as string) || 20,
+        sort: (req.query.sort as string) || 'createdAt',
+        order: (req.query.order as 'asc' | 'desc') || 'desc'
+      };
+
+      const filters: any = {
+        category: req.query.category,
+        isAvailable: req.query.isAvailable ? req.query.isAvailable === 'true' : undefined,
+        search: req.query.search
+      };
+
+      const result = await adminService.getProducts(filters, pagination);
+      
+      res.json({
+        success: true,
+        data: result.data,
+        pagination: result.pagination,
+        filters: result.filters,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  async createProduct(req: Request, res: Response, next: NextFunction) {
+    try {
+      const productData: any = req.body;
+      const adminId = (req as any).user?.id;
+
+      const result = await adminService.createProduct(productData);
+      
+      res.status(201).json({
+        success: true,
+        data: result,
+        message: 'Product created successfully',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  async updateProduct(req: Request, res: Response, next: NextFunction) {
+    try {
+      const productId: any = parseInt(req.params.id);
+      const updateData: any = req.body;
+      const adminId = (req as any).user?.id;
+
+      if (!productId) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_PRODUCT_ID',
+            message: 'Valid product ID is required'
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const result = await adminService.updateProduct(productId, updateData);
+      
+      res.json({
+        success: true,
+        data: result,
+        message: 'Product updated successfully',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  async deleteProduct(req: Request, res: Response, next: NextFunction) {
+    try {
+      const productId: any = parseInt(req.params.id);
+      const adminId = (req as any).user?.id;
+
+      if (!productId) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_PRODUCT_ID',
+            message: 'Valid product ID is required'
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      await adminService.deleteProduct(productId, adminId);
+      
+      res.json({
+        success: true,
+        message: 'Product deleted successfully',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
   async getContactRequests(req: Request, res: Response, next: NextFunction) {
     try {
       const pagination: AdminQueryParams = {
@@ -1583,7 +1784,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getContactRequests(pagination);
+      const result = await adminService.getContactMessages(pagination);
       
       res.json({
         success: true,
@@ -1705,9 +1906,42 @@ export class AdminController {
 
   async getVisitorAnalytics(req: Request, res: Response, next: NextFunction) {
     try {
-      const { period = '30d' } = req.query;
+      const { start_date, end_date, limit = '500' } = req.query;
       
-      const analytics = await adminService.getVisitorAnalytics(period as string);
+      let period: string;
+      
+      // Calculate period based on date range if provided
+      if (start_date && end_date) {
+        const startDate = new Date(start_date as string);
+        const endDate = new Date(end_date as string);
+        
+        // Validate dates
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid date format'
+          });
+        }
+        
+        // Calculate days difference
+        const diffTime = endDate.getTime() - startDate.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        // Convert to period string that your service expects
+        if (diffDays <= 1) {
+          period = '1d';
+        } else if (diffDays <= 7) {
+          period = '7d';
+        } else if (diffDays <= 30) {
+          period = '30d';
+        } else {
+          period = `${diffDays}d`;
+        }
+      } else {
+        period = '30d'; // default
+      }
+      
+      const analytics = await adminService.getTestAllFetch(period);
       
       res.json({
         success: true,

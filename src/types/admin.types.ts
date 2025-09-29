@@ -50,7 +50,7 @@ export interface AdminDashboardOverview {
 
 export interface AdminAlert {
   id: string;
-  type: 'error' | 'warning' | 'info' | 'success';
+  type: 'error' | 'warning' | 'info' | 'success' | 'critical';
   severity: 'low' | 'medium' | 'high' | 'critical';
   title: string;
   message: string;
@@ -482,7 +482,7 @@ export interface AdminEscrowTransaction {
   userId: number;
   userName: string;
   userEmail: string;
-  recipientId?: number;
+  recipientId?: number | any;
   recipientName?: string;
   recipientEmail?: string;
   type: string;
@@ -490,18 +490,18 @@ export interface AdminEscrowTransaction {
   currency: string;
   status: string;
   reference: string;
-  description?: string;
-  escrowId?: string;
+  description?: string  | any;
+  escrowId?: string | any;
   fundedAt?: string;
   releasedAt?: string;
-  releasedBy?: number;
-  releaseReason?: string;
+  releasedBy?: number | any;
+  releaseReason?: string | any;
   disputedAt?: string;
-  disputedBy?: number;
-  disputeReason?: string;
+  disputedBy?: number | any;
+  disputeReason?: string | any;
   resolvedAt?: string;
   cancelledAt?: string;
-  cancellationReason?: string;
+  cancellationReason?: string |  any;
   createdAt: string;
   metadata?: any;
 }
@@ -517,7 +517,7 @@ export interface AdminWithdrawalRequest {
   status: string;
   destination: any;
   reference: string;
-  failureReason?: string;
+  failureReason?: string | any;
   createdAt: string;
   completedAt?: string;
 }

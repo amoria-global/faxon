@@ -76,9 +76,6 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/help', helpRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/pesapal', require('./routes/pesapal.callback').default);
-app.use('/api/sms', smsTestRoutes); // Add SMS test routes
-app.use('/api/sms', smsTestRoutes); // Add SMS test routes
-app.use('/api/brevo/email', emailTestRoutes); // Email test routes
 app.use('/api/admin', adminRoutes);
 
 // Health check

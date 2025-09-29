@@ -391,7 +391,32 @@ router.post('/wallets/:id/adjust',
   adminController.adjustWalletBalance
 );
 
+// ===================================================================
+//                           ADMIN ROUTES
+// ===================================================================
+
 // === CONTENT MANAGEMENT ===
+
+// Products
+router.get('/content/products',
+  validateAdminQuery,
+  adminController.getProducts
+);
+
+router.post('/content/products',
+  auditLog('CREATE_PRODUCT', 'product'),
+  adminController.createProduct
+);
+
+router.put('/content/products/:id',
+  auditLog('UPDATE_PRODUCT', 'product'),
+  adminController.updateProduct
+);
+
+router.delete('/content/products/:id',
+  auditLog('DELETE_PRODUCT', 'product'),
+  adminController.deleteProduct
+);
 
 // Services
 router.get('/content/services',
@@ -399,9 +424,19 @@ router.get('/content/services',
   adminController.getServices
 );
 
+router.post('/content/services',
+  auditLog('CREATE_SERVICE', 'service'),
+  adminController.createService
+);
+
 router.put('/content/services/:id',
   auditLog('UPDATE_SERVICE', 'service'),
   adminController.updateService
+);
+
+router.delete('/content/services/:id',
+  auditLog('DELETE_SERVICE', 'service'),
+  adminController.deleteService
 );
 
 // Partners
@@ -410,9 +445,19 @@ router.get('/content/partners',
   adminController.getPartners
 );
 
+router.post('/content/partners',
+  auditLog('CREATE_PARTNER', 'partner'),
+  adminController.createPartner
+);
+
 router.put('/content/partners/:id',
   auditLog('UPDATE_PARTNER', 'partner'),
   adminController.updatePartner
+);
+
+router.delete('/content/partners/:id',
+  auditLog('DELETE_PARTNER', 'partner'),
+  adminController.deletePartner
 );
 
 // Contact requests
@@ -435,6 +480,41 @@ router.get('/newsletter/subscriptions',
 router.put('/newsletter/subscriptions/:id',
   auditLog('UPDATE_NEWSLETTER', 'newsletter'),
   adminController.updateNewsletterStatus
+);
+
+// === ANALYTICS & REPORTING ===
+
+// Get system analytics
+router.get('/analytics',
+  requirePermissions('analytics.view'),
+  validateAnalytics,
+  validateDateRange,
+  auditLog('VIEW_ANALYTICS', 'analytics'),
+  adminController.getSystemAnalytics
+);
+
+// Get visitor analytics
+router.get('/analytics/visitors',
+  requirePermissions('analytics.view'),
+  validateDateRange,
+  auditLog('VIEW_VISITOR_ANALYTICS', 'analytics'),
+  adminController.getVisitorAnalytics
+);
+
+// Generate financial report
+router.get('/reports/financial',
+  requirePermissions('analytics.view'),
+  validateAnalytics,
+  validateDateRange,
+  auditLog('VIEW_FINANCIAL_REPORT', 'financial_report'),
+  adminController.generateFinancialReport
+);
+
+// Generate custom report
+router.post('/reports/generate',
+  requirePermissions('reports.generate'),
+  auditLog('GENERATE_REPORT', 'report'),
+  adminController.generateReport
 );
 
 // === ANALYTICS & REPORTING ===
