@@ -27,6 +27,61 @@ const prisma = new PrismaClient();
 const googleClient = new OAuth2Client(config.googleClientId);
 
 export class AuthService {
+  // Essential user fields that exist in the database (avoiding schema mismatch issues)
+  private readonly userSelectFields = {
+    id: true,
+    email: true,
+    firstName: true,
+    lastName: true,
+    password: true,
+    provider: true,
+    providerId: true,
+    phone: true,
+    phoneCountryCode: true,
+    profileImage: true,
+    city: true,
+    zipCode: true,
+    postalCode: true,
+    postcode: true,
+    pinCode: true,
+    eircode: true,
+    cep: true,
+    status: true,
+    userType: true,
+    bio: true,
+    experience: true,
+    languages: true,
+    specializations: true,
+    rating: true,
+    totalTours: true,
+    isVerified: true,
+    licenseNumber: true,
+    certifications: true,
+    totalSessions: true,
+    twoFactorEnabled: true,
+    createdAt: true,
+    updatedAt: true,
+    lastLogin: true,
+    resetPasswordOtp: true,
+    resetPasswordExpires: true,
+    verificationStatus: true,
+    preferredCommunication: true,
+    hostNotes: true,
+    averageRating: true,
+    county: true,
+    region: true,
+    companyName: true,
+    companyTIN: true,
+    employmentContract: true,
+    nationalId: true,
+    tourGuideType: true,
+    verificationDocument: true,
+    kycCompleted: true,
+    kycSubmittedAt: true,
+    kycStatus: true,
+    addressDocument: true
+  };
+
   private brevoEmailService: BrevoMailingService;
   private brevoSMSService: BrevoSMSService;
 
@@ -225,7 +280,7 @@ export class AuthService {
       companyTIN: data.companyTIN,
       companyName: data.companyName,
     } : {};
-    
+
     const user = await prisma.user.create({
       data: {
         email: data.email,
@@ -235,11 +290,15 @@ export class AuthService {
         provider: data.provider || 'manual',
         phone: data.phone,
         phoneCountryCode: data.phoneCountryCode,
-        country: data.country,
-        state: data.state,
-        province: data.province,
-        city: data.city,
+        // Granular address fields
+        district: data.district,
+        sector: data.sector,
         street: data.street,
+        province: data.province,
+        state: data.state,
+        country: data.country,
+        // Legacy fields
+        city: data.city,
         zipCode: data.zipCode,
         postalCode: data.postalCode,
         postcode: data.postcode,
@@ -271,7 +330,8 @@ export class AuthService {
 
   async login(data: LoginDto, req?: any): Promise<AuthResponse | TourGuideLoginResponse> {
     const user = await prisma.user.findUnique({
-      where: { email: data.email }
+      where: { email: data.email },
+      select: this.userSelectFields
     });
 
     if (!user) {
@@ -595,7 +655,8 @@ export class AuthService {
     nextAction?: 'login' | 'setup_password' | 'verify_account' | 'signup' | 'contact_support';
   }> {
     const user = await prisma.user.findUnique({
-      where: { email }
+      where: { email },
+      select: this.userSelectFields
     });
 
     if (!user) {
@@ -972,12 +1033,15 @@ export class AuthService {
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.phoneCountryCode !== undefined) updateData.phoneCountryCode = data.phoneCountryCode;
 
-    // Handle location fields
-    if (data.country !== undefined) updateData.country = data.country;
-    if (data.state !== undefined) updateData.state = data.state;
-    if (data.province !== undefined) updateData.province = data.province;
-    if (data.city !== undefined) updateData.city = data.city;
+    // Handle granular address fields
+    if (data.district !== undefined) updateData.district = data.district;
+    if (data.sector !== undefined) updateData.sector = data.sector;
     if (data.street !== undefined) updateData.street = data.street;
+    if (data.province !== undefined) updateData.province = data.province;
+    if (data.state !== undefined) updateData.state = data.state;
+    if (data.country !== undefined) updateData.country = data.country;
+    // Legacy fields
+    if (data.city !== undefined) updateData.city = data.city;
 
     // Handle postal codes
     if (data.zipCode !== undefined) updateData.zipCode = data.zipCode;
@@ -1264,11 +1328,15 @@ export class AuthService {
         provider: data.provider || 'manual',
         phone: data.phone,
         phoneCountryCode: data.phoneCountryCode,
-        country: data.country,
-        state: data.state,
-        province: data.province,
-        city: data.city,
+        // Granular address fields
+        district: data.district,
+        sector: data.sector,
         street: data.street,
+        province: data.province,
+        state: data.state,
+        country: data.country,
+        // Legacy fields
+        city: data.city,
         zipCode: data.zipCode,
         postalCode: data.postalCode,
         postcode: data.postcode,
@@ -1322,6 +1390,12 @@ export class AuthService {
     // Copy all other fields from the profile update method
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.phoneCountryCode !== undefined) updateData.phoneCountryCode = data.phoneCountryCode;
+    // Granular address fields
+    if (data.district !== undefined) updateData.district = data.district;
+    if (data.sector !== undefined) updateData.sector = data.sector;
+    if (data.street !== undefined) updateData.street = data.street;
+    if (data.province !== undefined) updateData.province = data.province;
+    if (data.state !== undefined) updateData.state = data.state;
     if (data.country !== undefined) updateData.country = data.country;
     if (data.preferredCommunication !== undefined) updateData.preferredCommunication = data.preferredCommunication;
 
@@ -1445,8 +1519,8 @@ export class AuthService {
 
   // --- KYC METHODS ---
   async submitKYC(
-    userId: number, 
-    personalDetails: any, 
+    userId: number,
+    personalDetails: any,
     addressDocumentUrl?: string
   ): Promise<{ user: UserInfo; requiresDocumentUpload: boolean }> {
     const user = await prisma.user.findUnique({
@@ -1464,8 +1538,13 @@ export class AuthService {
         lastName: personalDetails.fullName.split(' ').slice(1).join(' ') || user.lastName,
         phone: personalDetails.phoneNumber,
         email: personalDetails.email,
-        street: personalDetails.address,
-        country: personalDetails.nationality,
+        // Store new granular address fields
+        district: personalDetails.district,
+        sector: personalDetails.sector,
+        street: personalDetails.street,
+        province: personalDetails.province,
+        state: personalDetails.state,
+        country: personalDetails.country,
         kycCompleted: true,
         kycSubmittedAt: new Date(),
         kycStatus: 'pending',
@@ -1684,11 +1763,15 @@ export class AuthService {
       phone: user.phone,
       phoneCountryCode: user.phoneCountryCode,
       profile: user.profileImage,
-      country: user.country,
-      state: user.state,
-      province: user.province,
+      // Granular address fields
+      district: user.district || null,
+      sector: user.sector || null,
+      street: user.street || null,
+      province: user.province || null,
+      state: user.state || null,
+      country: user.country || null,
+      // Legacy fields
       city: user.city,
-      street: user.street,
       zipCode: user.zipCode,
       postalCode: user.postalCode,
       postcode: user.postcode,
