@@ -54,13 +54,6 @@ export class BrevoSMSService {
     this.apiKey = config.notifications.sms.apiKey;
     this.defaultSender = config.notifications.sms.from || 'Jambolush';
     
-    // Debug configuration on initialization
-    console.log('🔧 SMS Service Configuration:');
-    console.log('- API Key present:', !!this.apiKey);
-    console.log('- API Key length:', this.apiKey?.length || 0);
-    console.log('- Default sender:', this.defaultSender);
-    console.log('- API URL:', this.apiUrl);
-    
     if (!this.apiKey) {
       console.error('❌ CRITICAL: Brevo API key is missing!');
       console.error('Please check your config file for notifications.sms.apiKey');

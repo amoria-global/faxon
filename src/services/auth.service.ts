@@ -1083,7 +1083,7 @@ export class AuthService {
       where: {
         email,
         password: null,
-        userType: { in: ['host', 'tourguide', 'agent'] }
+        userType: { in: ['host', 'tourguide', 'agent', 'guest'] }
       }
     });
 

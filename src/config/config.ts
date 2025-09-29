@@ -15,6 +15,7 @@ export const config = {
   brevoApiKey: process.env.BREVO_API_KEY || '',
   brevoSenderEmail: process.env.BREVO_SENDER_EMAIL || '',
 
+  brevoAdminSenderEmail: "notification@jambolush.com",
   // PRIMARY: Pesapal Escrow Integration (NEW) - WITH AUTO IPN REGISTRATION
   pesapal: {
     consumerKey: process.env.PESAPAL_CONSUMER_KEY!,

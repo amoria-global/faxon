@@ -1,7 +1,0 @@
-localStroge.setItem("userInfo", 
-JSON.parse({
-    name: result.user.firstName +" "+ result.user.lastName,
-    email: result.user.email,
-    
-})
-)
