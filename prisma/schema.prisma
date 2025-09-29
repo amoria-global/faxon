@@ -19,11 +19,15 @@ model User {
   phone                         String?
   phoneCountryCode              String?
   profileImage                  String?
-  country                       String?
-  state                         String?
-  province                      String?
+  // Granular address fields for KYC
+  district                      String?  // required for KYC
+  sector                        String?  // required for KYC
+  street                        String?  // required for KYC
+  province                      String?  // required for KYC
+  state                         String?   // required for KYC
+  country                       String?  // required for KYC
+  // Legacy postal code fields (still available for other use cases)
   city                          String?
-  street                        String?
   zipCode                       String?
   postalCode                    String?
   postcode                      String?
@@ -53,7 +57,6 @@ model User {
   hostNotes                     String?
   averageRating                 Float                    @default(0)
   county                        String?
-  district                      String?
   region                        String?
   companyName                   String?
   companyTIN                    String?

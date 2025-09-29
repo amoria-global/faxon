@@ -958,18 +958,62 @@ async submitKYC(req: Request, res: Response, next: NextFunction) {
     }
 
     const { personalDetails, addressDocumentUrl } = req.body;
-    
+
     if (!personalDetails) {
-      return res.status(400).json({ 
-        message: 'Personal details are required' 
+      return res.status(400).json({
+        message: 'Personal details are required'
       });
     }
 
-    // Validate required fields
-    const { fullName, dateOfBirth, nationality, address, phoneNumber, email } = personalDetails;
-    if (!fullName || !dateOfBirth || !nationality || !address || !phoneNumber || !email) {
-      return res.status(400).json({ 
-        message: 'All personal details fields are required' 
+    // Validate required fields with new granular address structure
+    const {
+      fullName,
+      dateOfBirth,
+      nationality,
+      district,
+      sector,
+      street,
+      province,
+      state,
+      country,
+      phoneNumber,
+      email,
+      documentType
+    } = personalDetails;
+
+    // Validate all required fields
+    const missingFields = [];
+    if (!fullName) missingFields.push('fullName');
+    if (!dateOfBirth) missingFields.push('dateOfBirth');
+    if (!nationality) missingFields.push('nationality');
+    if (!district) missingFields.push('district');
+    if (!sector) missingFields.push('sector');
+    if (!street) missingFields.push('street');
+    if (!province) missingFields.push('province');
+    if (!country) missingFields.push('country');
+    if (!phoneNumber) missingFields.push('phoneNumber');
+    if (!email) missingFields.push('email');
+    if (!documentType) missingFields.push('documentType');
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        message: `The following fields are required: ${missingFields.join(', ')}`
+      });
+    }
+
+    // Validate field lengths
+    const validationErrors = [];
+    if (district.length < 2) validationErrors.push('District must be at least 2 characters long');
+    if (sector.length < 2) validationErrors.push('Sector must be at least 2 characters long');
+    if (street.length < 2) validationErrors.push('Street must be at least 2 characters long');
+    if (province.length < 2) validationErrors.push('Province must be at least 2 characters long');
+    if (state.length < 2) validationErrors.push('State must be at least 2 characters long');
+    if (country.length < 2) validationErrors.push('Country must be at least 2 characters long');
+
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        message: 'Validation failed',
+        errors: validationErrors
       });
     }
 
