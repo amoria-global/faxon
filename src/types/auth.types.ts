@@ -40,6 +40,9 @@ export interface RegisterDto {
   companyName?: string; // For employed tour guides
   employmentContract?: string;
   preferredCommunication?: string; // 'email' | 'sms' | 'phone' | 'whatsapp' | 'all'
+
+  // Referral system fields
+  referralCode?: string; // Agent referral code from URL parameter
 }
 
 export interface LoginDto {
@@ -142,6 +145,12 @@ export interface UserInfo {
   kycStatus?: string;
   kycSubmittedAt?: string;
   addressDocument?: string;
+
+  // Referral system fields
+  referredBy?: number;
+  referralCode?: string;
+  referralStatus?: string;
+  referredAt?: string;
 }
 
 export interface UpdateUserProfileDto {

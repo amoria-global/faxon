@@ -57,7 +57,13 @@ export class AuthController {
         }
       }
 
-      const result = await authService.register(req.body, req);
+      // Extract referral code from query parameters if not in body
+      const registrationData = {
+        ...req.body,
+        referralCode: req.body.referralCode || req.query.ref
+      };
+
+      const result = await authService.register(registrationData, req);
       res.status(201).json(result);
     } catch (error: any) {
       if (error.message === 'User already exists') {
@@ -1058,6 +1064,45 @@ async getKYCStatus(req: Request, res: Response, next: NextFunction) {
       res.json(stats);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  }
+
+  async getAgentReferrals(req: Request, res: Response, next: NextFunction) {
+    try {
+      const agentId = parseInt((req as any).user.userId);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+
+      const result = await authService.getAgentReferrals(agentId, page, limit);
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
+
+  async getAgentReferralCode(req: Request, res: Response, next: NextFunction) {
+    try {
+      const agentId = parseInt((req as any).user.userId);
+      const referralCode = await authService.generateAgentReferralCode(agentId);
+
+      res.json({
+        success: true,
+        data: {
+          referralCode,
+          referralLink: `https://jambolush.com/all/become-host?ref=${referralCode}`
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
     }
   }
 }

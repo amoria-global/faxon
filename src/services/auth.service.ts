@@ -79,7 +79,12 @@ export class AuthService {
     kycCompleted: true,
     kycSubmittedAt: true,
     kycStatus: true,
-    addressDocument: true
+    addressDocument: true,
+    // Referral fields
+    referredBy: true,
+    referralCode: true,
+    referralStatus: true,
+    referredAt: true
   };
 
   private brevoEmailService: BrevoMailingService;
@@ -268,6 +273,20 @@ export class AuthService {
       throw new Error('Password is required');
     }
     
+    // Handle referral tracking
+    let referralData = {};
+    if (data.referralCode) {
+      const referringAgent = await this.validateReferralCode(data.referralCode);
+      if (referringAgent) {
+        referralData = {
+          referredBy: referringAgent.id,
+          referralCode: data.referralCode,
+          referredAt: new Date(),
+          referralStatus: 'Pending'
+        };
+      }
+    }
+
     const tourGuideData = data.userType === 'tourguide' ? {
       bio: data.bio,
       experience: data.experience,
@@ -309,7 +328,8 @@ export class AuthService {
         status: isServiceProvider ? 'pending' : 'active',
         verificationStatus: isServiceProvider ? 'pending' : 'unverified',
         preferredCommunication: data.preferredCommunication || 'both',
-        ...tourGuideData
+        ...tourGuideData,
+        ...referralData
       }
     });
 
@@ -1469,7 +1489,12 @@ export class AuthService {
 
   async adminActivateUser(userId: number, req?: any): Promise<UserInfo> {
     const user = await prisma.user.findUnique({
-      where: { id: userId }
+      where: { id: userId },
+      select: {
+        id: true,
+        referredBy: true,
+        referralStatus: true
+      }
     });
 
     if (!user) {
@@ -1480,7 +1505,9 @@ export class AuthService {
       where: { id: userId },
       data: {
         status: 'active',
-        verificationStatus: 'verified'
+        verificationStatus: 'verified',
+        // Update referral status when user becomes active
+        referralStatus: user.referredBy ? 'Active' : (user.referralStatus || 'Pending')
       }
     });
 
@@ -1624,6 +1651,164 @@ export class AuthService {
     }
 
     return this.transformToUserInfo(updatedUser);
+  }
+
+  // --- REFERRAL SYSTEM ---
+  private async validateReferralCode(referralCode: string): Promise<{ id: number } | null> {
+    try {
+      // Extract agent ID from referral code
+      // Format expected: ?ref={agentId} where referralCode would be just the agentId
+      const agentId = parseInt(referralCode);
+
+      if (isNaN(agentId)) {
+        return null;
+      }
+
+      // Validate that the agent exists and is active
+      const agent = await prisma.user.findUnique({
+        where: {
+          id: agentId,
+          userType: 'agent',
+          status: 'active'
+        },
+        select: { id: true }
+      });
+
+      return agent;
+    } catch (error) {
+      console.error('Error validating referral code:', error);
+      return null;
+    }
+  }
+
+  async getAgentReferrals(
+    agentId: number,
+    page: number = 1,
+    limit: number = 10
+  ): Promise<{
+    referrals: Array<{
+      id: number;
+      fullName: string;
+      email: string;
+      phone: string | null;
+      status: string;
+      joinedAt: string;
+      referredBy: number;
+      referralCode: string | null;
+    }>;
+    totalReferrals: number;
+    currentPage: number;
+    totalPages: number;
+  }> {
+    // Validate that the user is an agent
+    const agent = await prisma.user.findUnique({
+      where: { id: agentId },
+      select: { userType: true }
+    });
+
+    if (!agent || agent.userType !== 'agent') {
+      throw new Error('Only agents can access referral data');
+    }
+
+    const offset = (page - 1) * limit;
+
+    // Get total count of referrals
+    const totalReferrals = await prisma.user.count({
+      where: {
+        referredBy: agentId,
+        NOT: { id: agentId } // Prevent self-referrals from being counted
+      }
+    });
+
+    // Get paginated referrals
+    const referrals = await prisma.user.findMany({
+      where: {
+        referredBy: agentId,
+        NOT: { id: agentId } // Prevent self-referrals
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        status: true,
+        createdAt: true,
+        referredBy: true,
+        referralCode: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      skip: offset,
+      take: limit
+    });
+
+    const totalPages = Math.ceil(totalReferrals / limit);
+
+    return {
+      referrals: referrals.map(user => ({
+        id: user.id,
+        fullName: `${user.firstName} ${user.lastName}`.trim(),
+        email: user.email,
+        phone: user.phone,
+        status: this.mapUserStatusToReferralStatus(user.status),
+        joinedAt: user.createdAt.toISOString(),
+        referredBy: user.referredBy!,
+        referralCode: user.referralCode
+      })),
+      totalReferrals,
+      currentPage: page,
+      totalPages
+    };
+  }
+
+  private mapUserStatusToReferralStatus(userStatus: string): string {
+    switch (userStatus) {
+      case 'active':
+        return 'Active';
+      case 'pending':
+        return 'Pending';
+      case 'suspended':
+      case 'inactive':
+        return 'Inactive';
+      default:
+        return 'Pending';
+    }
+  }
+
+  async updateReferralStatus(userId: number, newStatus: 'Active' | 'Inactive'): Promise<void> {
+    // Ensure only valid status transitions
+    if (!['Active', 'Inactive'].includes(newStatus)) {
+      throw new Error('Invalid referral status');
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        referralStatus: newStatus
+      }
+    });
+  }
+
+  async generateAgentReferralCode(agentId: number): Promise<string> {
+    // Validate that the user is an agent
+    const agent = await prisma.user.findUnique({
+      where: { id: agentId },
+      select: { userType: true, status: true }
+    });
+
+    if (!agent || agent.userType !== 'agent') {
+      throw new Error('Only agents can generate referral codes');
+    }
+
+    if (agent.status !== 'active') {
+      throw new Error('Agent must be active to generate referral codes');
+    }
+
+    // For simplicity, the referral code is just the agent ID
+    // This matches the expected format: ?ref={agentId}
+    return agentId.toString();
   }
 
   // --- STATISTICS ---
@@ -1809,7 +1994,12 @@ export class AuthService {
       kycCompleted: user.kycCompleted,
       kycStatus: user.kycStatus,
       kycSubmittedAt: user.kycSubmittedAt?.toISOString(),
-      addressDocument: user.addressDocument
+      addressDocument: user.addressDocument,
+      // Referral system fields
+      referredBy: user.referredBy,
+      referralCode: user.referralCode,
+      referralStatus: user.referralStatus,
+      referredAt: user.referredAt?.toISOString()
     };
   }
 }
