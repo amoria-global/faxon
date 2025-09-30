@@ -34,6 +34,15 @@ const router = Router();
 const adminController = new AdminController();
 
 // Apply admin-wide middleware
+
+//public url
+
+// Products
+router.get('/content/products',
+  validateAdminQuery,
+  adminController.getProducts
+);
+
 router.use(authenticate);
 router.use(requireAdmin);
 router.use(adminRateLimit);
@@ -398,7 +407,7 @@ router.post('/wallets/:id/adjust',
 // === CONTENT MANAGEMENT ===
 
 // Products
-router.get('/content/products',
+router.get('/products',
   validateAdminQuery,
   adminController.getProducts
 );
