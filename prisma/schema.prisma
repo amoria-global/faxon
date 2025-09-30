@@ -19,14 +19,16 @@ model User {
   phone                         String?
   phoneCountryCode              String?
   profileImage                  String?
+  
   // Granular address fields for KYC
-  district                      String?  // required for KYC
-  sector                        String?  // required for KYC
-  street                        String?  // required for KYC
-  province                      String?  // required for KYC
-  state                         String?  // required for KYC
-  country                       String?  // required for KYC
-  // Legacy postal code fields (still available for other use cases)
+  district                      String?
+  sector                        String?
+  street                        String?
+  province                      String?
+  state                         String?
+  country                       String?
+  
+  // Legacy postal code fields
   city                          String?
   zipCode                       String?
   postalCode                    String?
@@ -34,6 +36,7 @@ model User {
   pinCode                       String?
   eircode                       String?
   cep                           String?
+  
   status                        String                   @default("pending")
   userType                      String                   @default("guest")
   bio                           String?
@@ -69,18 +72,13 @@ model User {
   kycStatus                     String                   @default("pending")
   kycSubmittedAt                DateTime?
 
-  kycStatus                     String    @default("pending") // pending, approved, rejected
-  addressDocument               String?   // URL to address verification document
-
   // Referral system fields
-  referredBy                    Int?                  // ID of the user who referred this user
-  referralCode                  String?               // Referral code generated for this user
-  referralStatus                String                @default("Pending") // Pending, Active, Inactive
-  referredAt                    DateTime?             // When this user was referred
+  referredBy                    Int?
+  referralCode                  String?
+  referralStatus                String                   @default("Pending")
+  referredAt                    DateTime?
 
-  agentBookings                 AgentBooking[]        @relation("AgentBookings")
-  clientBookings                AgentBooking[]        @relation("ClientBookings")
-
+  // Relations
   agentBookings                 AgentBooking[]           @relation("AgentBookings")
   clientBookings                AgentBooking[]           @relation("ClientBookings")
   agentMetrics                  AgentPerformanceMetric[] @relation("AgentMetrics")
@@ -114,16 +112,6 @@ model User {
   sessions                      UserSession[]
   wallet                        Wallet?
   wishlists                     Wishlist[]
-
-  withdrawal_requests           WithdrawalRequest[]
-  userSettings                  UserSettings?
-  userVerifications             UserVerification[]
-  connectedAccounts             ConnectedAccount[]
-
-  // Referral relationships
-  referrer                      User?                 @relation("UserReferrals", fields: [referredBy], references: [id])
-  referrals                     User[]                @relation("UserReferrals")
-
   withdrawalRequests            WithdrawalRequest[]
   activityLogs                  ActivityLog[]
   contactMessages               ContactMessage[]
@@ -131,6 +119,9 @@ model User {
   user_settings                 user_settings?
   user_verifications            user_verifications[]
 
+  // Referral self-relation
+  referrer                      User?                    @relation("UserReferrals", fields: [referredBy], references: [id])
+  referrals                     User[]                   @relation("UserReferrals")
 
   @@map("users")
 }
