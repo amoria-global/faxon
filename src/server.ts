@@ -12,6 +12,7 @@ import helpRoutes from './routes/help.routes';
 import settingsRoutes from './routes/settings.routes';
 import smsTestRoutes from './routes/sms.test.routes'; // Add this import
 import emailTestRoutes from './routes/email.test.routes';
+import adminRoutes from './routes/admin.routes';
 
 const app = express();
 
@@ -26,6 +27,10 @@ app.use(cors({
     'http://app.jambolush.com',
     'https://www.jambolush.com',
     'https://www.app.jambolush.com',
+    'https://admin.amoriaglobal.com',
+    'https://www.admin.amoriaglobal.com',
+    'https://amoriaglobal.com',
+    'https://www.amoriaglobal.com'
   ],
   credentials: true
 }));
@@ -71,9 +76,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/help', helpRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/pesapal', require('./routes/pesapal.callback').default);
-app.use('/api/sms', smsTestRoutes); // Add SMS test routes
-app.use('/api/sms', smsTestRoutes); // Add SMS test routes
-app.use('/api/brevo/email', emailTestRoutes); // Email test routes
+app.use('/api/admin', adminRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

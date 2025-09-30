@@ -1,5 +1,3 @@
-// prisma/schema.prisma - Updated for Escrow Payment System
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,15 +8,13 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// === USER MANAGEMENT ===
-
 model User {
-  id                            Int                   @id @default(autoincrement())
-  email                         String                @unique
+  id                            Int                      @id @default(autoincrement())
+  email                         String                   @unique
   firstName                     String
   lastName                      String
   password                      String?
-  provider                      String                @default("manual")
+  provider                      String                   @default("manual")
   providerId                    String?
   phone                         String?
   phoneCountryCode              String?
@@ -38,28 +34,28 @@ model User {
   pinCode                       String?
   eircode                       String?
   cep                           String?
-  status                        String                @default("pending")
-  userType                      String                @default("guest")
+  status                        String                   @default("pending")
+  userType                      String                   @default("guest")
   bio                           String?
   experience                    Int?
   languages                     Json?
   specializations               Json?
-  rating                        Float                 @default(0)
-  totalTours                    Int                   @default(0)
-  isVerified                    Boolean               @default(false)
+  rating                        Float                    @default(0)
+  totalTours                    Int                      @default(0)
+  isVerified                    Boolean                  @default(false)
   licenseNumber                 String?
   certifications                Json?
-  totalSessions                 Int                   @default(0)
-  twoFactorEnabled              Boolean               @default(false)
-  createdAt                     DateTime              @default(now())
-  updatedAt                     DateTime              @updatedAt
+  totalSessions                 Int                      @default(0)
+  twoFactorEnabled              Boolean                  @default(false)
+  createdAt                     DateTime                 @default(now())
+  updatedAt                     DateTime                 @updatedAt
   lastLogin                     DateTime?
   resetPasswordOtp              String?
   resetPasswordExpires          DateTime?
-  verificationStatus            String?               @default("unverified")
-  preferredCommunication        String?               @default("email")
+  verificationStatus            String?                  @default("unverified")
+  preferredCommunication        String?                  @default("email")
   hostNotes                     String?
-  averageRating                 Float                 @default(0)
+  averageRating                 Float                    @default(0)
   county                        String?
   region                        String?
   companyName                   String?
@@ -68,8 +64,11 @@ model User {
   nationalId                    String?
   tourGuideType                 String?
   verificationDocument          String?
-  kycCompleted                  Boolean   @default(false)
+  addressDocument               String?
+  kycCompleted                  Boolean                  @default(false)
+  kycStatus                     String                   @default("pending")
   kycSubmittedAt                DateTime?
+
   kycStatus                     String    @default("pending") // pending, approved, rejected
   addressDocument               String?   // URL to address verification document
 
@@ -81,28 +80,41 @@ model User {
 
   agentBookings                 AgentBooking[]        @relation("AgentBookings")
   clientBookings                AgentBooking[]        @relation("ClientBookings")
+
+  agentBookings                 AgentBooking[]           @relation("AgentBookings")
+  clientBookings                AgentBooking[]           @relation("ClientBookings")
+  agentMetrics                  AgentPerformanceMetric[] @relation("AgentMetrics")
+  agentReviews                  AgentReview[]            @relation("AgentReviews")
+  clientReviews                 AgentReview[]            @relation("ClientReviews")
   bankAccounts                  BankAccount[]
-  bookingsAsGuest               Booking[]             @relation("GuestBookings")
+  bookingsAsGuest               Booking[]                @relation("GuestBookings")
+  agentInteractions             ClientInteraction[]      @relation("AgentInteractions")
+  clientInteractions            ClientInteraction[]      @relation("ClientInteractions")
   escrowNotifications           EscrowNotification[]
-  escrowTransactionsAsRecipient EscrowTransaction[]   @relation("RecipientEscrowTransactions")
-  escrowTransactions            EscrowTransaction[]   @relation("UserEscrowTransactions")
-  hostEarnings                  HostEarning[]         @relation("HostEarnings")
+  escrowTransactionsAsRecipient EscrowTransaction[]      @relation("RecipientEscrowTransactions")
+  escrowTransactions            EscrowTransaction[]      @relation("UserEscrowTransactions")
+  hostEarnings                  HostEarning[]            @relation("HostEarnings")
+  agentInquiries                Inquiry[]                @relation("AgentInquiries")
+  clientInquiries               Inquiry[]                @relation("ClientInquiries")
+  agentLeads                    Lead[]                   @relation("AgentLeads")
   mobileMoneyAccounts           MobileMoneyAccount[]
   paymentSettings               PaymentSettings?
   paymentTransactions           PaymentTransaction[]
-  hostPayouts                   Payout[]              @relation("HostPayouts")
+  hostPayouts                   Payout[]                 @relation("HostPayouts")
   properties                    Property[]
+  propertyViews                 PropertyView[]           @relation("UserPropertyViews")
   reviews                       Review[]
-  tourBookingsAsGuest           TourBooking[]         @relation("GuestTourBookings")
+  tourBookingsAsGuest           TourBooking[]            @relation("GuestTourBookings")
   tourEarnings                  TourEarnings[]
-  receivedTourMessages          TourMessage[]         @relation("TourMessageReceiver")
-  sentTourMessages              TourMessage[]         @relation("TourMessageSender")
+  receivedTourMessages          TourMessage[]            @relation("TourMessageReceiver")
+  sentTourMessages              TourMessage[]            @relation("TourMessageSender")
   tourNotifications             TourNotification[]
   tourReviews                   TourReview[]
-  toursAsGuide                  Tour[]                @relation("TourGuideToTours")
+  toursAsGuide                  Tour[]                   @relation("TourGuideToTours")
   sessions                      UserSession[]
   wallet                        Wallet?
   wishlists                     Wishlist[]
+
   withdrawal_requests           WithdrawalRequest[]
   userSettings                  UserSettings?
   userVerifications             UserVerification[]
@@ -111,6 +123,14 @@ model User {
   // Referral relationships
   referrer                      User?                 @relation("UserReferrals", fields: [referredBy], references: [id])
   referrals                     User[]                @relation("UserReferrals")
+
+  withdrawalRequests            WithdrawalRequest[]
+  activityLogs                  ActivityLog[]
+  contactMessages               ContactMessage[]
+  connected_accounts            connected_accounts[]
+  user_settings                 user_settings?
+  user_verifications            user_verifications[]
+
 
   @@map("users")
 }
@@ -135,31 +155,71 @@ model UserSession {
   @@map("user_sessions")
 }
 
+model EscrowTransaction {
+  id                 String               @id @default(cuid())
+  userId             Int
+  recipientId        Int?
+  type               String
+  amount             Float
+  currency           String               @default("RWF")
+  status             String               @default("PENDING")
+  reference          String               @unique
+  description        String?
+  escrowId           String?
+  externalId         String?
+  paymentUrl         String?
+  sourceEscrowId     String?
+  transferType       String?
+  isP2P              Boolean              @default(false)
+  notifyBySMS        Boolean              @default(false)
+  fundedAt           DateTime?
+  releasedAt         DateTime?
+  releasedBy         Int?
+  releaseReason      String?
+  disputedAt         DateTime?
+  disputedBy         Int?
+  disputeReason      String?
+  resolvedAt         DateTime?
+  resolvedBy         Int?
+  resolutionReason   String?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  metadata           Json?
+  refundedAt         DateTime?
+  pesapalOrderId     String?
+  pesapalTrackingId  String?
+  notifications      EscrowNotification[]
+  recipient          User?                @relation("RecipientEscrowTransactions", fields: [recipientId], references: [id])
+  user               User                 @relation("UserEscrowTransactions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([recipientId])
+  @@index([status])
+  @@index([type])
+  @@index([currency])
+  @@index([escrowId])
+  @@index([reference])
+  @@index([createdAt])
+  @@map("escrow_transactions")
+}
+
 model WithdrawalRequest {
-  id String @id @default(cuid())
-
-  // User
-  userId Int
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Withdrawal Details
-  amount   Float
-  currency String @default("RWF")
-  method   String // MOBILE, BANK
-  status   String @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
-
-  // Destination (stored as JSON for flexibility)
-  destination Json // { holderName, accountNumber, mobileProvider?, bankCode?, etc. }
-
-  // Processing
-  pesapalPayoutId String? // Pesapal payout request ID
-  reference       String  @unique
+  id              String    @id @default(cuid())
+  userId          Int
+  amount          Float
+  currency        String    @default("RWF")
+  method          String
+  status          String    @default("PENDING")
+  destination     Json
+  pesapalPayoutId String?
+  reference       String    @unique
   failureReason   String?
-
-  // Timestamps
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  completedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  completedAt     DateTime?
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([status])
@@ -169,38 +229,24 @@ model WithdrawalRequest {
 }
 
 model EscrowNotification {
-  id String @id @default(cuid())
-
-  // User
-  userId Int
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Related Transaction (optional)
+  id                  String             @id @default(cuid())
+  userId              Int
   escrowTransactionId String?
-  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id], onDelete: SetNull)
-
-  // Notification Details
-  type    String // escrow_created, escrow_funded, release_requested, etc.
-  title   String
-  message String
-  data    Json? // Additional notification data
-
-  // Delivery Channels
-  channels Json // ["email", "sms", "push", "in_app"]
-
-  // Status
-  isRead Boolean   @default(false)
-  readAt DateTime?
-  sentAt DateTime?
-
-  // Delivery Status
-  emailSent Boolean @default(false)
-  smsSent   Boolean @default(false)
-  pushSent  Boolean @default(false)
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  type                String
+  title               String
+  message             String
+  data                Json?
+  channels            Json
+  isRead              Boolean            @default(false)
+  readAt              DateTime?
+  sentAt              DateTime?
+  emailSent           Boolean            @default(false)
+  smsSent             Boolean            @default(false)
+  pushSent            Boolean            @default(false)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id])
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([escrowTransactionId])
@@ -210,8 +256,61 @@ model EscrowNotification {
   @@map("escrow_notifications")
 }
 
+model Wallet {
+  id            String              @id @default(cuid())
+  userId        Int                 @unique
+  balance       Float               @default(0)
+  currency      String              @default("RWF")
+  accountNumber String?
+  isActive      Boolean             @default(true)
+  isVerified    Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  transactions  WalletTransaction[]
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id            String   @id @default(cuid())
+  walletId      String
+  type          String
+  amount        Float
+  balanceBefore Float
+  balanceAfter  Float
+  reference     String
+  description   String
+  transactionId String?
+  createdAt     DateTime @default(now())
+  wallet        Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId])
+  @@index([reference])
+  @@index([createdAt])
+  @@map("wallet_transactions")
+}
+
+model SmsLog {
+  id          String   @id @default(cuid())
+  userId      Int
+  phoneNumber String
+  messageType String
+  status      String
+  messageId   String?
+  metadata    Json?
+  error       String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([messageType])
+  @@index([createdAt])
+  @@map("sms_logs")
+}
+
 model Property {
-  id                Int           @id @default(autoincrement())
+  id                Int            @id @default(autoincrement())
   name              String
   location          String
   type              String
@@ -229,24 +328,25 @@ model Property {
   ownerDetails      Json?
   availableFrom     DateTime?
   availableTo       DateTime?
-  minStay           Int           @default(1)
+  minStay           Int            @default(1)
   maxStay           Int?
-  status            String        @default("pending")
-  isVerified        Boolean       @default(false)
-  isInstantBook     Boolean       @default(false)
-  views             Int           @default(0)
-  totalBookings     Int           @default(0)
-  averageRating     Float         @default(0)
-  reviewsCount      Int           @default(0)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  status            String         @default("pending")
+  isVerified        Boolean        @default(false)
+  isInstantBook     Boolean        @default(false)
+  views             Int            @default(0)
+  totalBookings     Int            @default(0)
+  averageRating     Float          @default(0)
+  reviewsCount      Int            @default(0)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
   propertyAddress   String?
   upiNumber         String?
   blockedDates      BlockedDate[]
   bookings          Booking[]
-  hostEarnings      HostEarning[] @relation("PropertyEarnings")
+  hostEarnings      HostEarning[]  @relation("PropertyEarnings")
   pricingRules      PricingRule[]
-  host              User          @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  host              User           @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  propertyViews     PropertyView[] @relation("PropertyViews")
   reviews           Review[]
   wishlistedBy      Wishlist[]
 
@@ -413,18 +513,16 @@ model Tour {
 }
 
 model TourCategory {
-  id          String  @id @default(cuid())
-  name        String  @unique
-  slug        String  @unique
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
   description String?
-  icon        String? // Icon class or URL
-  color       String? // Hex color for UI
-  isActive    Boolean @default(true)
-  sortOrder   Int     @default(0)
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  icon        String?
+  color       String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([isActive])
   @@index([sortOrder])
@@ -595,24 +693,6 @@ model TourEarnings {
   @@map("tour_earnings")
 }
 
-
-model Wallet {
-  id            String              @id @default(cuid())
-  userId        Int                 @unique
-  balance       Float               @default(0)
-  currency      String              @default("RWF")
-  accountNumber String?
-  isActive      Boolean             @default(true)
-  isVerified    Boolean             @default(false)
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  transactions  WalletTransaction[]
-  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@map("wallets")
-}
-
 model PaymentTransaction {
   id                  String    @id @default(cuid())
   userId              Int
@@ -652,25 +732,6 @@ model PaymentTransaction {
   @@map("payment_transactions")
 }
 
-model WalletTransaction {
-  id            String   @id @default(cuid())
-  walletId      String
-  type          String
-  amount        Float
-  balanceBefore Float
-  balanceAfter  Float
-  reference     String
-  description   String
-  transactionId String?
-  createdAt     DateTime @default(now())
-  wallet        Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
-
-  @@index([walletId])
-  @@index([reference])
-  @@index([createdAt])
-  @@map("wallet_transactions")
-}
-
 model BankAccount {
   id            String   @id @default(cuid())
   userId        Int
@@ -706,55 +767,6 @@ model MobileMoneyAccount {
   @@index([userId])
   @@map("mobile_money_accounts")
 }
-
-model EscrowTransaction {
-  id                 String               @id @default(cuid())
-  userId             Int
-  recipientId        Int?
-  type               String
-  amount             Float
-  currency           String               @default("RWF")
-  status             String               @default("PENDING")
-  reference          String               @unique
-  description        String?
-  escrowId           String?
-  externalId         String?
-  paymentUrl         String?
-  sourceEscrowId     String?
-  transferType       String?
-  isP2P              Boolean              @default(false)
-  notifyBySMS        Boolean              @default(false)
-  fundedAt           DateTime?
-  releasedAt         DateTime?
-  releasedBy         Int?
-  releaseReason      String?
-  disputedAt         DateTime?
-  disputedBy         Int?
-  disputeReason      String?
-  resolvedAt         DateTime?
-  resolvedBy         Int?
-  resolutionReason   String?
-  cancelledAt        DateTime?
-  cancellationReason String?
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
-  metadata           Json?
-  refundedAt         DateTime?
-  notifications      EscrowNotification[]
-  recipient          User?                @relation("RecipientEscrowTransactions", fields: [recipientId], references: [id])
-  user               User                 @relation("UserEscrowTransactions", fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([recipientId])
-  @@index([status])
-  @@index([type])
-  @@index([currency])
-  @@index([escrowId])
-  @@index([createdAt])
-  @@index([reference])
-  @@map("escrow_transactions")
-}
-
 
 model PaymentSettings {
   id                      String   @id @default(cuid())
@@ -844,96 +856,380 @@ model AgentBooking {
   @@map("agent_bookings")
 }
 
+model Lead {
+  id           String    @id @default(cuid())
+  agentId      Int
+  source       String
+  type         String
+  status       String    @default("new")
+  priority     String    @default("medium")
+  clientName   String?
+  clientEmail  String?
+  clientPhone  String?
+  propertyId   Int?
+  requirements Json?
+  budget       Float?
+  timeline     String?
+  convertedAt  DateTime?
+  bookingId    String?
+  lostReason   String?
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  agent        User      @relation("AgentLeads", fields: [agentId], references: [id], onDelete: Cascade)
 
-// === USER SETTINGS MODELS ===
-
-model UserSettings {
-  id           String   @id @default(cuid())
-  userId       Int      @unique
-
-  // Notification Settings (stored as JSON for flexibility)
-  notifications Json    @default("{\"sms\": true, \"email\": true, \"pushNotifications\": false, \"marketingEmails\": false, \"propertyAlerts\": true, \"priceDropAlerts\": true, \"bookingUpdates\": true, \"securityAlerts\": true, \"systemNotifications\": true, \"preferredChannel\": \"email\", \"quietHours\": {\"enabled\": false, \"startTime\": \"22:00\", \"endTime\": \"08:00\", \"timezone\": \"UTC\"}}")
-
-  // Security Settings
-  security     Json    @default("{\"twoFactorEnabled\": false, \"twoFactorMethod\": \"sms\", \"loginNotifications\": true, \"passwordChangeNotifications\": true, \"suspiciousActivityAlerts\": true, \"sessionTimeout\": 30, \"maxActiveSessions\": 5, \"profileVisibility\": \"public\", \"dataSharing\": false, \"analyticsOptOut\": false}")
-
-  // General Settings
-  general      Json    @default("{\"language\": \"en\", \"timezone\": \"UTC\", \"currency\": \"USD\", \"dateFormat\": \"MM/DD/YYYY\", \"timeFormat\": \"12h\", \"accountDeactivated\": false, \"dataProcessingConsent\": true, \"marketingConsent\": false, \"compactMode\": false, \"showActivityStatus\": true}")
-
-  // Appearance Settings
-  appearance   Json    @default("{\"theme\": \"light\", \"fontSize\": \"medium\", \"compactMode\": false, \"colorScheme\": \"default\"}")
-
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@map("user_settings")
+  @@index([agentId])
+  @@index([status])
+  @@index([source])
+  @@index([createdAt])
+  @@map("leads")
 }
 
-model UserVerification {
-  id                String    @id @default(cuid())
-  userId            Int
+model Inquiry {
+  id             String    @id @default(cuid())
+  agentId        Int
+  clientId       Int?
+  type           String
+  subject        String?
+  message        String
+  propertyId     Int?
+  isUrgent       Boolean   @default(false)
+  isResponded    Boolean   @default(false)
+  respondedAt    DateTime?
+  responseTime   Int?
+  responseMethod String?
+  resolution     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  agent          User      @relation("AgentInquiries", fields: [agentId], references: [id], onDelete: Cascade)
+  client         User?     @relation("ClientInquiries", fields: [clientId], references: [id])
 
-  // Verification Status
-  emailVerified     Boolean   @default(false)
-  phoneVerified     Boolean   @default(false)
+  @@index([agentId])
+  @@index([clientId])
+  @@index([isResponded])
+  @@index([createdAt])
+  @@map("inquiries")
+}
 
-  // Verification Timestamps
-  emailVerifiedAt   DateTime?
-  phoneVerifiedAt   DateTime?
+model AgentReview {
+  id                    String    @id @default(cuid())
+  agentId               Int
+  clientId              Int
+  rating                Int
+  comment               String?
+  categories            Json?
+  bookingId             String?
+  serviceType           String?
+  communicationRating   Int?
+  professionalismRating Int?
+  knowledgeRating       Int?
+  responsivenessRating  Int?
+  resultsRating         Int?
+  response              String?
+  responseDate          DateTime?
+  isVisible             Boolean   @default(true)
+  isReported            Boolean   @default(false)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  agent                 User      @relation("AgentReviews", fields: [agentId], references: [id], onDelete: Cascade)
+  client                User      @relation("ClientReviews", fields: [clientId], references: [id], onDelete: Cascade)
 
-  // Last Verification Attempts
+  @@unique([agentId, clientId, bookingId])
+  @@index([agentId])
+  @@index([clientId])
+  @@index([rating])
+  @@index([createdAt])
+  @@map("agent_reviews")
+}
+
+model PropertyView {
+  id                 String   @id @default(cuid())
+  propertyId         Int
+  userId             Int?
+  sessionId          String?
+  ipAddress          String?
+  userAgent          String?
+  referrer           String?
+  duration           Int?
+  source             String?
+  device             String?
+  country            String?
+  city               String?
+  convertedToInquiry Boolean  @default(false)
+  convertedToBooking Boolean  @default(false)
+  inquiryId          String?
+  bookingId          String?
+  createdAt          DateTime @default(now())
+  property           Property @relation("PropertyViews", fields: [propertyId], references: [id], onDelete: Cascade)
+  user               User?    @relation("UserPropertyViews", fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([createdAt])
+  @@map("property_views")
+}
+
+model AgentPerformanceMetric {
+  id              String   @id @default(cuid())
+  agentId         Int
+  metricType      String
+  value           Float
+  unit            String?
+  period          String
+  periodStart     DateTime
+  periodEnd       DateTime
+  propertyCount   Int?
+  clientCount     Int?
+  bookingCount    Int?
+  metadata        Json?
+  marketAverage   Float?
+  competitorRank  Int?
+  improvementRate Float?
+  calculatedAt    DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  agent           User     @relation("AgentMetrics", fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, metricType, period, periodStart])
+  @@index([agentId])
+  @@index([metricType])
+  @@index([period])
+  @@index([periodStart])
+  @@map("agent_performance_metrics")
+}
+
+model ClientInteraction {
+  id                 String    @id @default(cuid())
+  agentId            Int
+  clientId           Int
+  type               String
+  duration           Int?
+  outcome            String?
+  nextAction         String?
+  dueDate            DateTime?
+  propertyId         Int?
+  bookingId          String?
+  notes              String?
+  clientSatisfaction Int?
+  agentNotes         String?
+  scheduledAt        DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  agent              User      @relation("AgentInteractions", fields: [agentId], references: [id], onDelete: Cascade)
+  client             User      @relation("ClientInteractions", fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([clientId])
+  @@index([type])
+  @@index([scheduledAt])
+  @@index([createdAt])
+  @@map("client_interactions")
+}
+
+model MarketData {
+  id                    String   @id @default(cuid())
+  region                String
+  city                  String?
+  area                  String?
+  averagePropertyPrice  Float?
+  averageCommissionRate Float?
+  averageResponseTime   Float?
+  averageConversionRate Float?
+  averageRetentionRate  Float?
+  totalActiveAgents     Int?
+  totalActiveProperties Int?
+  marketVolume          Float?
+  period                String
+  periodStart           DateTime
+  periodEnd             DateTime
+  dataSource            String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([region, period, periodStart])
+  @@index([region])
+  @@index([period])
+  @@index([periodStart])
+  @@map("market_data")
+}
+
+// ================================================================= //
+//                       ADMIN & SITE MODELS                         //
+// ================================================================= //
+
+model VisitorTracking {
+  id        Int       @id @default(autoincrement())
+  ipAddress String?
+  location  Json?
+  country   String?
+  city      String?
+  region    String?
+  timezone  String?
+  userAgent String?
+  pageUrl   String?
+  referrer  String?
+  sessionId String?
+  createdAt DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@map("visitor_tracking")
+}
+
+model Product {
+  id          Int       @id @default(autoincrement())
+  name        String?
+  description String?
+  price       Float?
+  imageUrl    String?   @map("image_url")
+  category    String?
+  isAvailable Boolean?  @map("is_available")
+  siteUrl     String?   @map("site_url")
+  createdAt   DateTime? @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime? @updatedAt @db.Timestamptz(6)
+
+  @@map("products")
+}
+
+model Service {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(150)
+  description String?
+  price       Decimal? @db.Decimal(10, 2)
+  category    String?  @db.VarChar(100)
+  imageUrl    String?  @map("image_url") @db.VarChar(512)
+  isActive    Boolean? @default(true) @map("is_active")
+  status      String?
+  icon        String?
+  features    String?
+  createdAt   DateTime @default(now()) @db.Timestamp(6)
+  updatedAt   DateTime @updatedAt @db.Timestamp(6)
+
+  @@map("services")
+}
+
+model Partner {
+  id           Int      @id @default(autoincrement())
+  name         String   @db.VarChar(150)
+  description  String?
+  logoUrl      String?  @map("logo_url") @db.VarChar(512)
+  websiteUrl   String?  @map("website_url") @db.VarChar(255)
+  contactEmail String?  @map("contact_email") @db.VarChar(150)
+  isVisible    Boolean? @default(true) @map("is_visible")
+  createdAt    DateTime @default(now()) @db.Timestamp(6)
+  updatedAt    DateTime @updatedAt @db.Timestamp(6)
+
+  @@map("partners")
+}
+
+model ContactMessage {
+  id          Int       @id @default(autoincrement())
+  userId      Int?      @map("user_id")
+  name        String?
+  email       String?
+  phoneNumber String?   @map("phone_number")
+  subject     String?
+  message     String?
+  isResolved  Boolean?  @map("is_resolved")
+  adminReply  String?   @map("admin_reply")
+  repliedAt   DateTime? @map("replied_at") @db.Timestamptz(6)
+  createdAt   DateTime? @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime? @updatedAt @db.Timestamptz(6)
+
+  // --- Relation to User (optional) ---
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([isResolved])
+  @@map("contact_us")
+}
+
+model NewsletterSubscription {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  isSubscribed   Boolean   @default(true)
+  subscribedAt   DateTime  @default(now())
+  unsubscribedAt DateTime?
+
+  @@map("newsletter_subscriptions")
+}
+
+model ActivityLog {
+  id           Int       @id @default(autoincrement())
+  userId       Int?      @map("user_id")
+  action       String?
+  resourceType String?   @map("resource_type")
+  resourceId   String?   @map("resource_id") // Using String for flexibility with CUIDs/UUIDs
+  ipAddress    String?   @map("ip_address")
+  userAgent    String?   @map("user_agent")
+  details      Json?
+  status       String?
+  errorMessage String?   @map("error_message")
+  durationMs   Int?      @map("duration_ms")
+  createdAt    DateTime? @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime? @updatedAt @db.Timestamptz(6)
+
+  // --- Relation to User ---
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType])
+  @@map("activity_logs")
+}
+
+model connected_accounts {
+  id          String   @id @default(cuid()) // ADD @default(cuid())
+  userId      Int
+  provider    String
+  providerId  String
+  email       String
+  connected   Boolean   @default(true)
+  connectedAt DateTime  @default(now())
+  lastUsed    DateTime?
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime @updatedAt // ADD @updatedAt
+  users       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([connected])
+  @@index([provider])
+  @@index([userId])
+}
+
+model user_settings {
+  id            String   @id @default(cuid())
+  userId        Int      @unique
+  notifications Json     @default("{\"sms\": true, \"email\": true, \"quietHours\": {\"enabled\": false, \"endTime\": \"08:00\", \"timezone\": \"UTC\", \"startTime\": \"22:00\"}, \"bookingUpdates\": true, \"propertyAlerts\": true, \"securityAlerts\": true, \"marketingEmails\": false, \"priceDropAlerts\": true, \"preferredChannel\": \"email\", \"pushNotifications\": false, \"systemNotifications\": true}")
+  security      Json     @default("{\"dataSharing\": false, \"sessionTimeout\": 30, \"analyticsOptOut\": false, \"twoFactorMethod\": \"sms\", \"twoFactorEnabled\": false, \"maxActiveSessions\": 5, \"profileVisibility\": \"public\", \"loginNotifications\": true, \"suspiciousActivityAlerts\": true, \"passwordChangeNotifications\": true}")
+  general       Json     @default("{\"currency\": \"USD\", \"language\": \"en\", \"timezone\": \"UTC\", \"dateFormat\": \"MM/DD/YYYY\", \"timeFormat\": \"12h\", \"compactMode\": false, \"marketingConsent\": false, \"accountDeactivated\": false, \"showActivityStatus\": true, \"dataProcessingConsent\": true}")
+  appearance    Json     @default("{\"theme\": \"light\", \"fontSize\": \"medium\", \"colorScheme\": \"default\", \"compactMode\": false}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  users         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model user_verifications {
+  id                        String    @id @default(uuid()) // Auto-generate UUID
+  userId                    Int
+  emailVerified             Boolean   @default(false)
+  phoneVerified             Boolean   @default(false)
+  emailVerifiedAt           DateTime?
+  phoneVerifiedAt           DateTime?
   lastEmailVerificationSent DateTime?
   lastPhoneVerificationSent DateTime?
-
-  // Verification Codes (temporary storage)
   emailVerificationCode     String?
   phoneVerificationCode     String?
   emailCodeExpires          DateTime?
   phoneCodeExpires          DateTime?
-
-  // Verification Attempts Counter
   emailVerificationAttempts Int       @default(0)
   phoneVerificationAttempts Int       @default(0)
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt // Auto-update on changes
+  users                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
   @@index([emailVerified])
   @@index([phoneVerified])
-  @@map("user_verifications")
-}
-
-model ConnectedAccount {
-  id           String    @id @default(cuid())
-  userId       Int
-
-  // Account Details
-  provider     String    // google, apple, facebook, microsoft
-  providerId   String    // External provider user ID
-  email        String
-
-  // Connection Status
-  connected    Boolean   @default(true)
-  connectedAt  DateTime  @default(now())
-  lastUsed     DateTime?
-
-  // Additional metadata
-  metadata     Json?     // Store provider-specific data
-
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, provider])
   @@index([userId])
-  @@index([provider])
-  @@index([connected])
-  @@map("connected_accounts")
 }

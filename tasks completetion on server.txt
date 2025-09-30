@@ -1,9 +1,0 @@
-
-// task flow inplementation on server
-- escrow deposit, withdraw, transfer, balance check, wallets integration
-- tours (create, update, delete, get) added
-- resolve refresh token on new requests
-- fix booking body parse to server
-- fix frontend confirm and pay body sending 
-- migration to supabase with postgres
-
