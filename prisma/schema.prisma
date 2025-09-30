@@ -24,7 +24,7 @@ model User {
   sector                        String?  // required for KYC
   street                        String?  // required for KYC
   province                      String?  // required for KYC
-  state                         String?   // required for KYC
+  state                         String?  // required for KYC
   country                       String?  // required for KYC
   // Legacy postal code fields (still available for other use cases)
   city                          String?
@@ -68,6 +68,19 @@ model User {
   kycCompleted                  Boolean                  @default(false)
   kycStatus                     String                   @default("pending")
   kycSubmittedAt                DateTime?
+
+  kycStatus                     String    @default("pending") // pending, approved, rejected
+  addressDocument               String?   // URL to address verification document
+
+  // Referral system fields
+  referredBy                    Int?                  // ID of the user who referred this user
+  referralCode                  String?               // Referral code generated for this user
+  referralStatus                String                @default("Pending") // Pending, Active, Inactive
+  referredAt                    DateTime?             // When this user was referred
+
+  agentBookings                 AgentBooking[]        @relation("AgentBookings")
+  clientBookings                AgentBooking[]        @relation("ClientBookings")
+
   agentBookings                 AgentBooking[]           @relation("AgentBookings")
   clientBookings                AgentBooking[]           @relation("ClientBookings")
   agentMetrics                  AgentPerformanceMetric[] @relation("AgentMetrics")
@@ -101,12 +114,23 @@ model User {
   sessions                      UserSession[]
   wallet                        Wallet?
   wishlists                     Wishlist[]
+
+  withdrawal_requests           WithdrawalRequest[]
+  userSettings                  UserSettings?
+  userVerifications             UserVerification[]
+  connectedAccounts             ConnectedAccount[]
+
+  // Referral relationships
+  referrer                      User?                 @relation("UserReferrals", fields: [referredBy], references: [id])
+  referrals                     User[]                @relation("UserReferrals")
+
   withdrawalRequests            WithdrawalRequest[]
   activityLogs                  ActivityLog[]
   contactMessages               ContactMessage[]
   connected_accounts            connected_accounts[]
   user_settings                 user_settings?
   user_verifications            user_verifications[]
+
 
   @@map("users")
 }

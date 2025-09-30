@@ -90,4 +90,7 @@ router.get('/agent/clients', authorize('agent', 'admin'), (req, res) => {
   res.json({ message: 'Agent clients endpoint - implement in agent controller' });
 });
 
+router.get('/agent/referrals', authorize('agent', 'admin'), authController.getAgentReferrals);
+router.get('/agent/referral-code', authorize('agent', 'admin'), authController.getAgentReferralCode);
+
 export default router;
