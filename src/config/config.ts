@@ -20,11 +20,7 @@ export const config = {
   pesapal: {
     consumerKey: process.env.PESAPAL_CONSUMER_KEY!,
     consumerSecret: process.env.PESAPAL_CONSUMER_SECRET!,
-    baseUrl: process.env.PESAPAL_BASE_URL || (
-      process.env.NODE_ENV === 'production' 
-        ? 'https://pay.pesapal.com/v3' 
-        : 'https://cybqa.pesapal.com/pesapalv3'
-    ),
+    baseUrl: process.env.PESAPAL_BASE_URL || "https://pay.pesapal.com/v3",
     environment: (process.env.NODE_ENV === 'production' ? 'production' : 'sandbox') as 'production' | 'sandbox',
     webhookSecret: process.env.PESAPAL_WEBHOOK_SECRET!,
     callbackUrl: process.env.PESAPAL_CALLBACK_URL || 'http://localhost:5000/api/pesapal/callback',
