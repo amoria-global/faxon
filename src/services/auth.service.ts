@@ -1548,7 +1548,8 @@ export class AuthService {
   async submitKYC(
     userId: number,
     personalDetails: any,
-    addressDocumentUrl?: string
+    addressDocumentUrl?: string,
+    passportPhotoUrl?: string
   ): Promise<{ user: UserInfo; requiresDocumentUpload: boolean }> {
     const user = await prisma.user.findUnique({
       where: { id: userId }
@@ -1576,6 +1577,7 @@ export class AuthService {
         kycSubmittedAt: new Date(),
         kycStatus: 'pending',
         addressDocument: addressDocumentUrl,
+        passportPhotoUrl: passportPhotoUrl,
       }
     });
 
@@ -1995,6 +1997,7 @@ export class AuthService {
       kycStatus: user.kycStatus,
       kycSubmittedAt: user.kycSubmittedAt?.toISOString(),
       addressDocument: user.addressDocument,
+      passportPhotoUrl: user.passportPhotoUrl,
       // Referral system fields
       referredBy: user.referredBy,
       referralCode: user.referralCode,

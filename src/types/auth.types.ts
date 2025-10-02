@@ -145,6 +145,7 @@ export interface UserInfo {
   kycStatus?: string;
   kycSubmittedAt?: string;
   addressDocument?: string;
+  passportPhotoUrl?: string;
 
   // Referral system fields
   referredBy?: number;
@@ -386,6 +387,7 @@ export interface KYCPersonalDetails {
 export interface KYCSubmissionDto {
   personalDetails: KYCPersonalDetails;
   addressDocumentUrl?: string;
+  passportPhotoUrl?: string;
 }
 
 // --- FORM STATE TYPES ---
