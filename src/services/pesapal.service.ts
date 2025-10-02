@@ -28,6 +28,7 @@ export class PesapalService {
   private credentials: PesapalCredentials = {};
   private ipnRegistration: IPNRegistration | null = null;
   private ipnRegistrationPromise: Promise<string> | null = null;
+  private authPromise: Promise<string | null> | null = null;
 
   constructor(config: PesapalConfig) {
     this.config = config;
@@ -41,9 +42,7 @@ export class PesapalService {
       }
     });
 
-    // Request interceptor for authentication
     this.client.interceptors.request.use(async (config) => {
-      // Skip auth for token endpoint
       if (config.url?.includes('/api/Auth/RequestToken')) {
         return config;
       }
@@ -56,17 +55,21 @@ export class PesapalService {
       return config;
     });
 
-    // Response interceptor for error handling
     this.client.interceptors.response.use(
       (response) => response,
       async (error: AxiosError) => {
         if (error.response?.status === 401) {
-          // Token expired, refresh and retry
+          console.log('[PESAPAL] 401 error - clearing credentials and retrying');
           this.credentials = {};
-          const token = await this.getValidToken();
-          if (token && error.config) {
-            error.config.headers.Authorization = `Bearer ${token}`;
-            return this.client.request(error.config);
+          this.authPromise = null;
+          
+          if (error.config && !error.config.headers['X-Retry']) {
+            const token = await this.getValidToken();
+            if (token) {
+              error.config.headers.Authorization = `Bearer ${token}`;
+              error.config.headers['X-Retry'] = 'true';
+              return this.client.request(error.config);
+            }
           }
         }
         return Promise.reject(error);
@@ -76,16 +79,38 @@ export class PesapalService {
 
   // === AUTHENTICATION ===
   
-  private async getValidToken(): Promise<any | null> {
+  private async getValidToken(): Promise<string | null> {
     try {
-      // Check if current token is still valid
+      if (this.authPromise) {
+        return await this.authPromise;
+      }
+
       if (this.credentials.accessToken && this.credentials.expiresAt) {
-        if (Date.now() < this.credentials.expiresAt - 60000) { // 1 minute buffer
+        if (Date.now() < this.credentials.expiresAt - 60000) {
           return this.credentials.accessToken;
         }
       }
 
-      // Get new token
+      this.authPromise = this.fetchNewToken();
+      
+      try {
+        const token = await this.authPromise;
+        return token;
+      } finally {
+        this.authPromise = null;
+      }
+
+    } catch (error: any) {
+      this.authPromise = null;
+      console.error('Pesapal authentication failed:', error.response?.data || error.message);
+      return null;
+    }
+  }
+
+  private async fetchNewToken(): Promise<string | null> {
+    try {
+      console.log('[PESAPAL] Fetching new authentication token...');
+      
       const authData: PesapalAuthRequest = {
         consumer_key: this.config.consumerKey,
         consumer_secret: this.config.consumerSecret
@@ -98,12 +123,17 @@ export class PesapalService {
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json'
-          }
+          },
+          timeout: this.config.timeout
         }
       );
 
       if (response.data.error) {
         throw new Error(`Pesapal auth error: ${response.data.error.message}`);
+      }
+
+      if (!response.data.token) {
+        throw new Error('No token received from Pesapal');
       }
 
       const expiresAt = new Date(response.data.expiryDate).getTime();
@@ -113,10 +143,23 @@ export class PesapalService {
         expiresAt
       };
 
+      console.log('[PESAPAL] ✅ Authentication successful. Token expires:', new Date(expiresAt).toISOString());
+
       return this.credentials.accessToken;
     } catch (error: any) {
-      console.error('Pesapal authentication failed:', error.response?.data || error.message);
-      return null;
+      console.error('[PESAPAL] ❌ Authentication failed:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      
+      this.credentials = {};
+      
+      throw new Error(
+        error.response?.data?.error?.message || 
+        error.message || 
+        'Failed to authenticate with Pesapal'
+      );
     }
   }
 
@@ -124,37 +167,40 @@ export class PesapalService {
   
   private async getValidIPNId(): Promise<string> {
     try {
-      // If we already have a registration request in progress, wait for it
       if (this.ipnRegistrationPromise) {
         return await this.ipnRegistrationPromise;
       }
 
-      // Check if current IPN registration is still valid
       if (this.ipnRegistration && this.isIPNValid(this.ipnRegistration)) {
         return this.ipnRegistration.ipn_id;
       }
 
-      // Create a new registration promise to prevent multiple concurrent registrations
       this.ipnRegistrationPromise = this.registerIPNUrl();
       
       try {
         const ipnId = await this.ipnRegistrationPromise;
         return ipnId;
       } finally {
-        // Clear the promise once completed (success or failure)
         this.ipnRegistrationPromise = null;
       }
     } catch (error: any) {
-      console.error('Failed to get valid IPN ID:', error);
+      console.error('[PESAPAL] Failed to get valid IPN ID:', error);
       throw new Error(`IPN registration failed: ${error.message}`);
     }
   }
 
   private async registerIPNUrl(): Promise<string> {
     try {
-      console.log('Registering IPN URL with Pesapal...');
+      console.log('[PESAPAL] Registering IPN URL with Pesapal...');
       
-      const ipnUrl = this.config.callbackUrl.replace('/callback', '/ipn'); // Use IPN-specific endpoint
+      const token = await this.getValidToken();
+      if (!token) {
+        throw new Error('Failed to obtain authentication token for IPN registration');
+      }
+      
+      const ipnUrl = this.config.callbackUrl.replace('/callback', '/ipn');
+      
+      console.log('[PESAPAL] IPN URL:', ipnUrl);
       
       const registrationData = {
         url: ipnUrl,
@@ -162,6 +208,11 @@ export class PesapalService {
       };
 
       const response = await this.client.post('/api/URLSetup/RegisterIPN', registrationData);
+
+      console.log('[PESAPAL] IPN registration response:', {
+        status: response.status,
+        data: response.data
+      });
 
       if (response.data.error) {
         throw new Error(`IPN registration error: ${response.data.error.message}`);
@@ -171,7 +222,6 @@ export class PesapalService {
         throw new Error('IPN registration did not return an IPN ID');
       }
 
-      // Cache the registration
       this.ipnRegistration = {
         ipn_id: response.data.ipn_id,
         url: ipnUrl,
@@ -179,11 +229,19 @@ export class PesapalService {
         expires_at: response.data.expires_at ? new Date(response.data.expires_at) : undefined
       };
 
-      console.log(`IPN URL registered successfully. IPN ID: ${response.data.ipn_id}`);
+      console.log(`[PESAPAL] ✅ IPN URL registered successfully. IPN ID: ${response.data.ipn_id}`);
       
       return response.data.ipn_id;
     } catch (error: any) {
-      console.error('IPN registration failed:', error);
+      console.error('[PESAPAL] ❌ IPN registration failed:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        url: error.config?.url
+      });
+      
+      this.ipnRegistration = null;
+      
       throw new Error(
         error.response?.data?.error?.message || 
         error.message || 
@@ -193,15 +251,13 @@ export class PesapalService {
   }
 
   private isIPNValid(registration: IPNRegistration): boolean {
-    // Check if registration is recent (valid for 24 hours)
-    const maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    const maxAge = 24 * 60 * 60 * 1000;
     const age = Date.now() - registration.registered_at.getTime();
     
     if (age > maxAge) {
       return false;
     }
 
-    // Check if it has an expiry date and it's still valid
     if (registration.expires_at) {
       return registration.expires_at.getTime() > Date.now();
     }
@@ -214,7 +270,7 @@ export class PesapalService {
       const response = await this.client.get('/api/URLSetup/GetIpnList');
       return response.data || [];
     } catch (error: any) {
-      console.error('Failed to get registered IPNs:', error);
+      console.error('[PESAPAL] Failed to get registered IPNs:', error);
       return [];
     }
   }
@@ -223,16 +279,14 @@ export class PesapalService {
   
   async createCheckout(request: PesapalCheckoutRequest): Promise<PesapalCheckoutResponse> {
     try {
-      // Ensure we have a valid IPN ID
       const ipnId = await this.getValidIPNId();
       
-      // Add the IPN ID to the request
       const checkoutRequestWithIPN = {
         ...request,
         notification_id: ipnId
       };
 
-      console.log('Creating Pesapal checkout with IPN ID:', ipnId);
+      console.log('[PESAPAL] Creating checkout with IPN ID:', ipnId);
 
       const response = await this.client.post<PesapalCheckoutResponse>(
         '/api/Transactions/SubmitOrderRequest',
@@ -245,7 +299,11 @@ export class PesapalService {
 
       return response.data;
     } catch (error: any) {
-      console.error('Pesapal checkout failed:', error);
+      console.error('[PESAPAL] Checkout failed:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
       throw new Error(
         error.response?.data?.error?.message || 
         error.message || 
@@ -254,17 +312,25 @@ export class PesapalService {
     }
   }
 
-  // === TRANSACTION STATUS ===
+  // === TRANSACTION STATUS (FIXED) ===
   
   async getTransactionStatus(orderTrackingId: string): Promise<PesapalTransactionStatus> {
     try {
+      console.log(`[PESAPAL] Fetching status for tracking ID: ${orderTrackingId}`);
+      
       const response = await this.client.get<PesapalTransactionStatus>(
         `/api/Transactions/GetTransactionStatus?orderTrackingId=${orderTrackingId}`
       );
 
+      console.log('[PESAPAL] Status response:', {
+        payment_status_description: response.data.payment_status_description,
+        status_code: response.data.status_code,
+        merchant_reference: response.data.merchant_reference
+      });
+
       return response.data;
     } catch (error: any) {
-      console.error('Get transaction status failed:', error);
+      console.error('[PESAPAL] Get transaction status failed:', error);
       throw new Error(
         error.response?.data?.error?.message || 
         error.message || 
@@ -288,7 +354,7 @@ export class PesapalService {
 
       return response.data;
     } catch (error: any) {
-      console.error('Pesapal payout failed:', error);
+      console.error('[PESAPAL] Payout failed:', error);
       throw new Error(
         error.response?.data?.error?.message || 
         error.message || 
@@ -305,7 +371,7 @@ export class PesapalService {
 
       return response.data;
     } catch (error: any) {
-      console.error('Get payout status failed:', error);
+      console.error('[PESAPAL] Get payout status failed:', error);
       throw new Error(
         error.response?.data?.error?.message || 
         error.message || 
@@ -337,9 +403,9 @@ export class PesapalService {
 
       return response.data;
     } catch (error: any) {
-      console.error('Pesapal refund failed:', error);
+      console.error('[PESAPAL] Refund failed:', error);
       throw new Error(
-        error.response?.data?.error?.message || 
+        error.response?.data?.error|| error.message || 
         error.message || 
         'Refund request failed'
       );
@@ -360,7 +426,7 @@ export class PesapalService {
         Buffer.from(expectedSignature, 'hex')
       );
     } catch (error) {
-      console.error('Webhook validation failed:', error);
+      console.error('[PESAPAL] Webhook validation failed:', error);
       return false;
     }
   }
@@ -379,7 +445,6 @@ export class PesapalService {
     provider?: string;
     errors?: string[];
   } {
-    // Rwanda phone number validation
     if (countryCode === 'RW') {
       const cleanPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
       const rwandaRegex = /^(\+250|250|0)?(7[0-9]{8})$/;
@@ -395,9 +460,8 @@ export class PesapalService {
       const nationalNumber = match[2];
       const formattedNumber = '250' + nationalNumber;
 
-      // Determine provider based on prefix
       let provider: string;
-      const prefix = nationalNumber.substring(1, 3); // Get 2nd and 3rd digits
+      const prefix = nationalNumber.substring(1, 3);
 
       if (['70', '71', '72', '73'].includes(prefix)) {
         provider = 'MTN';
@@ -429,7 +493,6 @@ export class PesapalService {
     isValid: boolean;
     errors?: string[];
   } {
-    // Basic bank account validation
     if (!accountNumber || accountNumber.length < 8 || accountNumber.length > 20) {
       return {
         isValid: false,
@@ -455,96 +518,113 @@ export class PesapalService {
   }
 
   formatAmount(amount: number): number {
-    // Ensure amount has max 2 decimal places
     return Math.round(amount * 100) / 100;
   }
 
-  mapPesapalStatusToEscrowStatus(pesapalStatus: string): string {
-    switch (pesapalStatus.toUpperCase()) {
-      case 'PENDING':
-        return 'PENDING';
-      case 'COMPLETED':
-        return 'HELD';
-      case 'FAILED':
-      case 'INVALID':
-        return 'FAILED';
-      case 'REVERSED':
-        return 'REFUNDED';
-      default:
-        return 'PENDING';
-    }
-  }
-
-  // === ERROR HANDLING ===
+  // === STATUS MAPPING (FIXED) ===
   
-  private handlePesapalError(error: any): Error {
-    if (error.response?.data?.error) {
-      const pesapalError = error.response.data.error;
-      return new Error(`Pesapal API Error (${pesapalError.code}): ${pesapalError.message}`);
-    }
-    
-    if (error.response?.status === 401) {
-      return new Error('Pesapal authentication failed');
-    }
-    
-    if (error.response?.status === 429) {
-      return new Error('Pesapal rate limit exceeded. Please try again later');
-    }
-    
-    if (error.response?.status >= 500) {
-      return new Error('Pesapal service temporarily unavailable');
-    }
-    
-    return new Error(error.message || 'Unknown Pesapal error');
-  }
+  /**
+   * Maps Pesapal payment status to escrow status
+   * Pesapal status codes:
+   * 0 = INVALID
+   * 1 = COMPLETED
+   * 2 = FAILED
+   * 3 = REVERSED
+   */
+  mapPesapalStatusToEscrowStatus(pesapalResponse: PesapalTransactionStatus | any): string {
+    // Try to get status from different possible fields
+    const statusCode = pesapalResponse.status_code;
+    const paymentStatusDescription = pesapalResponse.payment_status_description;
+    const status = pesapalResponse.status;
 
-  // === HEALTH CHECK ===
-  
-  async healthCheck(): Promise<{ healthy: boolean; message?: string; ipnStatus?: string }> {
-    try {
-      const token = await this.getValidToken();
+    console.log('[PESAPAL] Mapping status:', {
+      status_code: statusCode,
+      payment_status_description: paymentStatusDescription,
+      status: status
+    });
+
+    // Priority 1: Check status_code (most reliable)
+    if (typeof statusCode === 'number') {
+      switch (statusCode) {
+        case 0:
+          return 'FAILED'; // INVALID
+        case 1:
+          return 'HELD'; // COMPLETED - funds in escrow
+        case 2:
+          return 'FAILED'; // FAILED
+        case 3:
+          return 'REFUNDED'; // REVERSED
+        default:
+          console.warn(`[PESAPAL] Unknown status_code: ${statusCode}`);
+          return 'PENDING';
+      }
+    }
+
+    // Priority 2: Check payment_status_description
+    if (paymentStatusDescription) {
+      const statusUpper = paymentStatusDescription.toUpperCase();
       
-      if (!token) {
-        return {
-          healthy: false,
-          message: 'Authentication failed'
-        };
+      if (statusUpper.includes('COMPLETED') || statusUpper.includes('SUCCESS')) {
+        return 'HELD';
       }
-
-      // Check IPN status
-      let ipnStatus = 'unknown';
-      try {
-        await this.getValidIPNId();
-        ipnStatus = 'registered';
-      } catch (error) {
-        ipnStatus = 'failed';
+      
+      if (statusUpper.includes('FAILED') || statusUpper.includes('INVALID')) {
+        return 'FAILED';
       }
-
-      return {
-        healthy: true,
-        message: 'Pesapal service is healthy',
-        ipnStatus
-      };
-    } catch (error: any) {
-      return {
-        healthy: false,
-        message: error.message || 'Health check failed'
-      };
+      
+      if (statusUpper.includes('REVERSED') || statusUpper.includes('REFUND')) {
+        return 'REFUNDED';
+      }
+      
+      if (statusUpper.includes('PENDING')) {
+        return 'PENDING';
+      }
     }
+
+    // Priority 3: Check status field (least reliable, might be HTTP status)
+    if (status) {
+      const statusUpper = status.toString().toUpperCase();
+      
+      // Ignore HTTP status codes (200, 201, etc.)
+      if (!/^\d+$/.test(status) || parseInt(status) < 100) {
+        if (statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS') {
+          return 'HELD';
+        }
+        
+        if (statusUpper === 'FAILED' || statusUpper === 'INVALID') {
+          return 'FAILED';
+        }
+        
+        if (statusUpper === 'REVERSED' || statusUpper === 'REFUNDED') {
+          return 'REFUNDED';
+        }
+        
+        if (statusUpper === 'PENDING') {
+          return 'PENDING';
+        }
+      }
+    }
+
+    // Default to PENDING if we can't determine status
+    console.warn('[PESAPAL] Could not determine payment status, defaulting to PENDING');
+    return 'PENDING';
   }
 
-  // === MANUAL IPN MANAGEMENT (for debugging) ===
-  
   async forceRegisterIPN(): Promise<string> {
-    // Clear cached registration
     this.ipnRegistration = null;
-    this.ipnRegistrationPromise = null;
-    
-    // Force re-registration
     return await this.getValidIPNId();
   }
 
   getCurrentIPNInfo(): IPNRegistration | null {
     return this.ipnRegistration;
+  }
+
+  async healthCheck(): Promise<boolean> {
+    try {
+      const token = await this.getValidToken();
+      return !!token;
+    } catch {
+      return false;
+    }
   }
 }

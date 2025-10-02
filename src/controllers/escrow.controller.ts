@@ -1,5 +1,4 @@
 // controllers/escrow.controller.ts
-
 import { Request, Response } from 'express';
 import { EscrowService } from '../services/escrow.service';
 import { PesapalService } from '../services/pesapal.service';
@@ -8,154 +7,437 @@ import {
   ReleaseEscrowDto,
   WithdrawDto,
   RefundDto,
-  EscrowApiResponse,
-  EscrowSuccessResponse,
-  EscrowErrorResponse,
-  PesapalWebhookData,
   EscrowTransactionStatus,
   EscrowTransactionType
 } from '../types/pesapal.types';
+import { PrismaClient } from '@prisma/client';
 
-interface AuthenticatedRequest extends Request {
-  user?: {
-    userId: string;
-    email: string;
-    firstName?: string;
-    lastName?: string;
-  };
-}
+const prisma = new PrismaClient();
 
 export class EscrowController {
-  private escrowService: EscrowService;
-  private pesapalService: PesapalService;
+  constructor(
+    private escrowService: EscrowService,
+    private pesapalService: PesapalService
+  ) {}
 
-  constructor(escrowService: EscrowService, pesapalService: PesapalService) {
-    this.escrowService = escrowService;
-    this.pesapalService = pesapalService;
-  }
+  // ==================== USER OPERATIONS ====================
 
-  // === DEPOSIT OPERATIONS ===
-
-  createDeposit = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  /**
+   * Create a new deposit (payment into escrow)
+   * POST /api/escrow/deposits
+   */
+  createDeposit = async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.user!.userId);
-      const depositData: CreateDepositDto = req.body;
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'User authentication required'
+          }
+        });
+      }
 
+      const depositData: CreateDepositDto = req.body;
+      
       const result = await this.escrowService.createDeposit(userId, depositData);
 
-      const response: EscrowSuccessResponse = {
+      res.status(201).json({
         success: true,
         data: {
           transaction: result.transaction,
           checkoutUrl: result.checkoutUrl
         },
-        message: 'Deposit created successfully. Please complete payment.'
-      };
+        message: 'Deposit created successfully. Complete payment at the checkout URL.'
+      });
 
-      res.status(201).json(response);
     } catch (error: any) {
-      console.error('Create deposit controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      console.error('[CONTROLLER] Create deposit error:', error);
+      res.status(error.code === 'VALIDATION_ERROR' ? 400 : 500).json({
         success: false,
         error: {
-          code: 'DEPOSIT_CREATION_FAILED',
+          code: error.code || 'CREATE_DEPOSIT_FAILED',
           message: error.message || 'Failed to create deposit',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(400).json(errorResponse);
+      });
     }
   };
 
-  // === RELEASE OPERATIONS ===
+  // In escrow.controller.ts, add this method:
 
-  releaseEscrow = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  getTransactionByReference = async (req: Request, res: Response): Promise<void> => {
     try {
+      const { reference } = req.params;
+      
+      console.log(`[ESCROW] Fetching transaction by reference: ${reference}`);
+      
+      const transaction = await prisma.escrowTransaction.findFirst({
+        where: { reference },
+        include: {
+          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+        }
+      });
+      
+      if (!transaction) {
+        res.status(404).json({
+          success: false,
+          error: {
+            code: 'TRANSACTION_NOT_FOUND',
+            message: 'Transaction not found',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+      
+      // If transaction is still pending, check Pesapal for latest status
+      if (transaction.status === 'PENDING' && transaction.externalId) {
+        try {
+          const pesapalStatus = await this.pesapalService.getTransactionStatus(
+            transaction.externalId
+          );
+          
+          const newStatus = this.pesapalService.mapPesapalStatusToEscrowStatus(
+            pesapalStatus.status
+          );
+          
+          // Update if status changed
+          if (newStatus !== 'PENDING') {
+            await this.escrowService.handlePesapalWebhook({
+              OrderTrackingId: transaction.externalId,
+              OrderMerchantReference: transaction.reference,
+              OrderNotificationType: 'STATUSCHECK'
+            });
+            
+            // Re-fetch updated transaction
+            const updatedTransaction = await prisma.escrowTransaction.findFirst({
+              where: { reference },
+              include: {
+                user: { select: { id: true, email: true, firstName: true, lastName: true } },
+                recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+              }
+            });
+            
+            res.json({
+              success: true,
+              data: this.transformTransaction(updatedTransaction!)
+            });
+            return;
+          }
+        } catch (error) {
+          console.error('[ESCROW] Error checking Pesapal status:', error);
+          // Continue with current status
+        }
+      }
+      
+      res.json({
+        success: true,
+        data: this.transformTransaction(transaction)
+      });
+      
+    } catch (error: any) {
+      console.error('[ESCROW] Error fetching transaction:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'FETCH_FAILED',
+          message: error.message || 'Failed to fetch transaction',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  };
+    checkTransactionStatus = async (req: Request, res: Response) => {
+    try {
+      const { transactionId } = req.params;
+      
+      console.log(`[CONTROLLER] Manual status check for transaction: ${transactionId}`);
+
+      // Get transaction
+      const transaction = await prisma.escrowTransaction.findUnique({
+        where: { id: transactionId },
+        include: {
+          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+        }
+      });
+
+      if (!transaction) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'TRANSACTION_NOT_FOUND',
+            message: 'Transaction not found'
+          }
+        });
+      }
+
+      // Check if user has access to this transaction
+      const userId = (req as any).user?.userId;
+      if (userId && transaction.userId !== userId && transaction.recipientId !== userId) {
+        // Admin can check any transaction
+        const isAdmin = (req as any).user?.role === 'admin';
+        if (!isAdmin) {
+          return res.status(403).json({
+            success: false,
+            error: {
+              code: 'ACCESS_DENIED',
+              message: 'You do not have access to this transaction'
+            }
+          });
+        }
+      }
+
+      if (!transaction.externalId) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'NO_TRACKING_ID',
+            message: 'Transaction does not have a Pesapal tracking ID'
+          }
+        });
+      }
+
+      // Get latest status from Pesapal
+      console.log(`[CONTROLLER] Fetching status from Pesapal: ${transaction.externalId}`);
+      const statusResponse = await this.pesapalService.getTransactionStatus(
+        transaction.externalId
+      );
+
+      // Map to escrow status
+      const newStatus = this.pesapalService.mapPesapalStatusToEscrowStatus(statusResponse);
+
+      console.log(`[CONTROLLER] Status check result: ${transaction.status} → ${newStatus}`);
+
+      // If status changed, update via webhook handler
+      if (newStatus !== transaction.status) {
+        await this.escrowService.handlePesapalWebhook({
+          OrderTrackingId: transaction.externalId,
+          OrderMerchantReference: transaction.reference,
+          OrderNotificationType: 'MANUAL_CHECK'
+        });
+
+        // Fetch updated transaction
+        const updatedTransaction = await prisma.escrowTransaction.findUnique({
+          where: { id: transactionId },
+          include: {
+            user: { select: { id: true, email: true, firstName: true, lastName: true } },
+            recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+          }
+        });
+
+        res.json({
+          success: true,
+          data: {
+            transaction: this.transformTransaction(updatedTransaction!),
+            statusChanged: true,
+            oldStatus: transaction.status,
+            newStatus: updatedTransaction!.status,
+            pesapalDetails: {
+              payment_status: statusResponse.payment_status_description,
+              status_code: statusResponse.status_code,
+              confirmation_code: statusResponse.confirmation_code
+            }
+          },
+          message: `Status updated from ${transaction.status} to ${updatedTransaction!.status}`
+        });
+      } else {
+        res.json({
+          success: true,
+          data: {
+            transaction: this.transformTransaction(transaction),
+            statusChanged: false,
+            currentStatus: transaction.status,
+            pesapalDetails: {
+              payment_status: statusResponse.payment_status_description,
+              status_code: statusResponse.status_code,
+              confirmation_code: statusResponse.confirmation_code
+            }
+          },
+          message: 'Transaction status is up to date'
+        });
+      }
+
+    } catch (error: any) {
+      console.error('[CONTROLLER] Check status error:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'STATUS_CHECK_FAILED',
+          message: error.message || 'Failed to check transaction status',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  };
+
+  private transformTransaction(transaction: any) {
+    const metadata = JSON.parse(transaction.metadata || '{}');
+    
+    return {
+      id: transaction.id,
+      reference: transaction.reference,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      status: transaction.status,
+      description: transaction.description,
+      type: transaction.type,
+      createdAt: transaction.createdAt,
+      updatedAt: transaction.updatedAt,
+      fundedAt: transaction.fundedAt,
+      releasedAt: transaction.releasedAt,
+      refundedAt: transaction.refundedAt,
+      cancelledAt: transaction.cancelledAt,
+      cancellationReason: transaction.cancellationReason,
+      splitAmounts: metadata.splitAmounts,
+      guest: transaction.user ? {
+        firstName: transaction.user.firstName,
+        lastName: transaction.user.lastName,
+        email: transaction.user.email
+      } : null,
+      host: transaction.recipient ? {
+        firstName: transaction.recipient.firstName,
+        lastName: transaction.recipient.lastName,
+        email: transaction.recipient.email
+      } : null
+    };
+  }
+
+  checkStatusByReference = async (req: Request, res: Response) => {
+    try {
+      const { reference } = req.params;
+      
+      console.log(`[CONTROLLER] Status check by reference: ${reference}`);
+
+      // Find transaction
+      const transaction = await prisma.escrowTransaction.findFirst({
+        where: { reference },
+        include: {
+          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+        }
+      });
+
+      if (!transaction) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'TRANSACTION_NOT_FOUND',
+            message: 'Transaction not found'
+          }
+        });
+      }
+
+      if (!transaction.externalId) {
+        return res.json({
+          success: true,
+          data: {
+            transaction: this.transformTransaction(transaction),
+            statusChanged: false,
+            message: 'Transaction does not have tracking ID yet'
+          }
+        });
+      }
+
+      // Get latest status from Pesapal
+      const statusResponse = await this.pesapalService.getTransactionStatus(
+        transaction.externalId
+      );
+
+      // Map to escrow status
+      const newStatus = this.pesapalService.mapPesapalStatusToEscrowStatus(statusResponse);
+
+      // If status changed, update via webhook handler
+      if (newStatus !== transaction.status) {
+        await this.escrowService.handlePesapalWebhook({
+          OrderTrackingId: transaction.externalId,
+          OrderMerchantReference: transaction.reference,
+          OrderNotificationType: 'REFERENCE_CHECK'
+        });
+
+        // Fetch updated transaction
+        const updatedTransaction = await prisma.escrowTransaction.findFirst({
+          where: { reference },
+          include: {
+            user: { select: { id: true, email: true, firstName: true, lastName: true } },
+            recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+          }
+        });
+
+        res.json({
+          success: true,
+          data: {
+            transaction: this.transformTransaction(updatedTransaction!),
+            statusChanged: true,
+            oldStatus: transaction.status,
+            newStatus: updatedTransaction!.status
+          }
+        });
+      } else {
+        res.json({
+          success: true,
+          data: {
+            transaction: this.transformTransaction(transaction),
+            statusChanged: false
+          }
+        });
+      }
+
+    } catch (error: any) {
+      console.error('[CONTROLLER] Check status by reference error:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'STATUS_CHECK_FAILED',
+          message: error.message || 'Failed to check transaction status',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  };
+  /**
+   * Release escrow funds to recipient
+   * POST /api/escrow/transactions/:transactionId/release
+   */
+  releaseEscrow = async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user?.userId;
       const { transactionId } = req.params;
       const releaseData: ReleaseEscrowDto = req.body;
 
-      // Verify user has permission to release this escrow
-      const transaction = await this.escrowService.getEscrowTransactionById(transactionId);
-      
-      const userId = parseInt(req.user!.userId);
-      
-      // Only the guest (payer) or admin can release escrow
-      if (transaction.guestId !== userId && !this.isAdmin(userId)) {
-        const errorResponse: EscrowErrorResponse = {
-          success: false,
-          error: {
-            code: 'UNAUTHORIZED_RELEASE',
-            message: 'You are not authorized to release this escrow',
-            timestamp: new Date().toISOString()
-          }
-        };
-        
-        res.status(403).json(errorResponse);
-        return;
-      }
+      const transaction = await this.escrowService.releaseEscrow(
+        transactionId,
+        releaseData,
+        userId
+      );
 
-      const releasedTransaction = await this.escrowService.releaseEscrow(transactionId, releaseData);
-
-      const response: EscrowSuccessResponse = {
+      res.status(200).json({
         success: true,
-        data: releasedTransaction,
+        data: transaction,
         message: 'Escrow funds released successfully'
-      };
+      });
 
-      res.status(200).json(response);
     } catch (error: any) {
-      console.error('Release escrow controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      console.error('[CONTROLLER] Release escrow error:', error);
+      res.status(error.code === 'VALIDATION_ERROR' ? 400 : 500).json({
         success: false,
         error: {
-          code: 'ESCROW_RELEASE_FAILED',
+          code: error.code || 'RELEASE_FAILED',
           message: error.message || 'Failed to release escrow',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(400).json(errorResponse);
+      });
     }
   };
 
-  // === WITHDRAWAL OPERATIONS ===
-
-  createWithdrawal = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const userId = parseInt(req.user!.userId);
-      const withdrawData: WithdrawDto = req.body;
-
-      const withdrawal = await this.escrowService.createWithdrawal(userId, withdrawData);
-
-      const response: EscrowSuccessResponse = {
-        success: true,
-        data: withdrawal,
-        message: 'Withdrawal request created successfully'
-      };
-
-      res.status(201).json(response);
-    } catch (error: any) {
-      console.error('Create withdrawal controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
-        success: false,
-        error: {
-          code: 'WITHDRAWAL_CREATION_FAILED',
-          message: error.message || 'Failed to create withdrawal',
-          timestamp: new Date().toISOString()
-        }
-      };
-
-      res.status(400).json(errorResponse);
-    }
-  };
-
-  // === REFUND OPERATIONS ===
-
-  processRefund = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  /**
+   * Process refund
+   * POST /api/escrow/transactions/:transactionId/refund
+   */
+  processRefund = async (req: Request, res: Response) => {
     try {
       const { transactionId } = req.params;
       const refundData: RefundDto = {
@@ -163,178 +445,288 @@ export class EscrowController {
         ...req.body
       };
 
-      // Verify user has permission to refund this transaction
-      const transaction = await this.escrowService.getEscrowTransactionById(transactionId);
-      
-      const userId = parseInt(req.user!.userId);
-      
-      // Only the host (service provider) or admin can initiate refunds
-      if (transaction.hostId !== userId && !this.isAdmin(userId)) {
-        const errorResponse: EscrowErrorResponse = {
-          success: false,
-          error: {
-            code: 'UNAUTHORIZED_REFUND',
-            message: 'You are not authorized to refund this transaction',
-            timestamp: new Date().toISOString()
-          }
-        };
-        
-        res.status(403).json(errorResponse);
-        return;
-      }
+      const transaction = await this.escrowService.processRefund(refundData);
 
-      const refundedTransaction = await this.escrowService.processRefund(refundData);
-
-      const response: EscrowSuccessResponse = {
+      res.status(200).json({
         success: true,
-        data: refundedTransaction,
+        data: transaction,
         message: 'Refund processed successfully'
-      };
+      });
 
-      res.status(200).json(response);
     } catch (error: any) {
-      console.error('Process refund controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      console.error('[CONTROLLER] Process refund error:', error);
+      res.status(error.code === 'VALIDATION_ERROR' ? 400 : 500).json({
         success: false,
         error: {
-          code: 'REFUND_PROCESSING_FAILED',
+          code: error.code || 'REFUND_FAILED',
           message: error.message || 'Failed to process refund',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(400).json(errorResponse);
+      });
     }
   };
 
-  // === TRANSACTION QUERIES ===
-
-  getTransaction = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  /**
+   * Create withdrawal request
+   * POST /api/escrow/withdrawals
+   */
+  createWithdrawal = async (req: Request, res: Response) => {
     try {
+      const userId = (req as any).user?.userId;
+      const withdrawData: WithdrawDto = req.body;
+
+      const withdrawal = await this.escrowService.createWithdrawal(userId, withdrawData);
+
+      res.status(201).json({
+        success: true,
+        data: withdrawal,
+        message: 'Withdrawal request created successfully'
+      });
+
+    } catch (error: any) {
+      console.error('[CONTROLLER] Create withdrawal error:', error);
+      res.status(error.code === 'VALIDATION_ERROR' ? 400 : 500).json({
+        success: false,
+        error: {
+          code: error.code || 'WITHDRAWAL_FAILED',
+          message: error.message || 'Failed to create withdrawal',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  };
+
+  /**
+   * Get specific transaction
+   * GET /api/escrow/transactions/:transactionId
+   */
+  getTransaction = async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user?.userId;
       const { transactionId } = req.params;
-      const userId = parseInt(req.user!.userId);
 
       const transaction = await this.escrowService.getEscrowTransactionById(transactionId);
 
       // Verify user has access to this transaction
-      if (transaction.guestId !== userId && 
-          transaction.hostId !== userId && 
-          transaction.agentId !== userId && 
-          !this.isAdmin(userId)) {
-        const errorResponse: EscrowErrorResponse = {
+      if (transaction.guestId !== userId && transaction.hostId !== userId) {
+        return res.status(403).json({
           success: false,
           error: {
-            code: 'TRANSACTION_NOT_FOUND',
-            message: 'Transaction not found',
-            timestamp: new Date().toISOString()
+            code: 'ACCESS_DENIED',
+            message: 'You do not have access to this transaction'
           }
-        };
-        
-        res.status(404).json(errorResponse);
-        return;
+        });
       }
 
-      const response: EscrowSuccessResponse = {
+      res.status(200).json({
         success: true,
-        data: transaction,
-        message: 'Transaction retrieved successfully'
-      };
+        data: transaction
+      });
 
-      res.status(200).json(response);
     } catch (error: any) {
-      console.error('Get transaction controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      console.error('[CONTROLLER] Get transaction error:', error);
+      res.status(error.message?.includes('not found') ? 404 : 500).json({
         success: false,
         error: {
-          code: 'TRANSACTION_RETRIEVAL_FAILED',
-          message: error.message || 'Failed to retrieve transaction',
+          code: 'TRANSACTION_NOT_FOUND',
+          message: error.message || 'Failed to get transaction',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(500).json(errorResponse);
+      });
     }
   };
 
-  getUserTransactions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  /**
+   * Get user's transactions with filters
+   * GET /api/escrow/transactions
+   */
+  getUserTransactions = async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.user!.userId);
-      const status = req.query.status as EscrowTransactionStatus | undefined;
-      const type = req.query.type as EscrowTransactionType | undefined;
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 20;
+      const userId = (req as any).user?.userId;
+      const {
+        status,
+        type,
+        page,
+        limit,
+        startDate,
+        endDate
+      } = req.query;
 
-      const result = await this.escrowService.getUserEscrowTransactions(
-        userId, 
-        status, 
-        type, 
-        page, 
-        limit
-      );
+      const result = await this.escrowService.getUserEscrowTransactions(userId, {
+        status: status as EscrowTransactionStatus,
+        type: type as EscrowTransactionType,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined
+      });
 
-      const response: EscrowSuccessResponse = {
+      res.status(200).json({
         success: true,
-        data: result,
-        message: 'User transactions retrieved successfully'
-      };
+        data: result.transactions,
+        pagination: result.pagination
+      });
 
-      res.status(200).json(response);
     } catch (error: any) {
-      console.error('Get user transactions controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      console.error('[CONTROLLER] Get user transactions error:', error);
+      res.status(500).json({
         success: false,
         error: {
-          code: 'USER_TRANSACTIONS_RETRIEVAL_FAILED',
-          message: error.message || 'Failed to retrieve user transactions',
+          code: 'FETCH_TRANSACTIONS_FAILED',
+          message: error.message || 'Failed to fetch transactions',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(500).json(errorResponse);
+      });
     }
   };
 
-  // === WALLET OPERATIONS ===
-
-  getUserWallet = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  /**
+   * Get user's wallet
+   * GET /api/escrow/wallet
+   */
+  getUserWallet = async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.user!.userId);
+      const userId = (req as any).user?.userId;
 
       const wallet = await this.escrowService.getUserWallet(userId);
 
-      const response: EscrowSuccessResponse = {
+      res.status(200).json({
         success: true,
-        data: wallet,
-        message: 'Wallet retrieved successfully'
-      };
+        data: wallet
+      });
 
-      res.status(200).json(response);
     } catch (error: any) {
-      console.error('Get wallet controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      console.error('[CONTROLLER] Get wallet error:', error);
+      res.status(500).json({
         success: false,
         error: {
-          code: 'WALLET_RETRIEVAL_FAILED',
-          message: error.message || 'Failed to retrieve wallet',
+          code: 'WALLET_FETCH_FAILED',
+          message: error.message || 'Failed to fetch wallet',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(500).json(errorResponse);
+      });
     }
   };
 
-  // === WEBHOOK HANDLING ===
+  // ==================== ADMIN OPERATIONS ====================
 
-  handlePesapalWebhook = async (req: Request, res: Response): Promise<void> => {
+  /**
+   * Get all transactions (admin only)
+   * GET /api/escrow/admin/transactions
+   */
+  getAllTransactions = async (req: Request, res: Response) => {
     try {
-      const webhookData: PesapalWebhookData = req.body;
+      const {
+        status,
+        type,
+        page,
+        limit,
+        search
+      } = req.query;
 
-      console.log('Received Pesapal webhook:', JSON.stringify(webhookData, null, 2));
+      const result = await this.escrowService.getAllTransactions({
+        status: status as EscrowTransactionStatus,
+        type: type as EscrowTransactionType,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+        search: search as string
+      });
+
+      res.status(200).json({
+        success: true,
+        data: result.transactions,
+        pagination: result.pagination
+      });
+
+    } catch (error: any) {
+      console.error('[CONTROLLER] Get all transactions error:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'FETCH_TRANSACTIONS_FAILED',
+          message: error.message || 'Failed to fetch transactions',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  };
+
+  /**
+   * Admin release escrow (emergency)
+   * POST /api/escrow/admin/transactions/:transactionId/release
+   */
+  adminReleaseEscrow = async (req: Request, res: Response) => {
+    try {
+      const adminId = (req as any).user?.userId; // ✅ Changed from .id to .userId
+      const { transactionId } = req.params;
+      const releaseData: ReleaseEscrowDto = req.body;
+
+      const transaction = await this.escrowService.releaseEscrow(
+        transactionId,
+        releaseData,
+        adminId
+      );
+
+      res.status(200).json({
+        success: true,
+        data: transaction,
+        message: 'Escrow released by admin'
+      });
+
+    } catch (error: any) {
+      console.error('[CONTROLLER] Admin release error:', error);
+      res.status(error.code === 'VALIDATION_ERROR' ? 400 : 500).json({
+        success: false,
+        error: {
+          code: error.code || 'ADMIN_RELEASE_FAILED',
+          message: error.message || 'Failed to release escrow',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  };
+
+  /**
+   * Get transaction statistics
+   * GET /api/escrow/admin/stats
+   */
+  getTransactionStats = async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.query;
+
+      const stats = await this.escrowService.getTransactionStats(
+        userId ? parseInt(userId as string) : undefined
+      );
+
+      res.status(200).json({
+        success: true,
+        data: stats
+      });
+
+    } catch (error: any) {
+      console.error('[CONTROLLER] Get stats error:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'STATS_FETCH_FAILED',
+          message: error.message || 'Failed to fetch statistics',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  };
+
+  // ==================== WEBHOOK HANDLERS ====================
+
+  /**
+   * Handle Pesapal webhook
+   * POST /api/escrow/webhook/pesapal
+   */
+  handlePesapalWebhook = async (req: Request, res: Response) => {
+    try {
+      console.log('[WEBHOOK] Pesapal webhook received');
+
+      const webhookData = req.body;
 
       await this.escrowService.handlePesapalWebhook(webhookData);
 
@@ -342,355 +734,320 @@ export class EscrowController {
         success: true,
         message: 'Webhook processed successfully'
       });
+
     } catch (error: any) {
-      console.error('Pesapal webhook controller error:', error);
+      console.error('[WEBHOOK] Processing error:', error);
       
-      // Still respond with 200 to prevent Pesapal from retrying
+      // Still return 200 to prevent Pesapal retries
       res.status(200).json({
         success: false,
-        error: 'Webhook processing failed'
+        error: 'Webhook processing failed',
+        note: 'Error logged for investigation'
       });
     }
   };
 
-  // === CALLBACK HANDLING (for Pesapal redirects) ===
-
-  handlePesapalCallback = async (req: Request, res: Response): Promise<void> => {
+  /**
+   * Handle Pesapal callback (user redirect)
+   * GET /api/escrow/callback
+   */
+  handlePesapalCallback = async (req: Request, res: Response) => {
     try {
-      const { OrderTrackingId, OrderMerchantReference } = req.query;
+      const { OrderTrackingId, OrderMerchantReference, Status } = req.query;
 
-      if (!OrderTrackingId || !OrderMerchantReference) {
-        res.redirect(`${process.env.FRONTEND_URL}/payment/error?error=missing_parameters`);
-        return;
+      console.log('[CALLBACK] Payment callback received:', {
+        trackingId: OrderTrackingId,
+        reference: OrderMerchantReference,
+        status: Status
+      });
+
+      // Process webhook data
+      if (OrderTrackingId) {
+        await this.escrowService.handlePesapalWebhook({
+          OrderTrackingId: OrderTrackingId as string,
+          OrderMerchantReference: OrderMerchantReference as string,
+          OrderNotificationType: 'IPNCHANGE'
+        });
       }
 
-      // Get transaction status from Pesapal
-      const status = await this.pesapalService.getTransactionStatus(OrderTrackingId as string);
+      // Redirect to frontend
+      const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+      const status = parseInt(Status as string || '0');
       
-      // Determine redirect URL based on status
-      let redirectUrl: string;
-      
-      if (status.status === 'COMPLETED') {
-        redirectUrl = `${process.env.FRONTEND_URL}/payment/success?reference=${OrderMerchantReference}`;
-      } else if (status.status === 'FAILED' || status.status === 'INVALID') {
-        redirectUrl = `${process.env.FRONTEND_URL}/payment/failed?reference=${OrderMerchantReference}`;
+      if (status === 1) {
+        return res.redirect(`${clientUrl}/payment/success?ref=${OrderMerchantReference}`);
+      } else if (status === 2) {
+        return res.redirect(`${clientUrl}/payment/failed?ref=${OrderMerchantReference}`);
       } else {
-        redirectUrl = `${process.env.FRONTEND_URL}/payment/pending?reference=${OrderMerchantReference}`;
+        return res.redirect(`${clientUrl}/payment/pending?ref=${OrderMerchantReference}`);
       }
 
-      res.redirect(redirectUrl);
     } catch (error: any) {
-      console.error('Pesapal callback error:', error);
-      res.redirect(`${process.env.FRONTEND_URL}/payment/error?error=callback_failed`);
+      console.error('[CALLBACK] Error:', error);
+      const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+      return res.redirect(`${clientUrl}/payment/error`);
     }
   };
 
-  // === HEALTH CHECK ===
+  // ==================== UTILITY ENDPOINTS ====================
 
-  healthCheck = async (req: Request, res: Response): Promise<void> => {
+  /**
+   * Health check
+   * GET /api/escrow/health
+   */
+  healthCheck = async (req: Request, res: Response) => {
     try {
-      const pesapalHealth = await this.pesapalService.healthCheck();
+      const health = await this.escrowService.checkPaymentSystemHealth();
 
-      const health = {
-        success: true,
-        system: 'escrow_payment_system',
-        status: pesapalHealth.healthy ? 'healthy' : 'degraded',
-        services: {
-          pesapal: {
-            status: pesapalHealth.healthy ? 'healthy' : 'unhealthy',
-            message: pesapalHealth.message
-          },
-          database: 'healthy' // Would implement actual DB health check
+      res.status(health.healthy ? 200 : 503).json({
+        success: health.healthy,
+        data: {
+          status: health.healthy ? 'healthy' : 'unhealthy',
+          pesapal: health.pesapalStatus,
+          database: health.databaseStatus,
+          environment: process.env.NODE_ENV || 'development',
+          timestamp: new Date().toISOString()
         },
-        features: {
-          deposits: true,
-          escrow_release: true,
-          withdrawals: true,
-          refunds: true,
-          mobile_money: true,
-          bank_transfers: true
-        },
-        supported_currencies: ['RWF', 'USD', 'UGX', 'TZS', 'KES'],
-        supported_providers: ['MTN', 'AIRTEL', 'TIGO', 'RWANDATEL'],
-        timestamp: new Date().toISOString()
-      };
+        message: health.message
+      });
 
-      res.status(pesapalHealth.healthy ? 200 : 503).json(health);
     } catch (error: any) {
+      console.error('[HEALTH] Check error:', error);
       res.status(503).json({
         success: false,
-        system: 'escrow_payment_system',
-        status: 'unhealthy',
-        error: 'Health check failed',
-        timestamp: new Date().toISOString()
+        error: {
+          code: 'HEALTH_CHECK_FAILED',
+          message: 'Health check failed',
+          timestamp: new Date().toISOString()
+        }
       });
     }
   };
 
-  // === ADMIN OPERATIONS ===
-
-  getAllTransactions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  /**
+   * Get supported currencies
+   * GET /api/escrow/currencies
+   */
+  getSupportedCurrencies = async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.user!.userId);
-      
-      if (!this.isAdmin(userId)) {
-        const errorResponse: EscrowErrorResponse = {
-          success: false,
-          error: {
-            code: 'UNAUTHORIZED_ACCESS',
-            message: 'Admin access required',
-            timestamp: new Date().toISOString()
-          }
-        };
-        
-        res.status(403).json(errorResponse);
-        return;
-      }
+      const currencies = [
+        {
+          code: 'RWF',
+          name: 'Rwandan Franc',
+          symbol: 'FRw',
+          decimals: 0
+        },
+        {
+          code: 'USD',
+          name: 'US Dollar',
+          symbol: '$',
+          decimals: 2
+        },
+        {
+          code: 'UGX',
+          name: 'Ugandan Shilling',
+          symbol: 'UGX',
+          decimals: 0
+        },
+        {
+          code: 'TZS',
+          name: 'Tanzanian Shilling',
+          symbol: 'TZS',
+          decimals: 0
+        },
+        {
+          code: 'KES',
+          name: 'Kenyan Shilling',
+          symbol: 'KSh',
+          decimals: 2
+        }
+      ];
 
-      const status = req.query.status as EscrowTransactionStatus | undefined;
-      const type = req.query.type as EscrowTransactionType | undefined;
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 50;
-
-      // For admin, we can get all transactions regardless of user
-      const result = await this.escrowService.getUserEscrowTransactions(
-        0, // Use 0 to indicate admin query (would need to modify service method)
-        status, 
-        type, 
-        page, 
-        limit
-      );
-
-      const response: EscrowSuccessResponse = {
+      res.status(200).json({
         success: true,
-        data: result,
-        message: 'All transactions retrieved successfully'
-      };
+        data: currencies
+      });
 
-      res.status(200).json(response);
     } catch (error: any) {
-      console.error('Get all transactions controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      res.status(500).json({
         success: false,
         error: {
-          code: 'ALL_TRANSACTIONS_RETRIEVAL_FAILED',
-          message: error.message || 'Failed to retrieve all transactions',
+          code: 'FETCH_CURRENCIES_FAILED',
+          message: 'Failed to fetch currencies',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(500).json(errorResponse);
+      });
     }
   };
 
-  adminReleaseEscrow = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  /**
+   * Get supported mobile providers
+   * GET /api/escrow/mobile-providers
+   */
+  getSupportedMobileProviders = async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.user!.userId);
-      
-      if (!this.isAdmin(userId)) {
-        const errorResponse: EscrowErrorResponse = {
-          success: false,
-          error: {
-            code: 'UNAUTHORIZED_ACCESS',
-            message: 'Admin access required',
-            timestamp: new Date().toISOString()
-          }
-        };
-        
-        res.status(403).json(errorResponse);
-        return;
-      }
+      const providers = [
+        {
+          code: 'MTN',
+          name: 'MTN Mobile Money',
+          countries: ['RW', 'UG'],
+          prefixes: ['70', '71', '72', '73']
+        },
+        {
+          code: 'AIRTEL',
+          name: 'Airtel Money',
+          countries: ['RW', 'UG', 'TZ', 'KE'],
+          prefixes: ['75', '76']
+        },
+        {
+          code: 'TIGO',
+          name: 'Tigo Pesa',
+          countries: ['RW', 'TZ'],
+          prefixes: ['78', '79']
+        }
+      ];
 
-      const { transactionId } = req.params;
-      const releaseData: ReleaseEscrowDto = req.body;
-
-      const releasedTransaction = await this.escrowService.releaseEscrow(transactionId, releaseData);
-
-      const response: EscrowSuccessResponse = {
+      res.status(200).json({
         success: true,
-        data: releasedTransaction,
-        message: 'Admin escrow release completed successfully'
-      };
+        data: providers
+      });
 
-      res.status(200).json(response);
     } catch (error: any) {
-      console.error('Admin release escrow controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      res.status(500).json({
         success: false,
         error: {
-          code: 'ADMIN_ESCROW_RELEASE_FAILED',
-          message: error.message || 'Failed to release escrow',
+          code: 'FETCH_PROVIDERS_FAILED',
+          message: 'Failed to fetch mobile providers',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(400).json(errorResponse);
+      });
     }
   };
 
-  // === UTILITY METHODS ===
-
-  private isAdmin(userId: number): boolean {
-    // Implement admin check logic
-    // This could check a database for admin roles or use environment variables
-    const adminIds = process.env.ADMIN_USER_IDS?.split(',').map(id => parseInt(id)) || [1];
-    return adminIds.includes(userId);
-  }
-
-  // === VALIDATION HELPERS ===
-
-  validateMobileNumber = async (req: Request, res: Response): Promise<void> => {
+  /**
+   * Validate mobile number
+   * POST /api/escrow/validate/mobile-number
+   */
+  validateMobileNumber = async (req: Request, res: Response) => {
     try {
       const { phoneNumber, countryCode } = req.body;
 
-      if (!phoneNumber) {
-        const errorResponse: EscrowErrorResponse = {
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Phone number is required',
-            timestamp: new Date().toISOString()
-          }
-        };
-        
-        res.status(400).json(errorResponse);
-        return;
-      }
+      const validation = this.pesapalService.validateMobileNumber(
+        phoneNumber,
+        countryCode || 'RW'
+      );
 
-      const validation = this.pesapalService.validateMobileNumber(phoneNumber, countryCode);
+      res.status(200).json({
+        success: validation.isValid,
+        data: validation.isValid ? {
+          formattedNumber: validation.formattedNumber,
+          provider: validation.provider
+        } : null,
+        errors: validation.errors
+      });
 
-      const response: EscrowSuccessResponse = {
-        success: true,
-        data: validation,
-        message: 'Mobile number validation completed'
-      };
-
-      res.status(200).json(response);
     } catch (error: any) {
-      console.error('Validate mobile number controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      res.status(500).json({
         success: false,
         error: {
           code: 'VALIDATION_FAILED',
-          message: error.message || 'Failed to validate mobile number',
+          message: 'Failed to validate mobile number',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(400).json(errorResponse);
+      });
     }
   };
 
-  validateBankAccount = async (req: Request, res: Response): Promise<void> => {
+  /**
+   * Validate bank account
+   * POST /api/escrow/validate/bank-account
+   */
+  validateBankAccount = async (req: Request, res: Response) => {
     try {
       const { accountNumber, bankCode } = req.body;
 
-      if (!accountNumber || !bankCode) {
-        const errorResponse: EscrowErrorResponse = {
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Account number and bank code are required',
-            timestamp: new Date().toISOString()
-          }
-        };
-        
-        res.status(400).json(errorResponse);
-        return;
-      }
+      const validation = this.pesapalService.validateBankAccount(
+        accountNumber,
+        bankCode
+      );
 
-      const validation = this.pesapalService.validateBankAccount(accountNumber, bankCode);
+      res.status(200).json({
+        success: validation.isValid,
+        errors: validation.errors
+      });
 
-      const response: EscrowSuccessResponse = {
-        success: true,
-        data: validation,
-        message: 'Bank account validation completed'
-      };
-
-      res.status(200).json(response);
     } catch (error: any) {
-      console.error('Validate bank account controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      res.status(500).json({
         success: false,
         error: {
           code: 'VALIDATION_FAILED',
-          message: error.message || 'Failed to validate bank account',
+          message: 'Failed to validate bank account',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(400).json(errorResponse);
+      });
     }
   };
 
-  // === CONFIGURATION ENDPOINTS ===
+  // ==================== MANUAL IPN MANAGEMENT ====================
 
-  getSupportedCurrencies = async (req: Request, res: Response): Promise<void> => {
+  /**
+   * Force IPN re-registration (admin only)
+   * POST /api/escrow/admin/ipn/register
+   */
+  forceIPNRegistration = async (req: Request, res: Response) => {
     try {
-      const currencies = [
-        { code: 'RWF', name: 'Rwandan Franc', symbol: 'FRw', isDefault: true },
-        { code: 'USD', name: 'US Dollar', symbol: '$', isDefault: false },
-        { code: 'UGX', name: 'Ugandan Shilling', symbol: 'UGX', isDefault: false },
-        { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TZS', isDefault: false },
-        { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', isDefault: false }
-      ];
+      console.log('[ADMIN] Forcing IPN re-registration');
 
-      const response: EscrowSuccessResponse = {
+      const ipnId = await this.pesapalService.forceRegisterIPN();
+
+      res.status(200).json({
         success: true,
-        data: currencies,
-        message: 'Supported currencies retrieved successfully'
-      };
+        data: {
+          ipn_id: ipnId,
+          ipn_info: this.pesapalService.getCurrentIPNInfo()
+        },
+        message: 'IPN re-registered successfully'
+      });
 
-      res.status(200).json(response);
     } catch (error: any) {
-      console.error('Get supported currencies controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      console.error('[ADMIN] IPN registration error:', error);
+      res.status(500).json({
         success: false,
         error: {
-          code: 'CURRENCIES_RETRIEVAL_FAILED',
-          message: error.message || 'Failed to retrieve supported currencies',
+          code: 'IPN_REGISTRATION_FAILED',
+          message: error.message || 'Failed to register IPN',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(500).json(errorResponse);
+      });
     }
   };
 
-  getSupportedMobileProviders = async (req: Request, res: Response): Promise<void> => {
+  /**
+   * Get current IPN info (admin only)
+   * GET /api/escrow/admin/ipn/info
+   */
+  getIPNInfo = async (req: Request, res: Response) => {
     try {
-      const providers = [
-        { code: 'MTN', name: 'MTN Rwanda', country: 'RW' },
-        { code: 'AIRTEL', name: 'Airtel Rwanda', country: 'RW' },
-        { code: 'TIGO', name: 'Tigo Rwanda', country: 'RW' },
-        { code: 'RWANDATEL', name: 'Rwandatel', country: 'RW' }
-      ];
+      const ipnInfo = this.pesapalService.getCurrentIPNInfo();
+      const registeredIPNs = await this.pesapalService.getRegisteredIPNs();
 
-      const response: EscrowSuccessResponse = {
+      res.status(200).json({
         success: true,
-        data: providers,
-        message: 'Supported mobile providers retrieved successfully'
-      };
+        data: {
+          current: ipnInfo,
+          all_registered: registeredIPNs
+        }
+      });
 
-      res.status(200).json(response);
     } catch (error: any) {
-      console.error('Get supported providers controller error:', error);
-      
-      const errorResponse: EscrowErrorResponse = {
+      res.status(500).json({
         success: false,
         error: {
-          code: 'PROVIDERS_RETRIEVAL_FAILED',
-          message: error.message || 'Failed to retrieve supported providers',
+          code: 'IPN_INFO_FETCH_FAILED',
+          message: error.message || 'Failed to fetch IPN info',
           timestamp: new Date().toISOString()
         }
-      };
-
-      res.status(500).json(errorResponse);
+      });
     }
   };
 }

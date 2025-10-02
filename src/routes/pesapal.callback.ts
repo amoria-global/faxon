@@ -1,5 +1,5 @@
-// routes/pesapal-callback.ts
-import express, { Request, Response, NextFunction } from 'express';
+// routes/pesapal-callback.routes.ts
+import express, { Request, Response } from 'express';
 import crypto from 'crypto';
 import { EscrowService } from '../services/escrow.service';
 import { PesapalService } from '../services/pesapal.service';
@@ -9,75 +9,46 @@ import config from '../config/config';
 
 const router = express.Router();
 
-// Initialize services (adjust based on your DI setup)
-let escrowService: EscrowService;
-let pesapalService: PesapalService;
+// Initialize services
+const pesapalService = new PesapalService({
+  consumerKey: config.pesapal.consumerKey,
+  consumerSecret: config.pesapal.consumerSecret,
+  baseUrl: config.pesapal.baseUrl,
+  environment: config.pesapal.environment,
+  timeout: config.pesapal.timeout,
+  retryAttempts: config.pesapal.retryAttempts,
+  webhookSecret: config.pesapal.webhookSecret,
+  callbackUrl: config.pesapal.callbackUrl,
+  defaultCurrency: config.escrow.defaultCurrency,
+  merchantAccount: config.pesapal.merchantAccount
+});
 
-// Initialize services - adjust this based on your dependency injection setup
-export function initializeServices(
-  escrowSvc: EscrowService, 
-  pesapalSvc: PesapalService
-) {
-  escrowService = escrowSvc;
-  pesapalService = pesapalSvc;
-}
+const emailService = new EmailService();
+const escrowService = new EscrowService(pesapalService, emailService);
 
-interface PesapalCallbackPayload {
-  OrderTrackingId: string;
-  OrderMerchantReference: string;
-  OrderNotificationType: string;
-  Status: number;
-  Amount: number;
-  Currency: string;
-  PaymentMethod?: string;
-  PhoneNumber?: string;
-  EmailAddress?: string;
-  FirstName?: string;
-  LastName?: string;
-  MiddleName?: string;
-  PaymentAccount?: string;
-  TransactionId?: string;
-  Error?: string;
-  ErrorMessage?: string;
-}
-
-// Payment status enum - matches Pesapal's status codes
-enum PaymentStatus {
-  PENDING = 0,
-  COMPLETED = 1,
-  FAILED = 2,
-  INVALID = 3
-}
+// ==================== HELPER FUNCTIONS ====================
 
 /**
- * Extract callback data from request (handles both POST body and GET query params)
+ * Extracts callback data from request (GET or POST)
  */
-function extractCallbackData(req: Request): PesapalCallbackPayload | null {
+function extractCallbackData(req: Request): any | null {
   try {
     const data = req.method === 'POST' ? req.body : req.query;
     
+    console.log('[PESAPAL_CALLBACK] Extracting data from:', req.method, data);
+    
     if (!data.OrderTrackingId || !data.OrderMerchantReference) {
-      console.error('[PESAPAL_CALLBACK] Missing required fields in callback data');
+      console.error('[PESAPAL_CALLBACK] Missing required fields:', {
+        hasTrackingId: !!data.OrderTrackingId,
+        hasReference: !!data.OrderMerchantReference
+      });
       return null;
     }
 
     return {
       OrderTrackingId: data.OrderTrackingId,
       OrderMerchantReference: data.OrderMerchantReference,
-      OrderNotificationType: data.OrderNotificationType || 'IPNCHANGE',
-      Status: parseInt(data.Status) || 0,
-      Amount: parseFloat(data.Amount) || 0,
-      Currency: data.Currency || 'USD',
-      PaymentMethod: data.PaymentMethod,
-      PhoneNumber: data.PhoneNumber,
-      EmailAddress: data.EmailAddress,
-      FirstName: data.FirstName,
-      LastName: data.LastName,
-      MiddleName: data.MiddleName,
-      PaymentAccount: data.PaymentAccount,
-      TransactionId: data.TransactionId,
-      Error: data.Error,
-      ErrorMessage: data.ErrorMessage
+      OrderNotificationType: data.OrderNotificationType || 'IPNCHANGE'
     };
   } catch (error) {
     console.error('[PESAPAL_CALLBACK] Error extracting callback data:', error);
@@ -86,16 +57,21 @@ function extractCallbackData(req: Request): PesapalCallbackPayload | null {
 }
 
 /**
- * Verify Pesapal callback authenticity using webhook secret
+ * Verifies webhook signature (for POST requests)
  */
 function verifyCallbackSignature(req: Request): boolean {
   try {
     const signature = req.headers['x-pesapal-signature'] as string;
     const secret = config.pesapal.webhookSecret;
 
+    // Skip verification in sandbox if secret not configured
     if (!signature || !secret) {
-      console.warn('[PESAPAL_CALLBACK] Missing signature or secret for verification');
-      return true; // Skip verification if not configured
+      if (config.pesapal.environment === 'sandbox') {
+        console.warn('[PESAPAL_CALLBACK] Skipping signature verification in sandbox');
+        return true;
+      }
+      console.warn('[PESAPAL_CALLBACK] Missing signature or secret');
+      return false;
     }
 
     const payload = JSON.stringify(req.body);
@@ -115,107 +91,127 @@ function verifyCallbackSignature(req: Request): boolean {
 }
 
 /**
- * Process webhook through EscrowService - this replaces the placeholder updatePaymentStatus
+ * Processes webhook by fetching current status and updating transaction
  */
-async function processWebhook(callbackData: PesapalCallbackPayload): Promise<boolean> {
+async function processWebhook(callbackData: any): Promise<boolean> {
   try {
-    if (!escrowService) {
-      console.error('[PESAPAL_CALLBACK] EscrowService not initialized');
-      return false;
-    }
-
     console.log(`[PESAPAL_CALLBACK] Processing webhook for ${callbackData.OrderMerchantReference}`);
+    console.log(`[PESAPAL_CALLBACK] Tracking ID: ${callbackData.OrderTrackingId}`);
     
-    // Convert callback data to webhook format expected by EscrowService
     const webhookData: PesapalWebhookData = {
       OrderTrackingId: callbackData.OrderTrackingId,
       OrderMerchantReference: callbackData.OrderMerchantReference,
       OrderNotificationType: callbackData.OrderNotificationType
     };
 
-    // Use EscrowService to handle the webhook - this will:
-    // 1. Find the transaction by tracking ID
-    // 2. Query Pesapal for current status
-    // 3. Update transaction status in database
-    // 4. Send notifications
+    // Process through escrow service which will fetch latest status
     await escrowService.handlePesapalWebhook(webhookData);
 
-    console.log(`[PESAPAL_CALLBACK] Webhook processed successfully for ${callbackData.OrderMerchantReference}`);
+    console.log(`[PESAPAL_CALLBACK] ✅ Webhook processed successfully: ${callbackData.OrderMerchantReference}`);
     return true;
 
-  } catch (error) {
-    console.error('[PESAPAL_CALLBACK] Error processing webhook:', error);
+  } catch (error: any) {
+    console.error('[PESAPAL_CALLBACK] ❌ Webhook processing failed:', {
+      error: error.message,
+      trackingId: callbackData.OrderTrackingId,
+      reference: callbackData.OrderMerchantReference
+    });
     return false;
   }
 }
 
+// ==================== ROUTES ====================
+
 /**
- * Shared handler for processing POST webhooks
- * This extracts the common logic to avoid duplication
+ * GET callback handler (user redirects after payment)
+ * GET /api/pesapal/callback
  */
-async function handlePostWebhook(req: Request, res: Response): Promise<void> {
+router.get('/callback', async (req: Request, res: Response) => {
+  try {
+    console.log(`[PESAPAL_CALLBACK] GET callback received at ${new Date().toISOString()}`);
+    console.log('[PESAPAL_CALLBACK] Query params:', req.query);
+
+    const callbackData = extractCallbackData(req);
+    if (!callbackData) {
+      console.error('[PESAPAL_CALLBACK] Invalid callback data');
+      const frontendUrl = config.clientUrl || 'https://jambolush.com';
+      return res.redirect(
+        `${frontendUrl}/payment/error?message=${encodeURIComponent('Invalid callback data')}`
+      );
+    }
+
+    // Process webhook data in background (don't wait for it)
+    processWebhook(callbackData).catch(err => {
+      console.error('[PESAPAL_CALLBACK] Background webhook processing failed:', err);
+    });
+
+    // Immediately redirect user - they'll see pending status and page will auto-refresh
+    const frontendUrl = config.clientUrl || 'https://jambolush.com';
+    return res.redirect(
+      `${frontendUrl}/payment/pending?ref=${callbackData.OrderMerchantReference}`
+    );
+
+  } catch (error: any) {
+    console.error('[PESAPAL_CALLBACK] GET callback error:', error);
+    const frontendUrl = config.clientUrl || 'https://jambolush.com';
+    return res.redirect(
+      `${frontendUrl}/payment/error?message=${encodeURIComponent('Payment processing error')}`
+    );
+  }
+});
+
+/**
+ * POST callback handler (Pesapal IPN notifications)
+ * POST /api/pesapal/callback
+ */
+router.post('/callback', async (req: Request, res: Response) => {
   const startTime = Date.now();
   
   try {
     console.log(`[PESAPAL_CALLBACK] POST webhook received at ${new Date().toISOString()}`);
-    console.log(`[PESAPAL_CALLBACK] Headers:`, JSON.stringify(req.headers, null, 2));
-    console.log(`[PESAPAL_CALLBACK] Body:`, JSON.stringify(req.body, null, 2));
+    console.log('[PESAPAL_CALLBACK] Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('[PESAPAL_CALLBACK] Body:', JSON.stringify(req.body, null, 2));
 
-    // Verify callback authenticity
+    // Verify signature (optional in sandbox)
     if (!verifyCallbackSignature(req)) {
       console.error('[PESAPAL_CALLBACK] Invalid callback signature');
-      res.status(401).json({
+      // Still return 200 to prevent retries
+      return res.status(200).json({
         success: false,
         error: 'Invalid signature'
       });
-      return;
     }
 
-    // Extract and validate callback data
+    // Extract and validate data
     const callbackData = extractCallbackData(req);
     if (!callbackData) {
-      console.error('[PESAPAL_CALLBACK] Invalid callback data received');
-      res.status(400).json({
+      console.error('[PESAPAL_CALLBACK] Invalid callback data');
+      return res.status(200).json({
         success: false,
         error: 'Invalid callback data'
       });
-      return;
     }
 
-    console.log(`[PESAPAL_CALLBACK] Processing payment: ${callbackData.OrderMerchantReference}`);
-    console.log(`[PESAPAL_CALLBACK] Payment status: ${PaymentStatus[callbackData.Status]} (${callbackData.Status})`);
-
-    // Process webhook through EscrowService
+    // Process webhook
     const processed = await processWebhook(callbackData);
 
-    if (!processed) {
-      console.error('[PESAPAL_CALLBACK] Failed to process webhook');
-      res.status(500).json({
-        success: false,
-        error: 'Failed to process webhook'
-      });
-      return;
-    }
-
-    // Log processing time
     const processingTime = Date.now() - startTime;
-    console.log(`[PESAPAL_CALLBACK] Webhook processed successfully in ${processingTime}ms`);
+    console.log(`[PESAPAL_CALLBACK] ${processed ? '✅' : '❌'} Webhook processed in ${processingTime}ms`);
 
-    // Respond to Pesapal (they expect a 200 response)
+    // Always respond with 200 to prevent Pesapal retries
     res.status(200).json({
-      success: true,
-      message: 'Webhook processed successfully',
+      success: processed,
+      message: processed ? 'Webhook processed successfully' : 'Webhook processing failed',
       reference: callbackData.OrderMerchantReference,
-      status: PaymentStatus[callbackData.Status],
       processingTime: `${processingTime}ms`
     });
 
-  } catch (error) {
+  } catch (error: any) {
     const processingTime = Date.now() - startTime;
     console.error('[PESAPAL_CALLBACK] POST webhook error:', error);
-    console.error(`[PESAPAL_CALLBACK] Error occurred after ${processingTime}ms`);
+    console.error(`[PESAPAL_CALLBACK] Error after ${processingTime}ms`);
     
-    // Still return 200 to Pesapal to avoid retries, but log the error
+    // Return 200 to avoid retries but log error
     res.status(200).json({
       success: false,
       error: 'Internal server error',
@@ -223,98 +219,143 @@ async function handlePostWebhook(req: Request, res: Response): Promise<void> {
       note: 'Error logged for investigation'
     });
   }
-}
+});
 
 /**
- * GET callback handler (for user redirects after payment)
+ * Alternative IPN endpoint
+ * GET /api/pesapal/ipn
  */
-router.get('/callback', async (req: Request, res: Response) => {
+router.get('/ipn', async (req: Request, res: Response) => {
   try {
-    console.log(`[PESAPAL_CALLBACK] GET callback received at ${new Date().toISOString()}`);
-    console.log(`[PESAPAL_CALLBACK] Query params:`, req.query);
+    console.log(`[PESAPAL_IPN] GET IPN received at ${new Date().toISOString()}`);
+    console.log('[PESAPAL_IPN] Query params:', req.query);
 
     const callbackData = extractCallbackData(req);
     if (!callbackData) {
-      return res.status(400).json({
+      console.error('[PESAPAL_IPN] Invalid IPN data');
+      return res.status(200).json({
         success: false,
-        error: 'Invalid callback data'
+        error: 'Invalid IPN data'
       });
     }
 
-    // Process the webhook data
+    // Process webhook
     const processed = await processWebhook(callbackData);
-    if (!processed) {
-      console.warn('[PESAPAL_CALLBACK] Webhook processing failed, but continuing with redirect');
-    }
 
-    // Redirect user to appropriate page based on payment status
-    const frontendUrl = config.clientUrl || 'http://localhost:3000';
-    const status = callbackData.Status as PaymentStatus;
+    res.status(200).json({
+      success: processed,
+      message: processed ? 'IPN processed successfully' : 'IPN processing failed',
+      reference: callbackData.OrderMerchantReference
+    });
+
+  } catch (error: any) {
+    console.error('[PESAPAL_IPN] GET IPN error:', error);
     
-    if (status === PaymentStatus.COMPLETED) {
-      return res.redirect(`${frontendUrl}/payment/success?ref=${callbackData.OrderMerchantReference}`);
-    } else if (status === PaymentStatus.FAILED) {
-      return res.redirect(`${frontendUrl}/payment/failed?ref=${callbackData.OrderMerchantReference}&error=${encodeURIComponent(callbackData.ErrorMessage || 'Payment failed')}`);
-    } else {
-      return res.redirect(`${frontendUrl}/payment/pending?ref=${callbackData.OrderMerchantReference}`);
-    }
-
-  } catch (error) {
-    console.error('[PESAPAL_CALLBACK] GET callback error:', error);
-    const frontendUrl = config.clientUrl || 'http://localhost:3000';
-    return res.redirect(`${frontendUrl}/payment/error?message=${encodeURIComponent('Payment processing error')}`);
+    res.status(200).json({
+      success: false,
+      error: 'Internal server error',
+      note: 'Error logged for investigation'
+    });
   }
 });
 
 /**
- * POST callback handler (for Pesapal IPN notifications)
- * This is the main webhook endpoint that Pesapal calls
- */
-router.post('/callback', async (req: Request, res: Response) => {
-  await handlePostWebhook(req, res);
-});
-
-/**
- * Separate IPN endpoint (alternative endpoint name for webhooks)
- * Uses the same logic as the main callback handler
+ * Alternative IPN endpoint (POST)
+ * POST /api/pesapal/ipn
  */
 router.post('/ipn', async (req: Request, res: Response) => {
-  await handlePostWebhook(req, res);
+  const startTime = Date.now();
+  
+  try {
+    console.log(`[PESAPAL_IPN] POST IPN received at ${new Date().toISOString()}`);
+    console.log('[PESAPAL_IPN] Body:', JSON.stringify(req.body, null, 2));
+
+    // Verify signature
+    if (!verifyCallbackSignature(req)) {
+      console.error('[PESAPAL_IPN] Invalid IPN signature');
+      return res.status(200).json({
+        success: false,
+        error: 'Invalid signature'
+      });
+    }
+
+    // Extract and validate data
+    const callbackData = extractCallbackData(req);
+    if (!callbackData) {
+      console.error('[PESAPAL_IPN] Invalid IPN data');
+      return res.status(200).json({
+        success: false,
+        error: 'Invalid IPN data'
+      });
+    }
+
+    // Process webhook
+    const processed = await processWebhook(callbackData);
+
+    const processingTime = Date.now() - startTime;
+    console.log(`[PESAPAL_IPN] ${processed ? '✅' : '❌'} IPN processed in ${processingTime}ms`);
+
+    res.status(200).json({
+      success: processed,
+      message: processed ? 'IPN processed successfully' : 'IPN processing failed',
+      reference: callbackData.OrderMerchantReference,
+      processingTime: `${processingTime}ms`
+    });
+
+  } catch (error: any) {
+    const processingTime = Date.now() - startTime;
+    console.error('[PESAPAL_IPN] POST IPN error:', error);
+    
+    res.status(200).json({
+      success: false,
+      error: 'Internal server error',
+      processingTime: `${processingTime}ms`,
+      note: 'Error logged for investigation'
+    });
+  }
 });
 
 /**
  * Health check endpoint
+ * GET /api/pesapal/health
  */
-router.get('/callback/health', (req: Request, res: Response) => {
-  const escrowHealthy = !!escrowService;
-  const pesapalHealthy = !!pesapalService;
-  
-  res.status(200).json({
-    success: true,
-    message: 'Pesapal callback handler is running',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    services: {
-      escrow: escrowHealthy,
-      pesapal: pesapalHealthy
-    }
-  });
+router.get('/health', async (req: Request, res: Response) => {
+  try {
+    const pesapalHealth = await pesapalService.healthCheck();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Pesapal callback handler is running',
+      timestamp: new Date().toISOString(),
+      environment: config.pesapal.environment,
+      services: {
+        pesapal: pesapalHealth ? 'healthy' : 'unhealthy',
+        escrow: true
+      }
+    });
+  } catch (error: any) {
+    res.status(503).json({
+      success: false,
+      error: 'Health check failed',
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 /**
  * Test endpoint for webhook simulation (development only)
+ * POST /api/pesapal/test-webhook
  */
-if (process.env.NODE_ENV === 'development') {
-  router.post('/callback/test', async (req: Request, res: Response) => {
+if (process.env.NODE_ENV === 'development' || config.pesapal.environment === 'sandbox') {
+  router.post('/test-webhook', async (req, res: Response) => {
     try {
-      const testData: PesapalCallbackPayload = {
+      const testData = {
         OrderTrackingId: req.body.OrderTrackingId || 'test-tracking-id',
         OrderMerchantReference: req.body.OrderMerchantReference || 'DEP-test-123',
-        OrderNotificationType: 'IPNCHANGE',
-        Status: req.body.Status || PaymentStatus.COMPLETED,
-        Amount: req.body.Amount || 100,
-        Currency: req.body.Currency || 'USD'
+        OrderNotificationType: 'IPNCHANGE'
       };
+
+      console.log('[TEST_WEBHOOK] Processing test webhook:', testData);
 
       const processed = await processWebhook(testData);
       
@@ -323,11 +364,11 @@ if (process.env.NODE_ENV === 'development') {
         message: processed ? 'Test webhook processed' : 'Test webhook failed',
         testData
       });
-    } catch (error) {
+    } catch (error: any) {
       res.status(500).json({
         success: false,
         error: 'Test webhook failed',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: error.message
       });
     }
   });

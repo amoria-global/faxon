@@ -1,30 +1,24 @@
 // routes/escrow.routes.ts
-
 import { Router } from 'express';
 import { EscrowController } from '../controllers/escrow.controller';
 import { EscrowService } from '../services/escrow.service';
 import { PesapalService } from '../services/pesapal.service';
-import { authenticate } from '../middleware/auth.middleware';
+import { EmailService } from '../services/email.service';
+import { authenticate, authorize } from '../middleware/auth.middleware';
 import {
-  // Rate limiting
   rateLimitEscrowOperations,
   rateLimitWebhooks,
-  
-  // Validation middleware
   validateDeposit,
   validateWithdrawal,
   validateRefund,
   validateRelease,
   validateTransactionId,
-  
-  // Security middleware
   validatePesapalWebhook,
   ipWhitelist,
   sanitizeEscrowData,
   logEscrowRequest
 } from '../middleware/escrow.middleware';
-import { config } from '../config/config';
-import { EmailService } from '../services/email.service';
+import config from '../config/config';
 
 const router = Router();
 
@@ -34,11 +28,11 @@ const pesapalService = new PesapalService({
   consumerSecret: config.pesapal.consumerSecret,
   baseUrl: config.pesapal.baseUrl,
   environment: config.pesapal.environment,
-  timeout: 30000,
-  retryAttempts: 3,
+  timeout: config.pesapal.timeout,
+  retryAttempts: config.pesapal.retryAttempts,
   webhookSecret: config.pesapal.webhookSecret,
   callbackUrl: config.pesapal.callbackUrl,
-  defaultCurrency: 'RWF',
+  defaultCurrency: config.escrow.defaultCurrency,
   merchantAccount: config.pesapal.merchantAccount
 });
 
@@ -46,13 +40,14 @@ const emailService = new EmailService();
 const escrowService = new EscrowService(pesapalService, emailService);
 const escrowController = new EscrowController(escrowService, pesapalService);
 
-// === PUBLIC ROUTES ===
+// ==================== PUBLIC ROUTES ====================
 
 // Health check endpoint
 router.get('/health', escrowController.healthCheck);
 
 // Pesapal webhook endpoint (must be public)
-router.post('/webhook/pesapal',
+router.post(
+  '/webhook/pesapal',
   rateLimitWebhooks,
   ipWhitelist,
   validatePesapalWebhook,
@@ -60,9 +55,7 @@ router.post('/webhook/pesapal',
 );
 
 // Pesapal callback endpoint (for payment redirects)
-router.get('/callback',
-  escrowController.handlePesapalCallback
-);
+router.get('/callback', escrowController.handlePesapalCallback);
 
 // Configuration endpoints (public)
 router.get('/currencies', escrowController.getSupportedCurrencies);
@@ -72,165 +65,107 @@ router.get('/mobile-providers', escrowController.getSupportedMobileProviders);
 router.post('/validate/mobile-number', escrowController.validateMobileNumber);
 router.post('/validate/bank-account', escrowController.validateBankAccount);
 
-// === PROTECTED ROUTES ===
-// All routes below require authentication
+// Public transaction lookup by reference
+router.get(
+  '/transactions/reference/:reference',
+  escrowController.getTransactionByReference
+);
+
+// Public status check by reference (for payment status page)
+router.get(
+  '/transactions/reference/:reference/status',
+  escrowController.checkStatusByReference
+);
+
+// ==================== PROTECTED USER ROUTES ====================
 router.use(authenticate);
 router.use(logEscrowRequest);
 router.use(sanitizeEscrowData);
 
 // === DEPOSIT OPERATIONS ===
-
-router.post('/deposits',
+router.post(
+  '/deposits',
   rateLimitEscrowOperations,
   validateDeposit,
   escrowController.createDeposit
 );
 
 // === ESCROW MANAGEMENT ===
-
-// Release escrow funds
-router.post('/transactions/:transactionId/release',
+router.post(
+  '/transactions/:transactionId/release',
   rateLimitEscrowOperations,
   validateTransactionId,
   validateRelease,
   escrowController.releaseEscrow
 );
 
-// Process refunds
-router.post('/transactions/:transactionId/refund',
+router.post(
+  '/transactions/:transactionId/refund',
   rateLimitEscrowOperations,
   validateTransactionId,
   validateRefund,
   escrowController.processRefund
 );
 
-// === WITHDRAWAL OPERATIONS ===
+// === STATUS CHECKING ===
+router.post(
+  '/transactions/:transactionId/check-status',
+  validateTransactionId,
+  escrowController.checkTransactionStatus
+);
 
-router.post('/withdrawals',
+// === WITHDRAWAL OPERATIONS ===
+router.post(
+  '/withdrawals',
   rateLimitEscrowOperations,
   validateWithdrawal,
   escrowController.createWithdrawal
 );
 
 // === TRANSACTION QUERIES ===
-
-// Get specific transaction
-router.get('/transactions/:transactionId',
+router.get(
+  '/transactions/:transactionId',
   validateTransactionId,
   escrowController.getTransaction
 );
 
-// Get user's transactions
-router.get('/transactions',
-  escrowController.getUserTransactions
-);
+router.get('/transactions', escrowController.getUserTransactions);
 
 // === WALLET OPERATIONS ===
+router.get('/wallet', escrowController.getUserWallet);
 
-router.get('/wallet',
-  escrowController.getUserWallet
-);
+// ==================== ADMIN ROUTES ====================
+router.use('/admin', authorize('admin'));
 
-// === ADMIN ROUTES ===
-// Note: These routes require additional admin middleware in production
+// Transaction management
+router.get('/admin/transactions', escrowController.getAllTransactions);
+router.get('/admin/stats', escrowController.getTransactionStats);
 
-// Get all transactions (admin only)
-router.get('/admin/transactions',
-  escrowController.getAllTransactions
-);
-
-// Admin release escrow (emergency cases)
-router.post('/admin/transactions/:transactionId/release',
+router.post(
+  '/admin/transactions/:transactionId/release',
   rateLimitEscrowOperations,
   validateTransactionId,
   validateRelease,
   escrowController.adminReleaseEscrow
 );
 
-// === ANALYTICS & REPORTING ROUTES ===
+// Admin status checking
+router.post(
+  '/admin/transactions/:transactionId/check-status',
+  validateTransactionId,
+  escrowController.checkTransactionStatus
+);
 
-// User transaction summary
-router.get('/analytics/summary', async (req, res) => {
-  try {
-    // TODO: Implement analytics service
-    res.status(501).json({
-      success: false,
-      message: 'Analytics feature coming soon'
-    });
-  } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'ANALYTICS_ERROR',
-        message: error.message,
-        timestamp: new Date().toISOString()
-      }
-    });
-  }
-});
+// IPN management
+router.post('/admin/ipn/register', escrowController.forceIPNRegistration);
+router.get('/admin/ipn/info', escrowController.getIPNInfo);
 
-// Platform statistics (admin only)
-router.get('/admin/analytics/platform', async (req, res) => {
-  try {
-    // TODO: Implement platform analytics
-    res.status(501).json({
-      success: false,
-      message: 'Platform analytics feature coming soon'
-    });
-  } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'ANALYTICS_ERROR',
-        message: error.message,
-        timestamp: new Date().toISOString()
-      }
-    });
-  }
-});
-
-// === FUTURE FEATURES (PLACEHOLDERS) ===
-
-// Recurring payments
-router.post('/recurring', async (req, res) => {
-  res.status(501).json({
-    success: false,
-    message: 'Recurring payments feature coming soon'
-  });
-});
-
-// Bulk operations
-router.post('/bulk/deposits', async (req, res) => {
-  res.status(501).json({
-    success: false,
-    message: 'Bulk deposits feature coming soon'
-  });
-});
-
-// Dispute management
-router.post('/transactions/:transactionId/dispute', async (req, res) => {
-  res.status(501).json({
-    success: false,
-    message: 'Dispute management feature coming soon'
-  });
-});
-
-// Payment links
-router.post('/payment-links', async (req, res) => {
-  res.status(501).json({
-    success: false,
-    message: 'Payment links feature coming soon'
-  });
-});
-
-// === ERROR HANDLING MIDDLEWARE ===
-
+// ==================== ERROR HANDLING ====================
 router.use((error: any, req: any, res: any, next: any) => {
   console.error('Escrow route error:', error);
   
-  // Handle specific error types
   if (error.name === 'ValidationError') {
-    res.status(400).json({
+    return res.status(400).json({
       success: false,
       error: {
         code: 'VALIDATION_ERROR',
@@ -238,11 +173,10 @@ router.use((error: any, req: any, res: any, next: any) => {
         timestamp: new Date().toISOString()
       }
     });
-    return;
   }
 
   if (error.name === 'UnauthorizedError') {
-    res.status(401).json({
+    return res.status(401).json({
       success: false,
       error: {
         code: 'UNAUTHORIZED',
@@ -250,10 +184,8 @@ router.use((error: any, req: any, res: any, next: any) => {
         timestamp: new Date().toISOString()
       }
     });
-    return;
   }
 
-  // Generic error response
   res.status(500).json({
     success: false,
     error: {
@@ -262,6 +194,51 @@ router.use((error: any, req: any, res: any, next: any) => {
       timestamp: new Date().toISOString()
     }
   });
+});
+
+// Test route for Pesapal authentication
+router.get('/test-pesapal-auth', async (req, res) => {
+  try {
+    console.log('\n🔍 Testing Pesapal Authentication...\n');
+    
+    console.log('Config Check:');
+    console.log('- Consumer Key:', config.pesapal.consumerKey ? '✅ SET' : '❌ NOT SET');
+    console.log('- Consumer Secret:', config.pesapal.consumerSecret ? '✅ SET' : '❌ NOT SET');
+    console.log('- Base URL:', config.pesapal.baseUrl);
+    console.log('- Environment:', config.pesapal.environment);
+    
+    // Test IPN registration
+    let ipnId;
+    try {
+      ipnId = await pesapalService.forceRegisterIPN();
+    } catch (ipnError: any) {
+      return res.status(500).json({
+        success: false,
+        message: 'Authentication successful but IPN registration failed',
+        error: ipnError.message
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Pesapal authentication and IPN registration successful',
+      data: {
+        authenticated: true,
+        ipnRegistered: true,
+        ipnId,
+        environment: config.pesapal.environment,
+        baseUrl: config.pesapal.baseUrl
+      }
+    });
+  } catch (error: any) {
+    console.error('Test failed:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test failed',
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
 });
 
 export default router;

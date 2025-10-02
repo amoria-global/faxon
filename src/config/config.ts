@@ -20,11 +20,7 @@ export const config = {
   pesapal: {
     consumerKey: process.env.PESAPAL_CONSUMER_KEY!,
     consumerSecret: process.env.PESAPAL_CONSUMER_SECRET!,
-    baseUrl: process.env.PESAPAL_BASE_URL || (
-      process.env.NODE_ENV === 'production' 
-        ? 'https://pay.pesapal.com/v3' 
-        : 'https://cybqa.pesapal.com/pesapalv3'
-    ),
+    baseUrl: process.env.PESAPAL_BASE_URL || "https://pay.pesapal.com/v3",
     environment: (process.env.NODE_ENV === 'production' ? 'production' : 'sandbox') as 'production' | 'sandbox',
     webhookSecret: process.env.PESAPAL_WEBHOOK_SECRET!,
     callbackUrl: process.env.PESAPAL_CALLBACK_URL || 'http://localhost:5000/api/pesapal/callback',
@@ -84,8 +80,8 @@ export const config = {
     // Default split rules for bookings
     defaultSplitRules: {
       host: parseFloat(process.env.DEFAULT_HOST_SPLIT || '78.95'), // 70% to service provider
-      agent: parseFloat(process.env.DEFAULT_AGENT_SPLIT || '4.39'), // 20% to agent/affiliate
-      platform: parseFloat(process.env.DEFAULT_PLATFORM_SPLIT || '4.39') // 10% to platform
+      agent: parseFloat(process.env.DEFAULT_AGENT_SPLIT || '4.38'), // 20% to agent/affiliate
+      platform: parseFloat(process.env.DEFAULT_PLATFORM_SPLIT || '16.67') // 10% to platform
     },
     
     // Escrow fee configuration (charged to payer)

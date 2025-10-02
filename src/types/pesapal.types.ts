@@ -14,7 +14,7 @@ export interface PesapalConfig {
 }
 
 export interface PesapalCredentials {
-  accessToken?: string;
+  accessToken?: string | any;
   expiresAt?: number;
 }
 
@@ -168,7 +168,7 @@ export interface EscrowParticipant {
   email: string;
   firstName: string;
   lastName: string;
-  phone?: string;
+  phone?: string | any;
 }
 
 // === METADATA TYPES ===

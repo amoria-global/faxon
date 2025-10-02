@@ -66,7 +66,7 @@ export const validateDeposit = (req: AuthenticatedRequest, res: Response, next: 
       errors.push('Amount is required');
     } else if (typeof data.amount !== 'number' || data.amount <= 0) {
       errors.push('Amount must be a positive number');
-    } else if (data.amount < 100) {
+    } else if (data.amount < 100 && data.currency != 'USD') {
       errors.push('Minimum deposit amount is 100 RWF');
     } else if (data.amount > 10000000) {
       errors.push('Maximum deposit amount is 10,000,000 RWF');
@@ -601,9 +601,11 @@ function isValidPhoneNumber(phone: string): boolean {
   return phoneRegex.test(cleanPhone);
 }
 
-// === TRANSACTION ID VALIDATION ===
-
-export const validateTransactionId = (req: Request, res: Response, next: NextFunction): void => {
+export const validateTransactionId = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
   try {
     const { transactionId } = req.params;
 
@@ -611,39 +613,47 @@ export const validateTransactionId = (req: Request, res: Response, next: NextFun
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_FAILED',
-          message: 'Transaction ID is required',
-          timestamp: new Date().toISOString()
-        }
+          code: "VALIDATION_FAILED",
+          message: "Transaction ID is required",
+          timestamp: new Date().toISOString(),
+        },
       });
       return;
     }
 
-    // Basic UUID validation (assuming UUIDs are used for transaction IDs)
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    
-    if (!uuidRegex.test(transactionId)) {
+    // Regex for Pesapal UUID (orderTrackingId)
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    // Regex for internal DB IDs (cuid/nanoid style: alphanumeric, underscores, hyphens, 10+ chars)
+    const customIdRegex = /^[a-zA-Z0-9_-]{10,}$/;
+
+    const isValid =
+      uuidRegex.test(transactionId) || customIdRegex.test(transactionId);
+
+    if (!isValid) {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_FAILED',
-          message: 'Invalid transaction ID format',
-          timestamp: new Date().toISOString()
-        }
+          code: "VALIDATION_FAILED",
+          message: "Invalid transaction ID format",
+          timestamp: new Date().toISOString(),
+        },
       });
       return;
     }
 
+    // Passed validation
     next();
   } catch (error: any) {
-    console.error('Transaction ID validation error:', error);
+    console.error("Transaction ID validation error:", error);
     res.status(500).json({
       success: false,
       error: {
-        code: 'VALIDATION_ERROR',
-        message: 'Validation error occurred',
-        timestamp: new Date().toISOString()
-      }
+        code: "VALIDATION_ERROR",
+        message: "Validation error occurred",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
-};
+}
