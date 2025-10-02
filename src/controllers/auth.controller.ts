@@ -963,7 +963,7 @@ async submitKYC(req: Request, res: Response, next: NextFunction) {
       return res.status(401).json({ message: 'User not authenticated' });
     }
 
-    const { personalDetails, addressDocumentUrl } = req.body;
+    const { personalDetails, addressDocumentUrl, passportPhotoUrl } = req.body;
 
     if (!personalDetails) {
       return res.status(400).json({
@@ -1023,10 +1023,27 @@ async submitKYC(req: Request, res: Response, next: NextFunction) {
       });
     }
 
+    // Validate passport photo URL if provided
+    if (passportPhotoUrl) {
+      try {
+        const url = new URL(passportPhotoUrl);
+        if (!url.hostname.includes('supabase.co')) {
+          return res.status(400).json({
+            message: 'Invalid passport photo URL. Must be a valid Supabase storage URL.'
+          });
+        }
+      } catch (error) {
+        return res.status(400).json({
+          message: 'Invalid passport photo URL format'
+        });
+      }
+    }
+
     const result = await authService.submitKYC(
       parseInt(req.user.userId),
       personalDetails,
-      addressDocumentUrl
+      addressDocumentUrl,
+      passportPhotoUrl
     );
 
     res.json({

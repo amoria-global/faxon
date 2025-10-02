@@ -13,10 +13,10 @@ import settingsRoutes from './routes/settings.routes';
 import smsTestRoutes from './routes/sms.test.routes';
 import emailTestRoutes from './routes/email.test.routes';
 import adminRoutes from './routes/admin.routes';
-import { StatusPollerService } from './services/status-poller.service';
 import { PesapalService } from './services/pesapal.service';
-import { EscrowService } from './services/escrow.service';
 import { EmailService } from './services/email.service';
+import { EscrowService } from './services/escrow.service';
+import { StatusPollerService } from './services/status-poller.service';
 
 const app = express();
 
@@ -106,8 +106,6 @@ app.use('/api/help', helpRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/pesapal', require('./routes/pesapal.callback').default);
 app.use('/api/admin', adminRoutes);
-app.use('/api/sms/test', smsTestRoutes);
-app.use('/api/email/test', emailTestRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
