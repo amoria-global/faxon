@@ -27,7 +27,7 @@ router.post('/test-welcome', async (req, res) => {
     }
 
     const brevoService = new BrevoMailingService();
-    
+
     const context = {
       user: {
         firstName,
@@ -39,7 +39,7 @@ router.post('/test-welcome', async (req, res) => {
         name: 'Jambolush',
         website: 'https://jambolush.com',
         supportEmail: 'support@jambolush.com',
-        logo: 'https://jambolush.com/logo.png'
+        logo: 'https://jambolush.com/favicon.ico'
       }
     };
 
@@ -52,7 +52,7 @@ router.post('/test-welcome', async (req, res) => {
       timestamp: new Date().toISOString()
     });
 
-  } catch (error:  any) {
+  } catch (error: any) {
     console.error('❌ Email test error:', error);
     res.status(500).json({
       success: false,
@@ -75,7 +75,7 @@ router.post('/test-verification', async (req, res) => {
     }
 
     const brevoService = new BrevoMailingService();
-    
+
     const context = {
       user: {
         firstName,
@@ -87,7 +87,7 @@ router.post('/test-verification', async (req, res) => {
         name: 'Jambolush',
         website: 'https://jambolush.com',
         supportEmail: 'support@jambolush.com',
-        logo: 'https://jambolush.com/logo.png'
+        logo: 'https://jambolush.com/favicon.ico'
       },
       verification: {
         code: Math.floor(100000 + Math.random() * 900000).toString(), // Random 6-digit code

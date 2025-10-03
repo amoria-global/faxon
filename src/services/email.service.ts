@@ -42,7 +42,7 @@ export class EmailService {
       name: process.env.COMPANY_NAME || 'Jambolush',
       website: process.env.COMPANY_WEBSITE || 'https://jambolush.com',
       supportEmail: process.env.COMPANY_SUPPORT_EMAIL || 'support@jambolush.com',
-      logo: process.env.COMPANY_LOGO || 'https://jambolush.com/logo.png'
+      logo: process.env.COMPANY_LOGO || 'https://jambolush.com/favicon.ico'
     };
   }
 
@@ -55,7 +55,7 @@ export class EmailService {
   }): Promise<void> {
     try {
       const template = this.generateDepositCreatedTemplate(data);
-      
+
       await this.sendEmail({
         to: data.user.email,
         subject: template.subject,
@@ -79,7 +79,7 @@ export class EmailService {
   }): Promise<void> {
     try {
       const template = this.generateStatusUpdateTemplate(data);
-      
+
       await this.sendEmail({
         to: data.user.email,
         subject: template.subject,
@@ -102,7 +102,7 @@ export class EmailService {
   }): Promise<void> {
     try {
       const template = this.generateFundsReleasedTemplate(data);
-      
+
       await this.sendEmail({
         to: data.user.email,
         subject: template.subject,
@@ -125,7 +125,7 @@ export class EmailService {
   }): Promise<void> {
     try {
       const template = this.generateWithdrawalRequestTemplate(data);
-      
+
       await this.sendEmail({
         to: data.user.email,
         subject: template.subject,
@@ -149,7 +149,7 @@ export class EmailService {
   }): Promise<void> {
     try {
       const template = this.generateRefundProcessedTemplate(data);
-      
+
       await this.sendEmail({
         to: data.user.email,
         subject: template.subject,
@@ -172,7 +172,7 @@ export class EmailService {
     checkoutUrl: string;
   }): EmailTemplate {
     const subject = `Complete Your Payment - ${data.transaction.reference}`;
-    
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -269,7 +269,7 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
 
     const subject = `Payment Update - ${data.transaction.reference}`;
     const statusMessage = statusMessages[data.status] || 'Payment status updated';
-    
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -344,7 +344,7 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
     transaction: EscrowTransaction;
   }): EmailTemplate {
     const subject = `Funds Released - ${data.transaction.reference}`;
-    
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -415,7 +415,7 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
     withdrawal: WithdrawalRequest;
   }): EmailTemplate {
     const subject = `Withdrawal Request Submitted - ${data.withdrawal.reference}`;
-    
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -500,7 +500,7 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
     refundAmount: number;
   }): EmailTemplate {
     const subject = `Refund Processed - ${data.transaction.reference}`;
-    
+
     const html = `
       <!DOCTYPE html>
       <html>

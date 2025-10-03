@@ -47,7 +47,7 @@ export class AdminService {
       name: 'Jambolush',
       website: 'https://jambolush.com',
       supportEmail: 'support@jambolush.com',
-      logo: 'https://jambolush.com/logo.png'
+      logo: 'https://jambolush.com/favicon.ico'
     };
   }
 
@@ -415,7 +415,7 @@ export class AdminService {
     // Send admin notification for significant changes
     const significantFields = ['status', 'userType', 'kycStatus', 'verificationStatus'];
     const changedFields = Object.keys(updateData).filter(key => significantFields.includes(key));
-    
+
     if (changedFields.length > 0) {
       await this.sendAdminNotification({
         type: 'user_updated',
@@ -3065,7 +3065,7 @@ export class AdminService {
       }
     });
 
-    
+
 
     return contact;
   }
