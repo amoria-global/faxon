@@ -13,6 +13,9 @@ import settingsRoutes from './routes/settings.routes';
 import smsTestRoutes from './routes/sms.test.routes';
 import emailTestRoutes from './routes/email.test.routes';
 import adminRoutes from './routes/admin.routes';
+import XentriPayRoutes from './routes/xentripay.routes';
+import kycReminderRoutes from './routes/kyc-reminder.routes'; // NEW
+import { ReminderSchedulerService } from './services/reminder-scheduler.service'; // NEW
 import { PesapalService } from './services/pesapal.service';
 import { EmailService } from './services/email.service';
 import { EscrowService } from './services/escrow.service';
@@ -87,11 +90,21 @@ const escrowService = new EscrowService(pesapalService, emailService);
 // Initialize status poller
 const statusPoller = new StatusPollerService(pesapalService, escrowService);
 
+// NEW: Initialize KYC Reminder Scheduler
+const reminderScheduler = new ReminderSchedulerService(2); // Check every 2 minutes
+
 // Start polling if enabled
 if (process.env.ENABLE_STATUS_POLLING !== 'false') {
   statusPoller.startPolling();
 }
 
+// NEW: Start KYC reminder scheduler if enabled
+if (process.env.ENABLE_KYC_REMINDERS !== 'false') {
+  reminderScheduler.start();
+  console.log('✅ KYC Reminder Scheduler initialized and running');
+} else {
+  console.log('⏸️  KYC Reminder Scheduler disabled by configuration');
+}
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -105,7 +118,12 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/help', helpRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/pesapal', require('./routes/pesapal.callback').default);
+app.use('/api/xentripay', require('./routes/xentripay.callback').default);
 app.use('/api/admin', adminRoutes);
+app.use('/api/sms/test', smsTestRoutes);
+app.use('/api/email/test', emailTestRoutes);
+app.use("/api/payments/xentripay", XentriPayRoutes);
+app.use('/api/kyc-reminders', kycReminderRoutes); // NEW: KYC reminder routes
 
 // Health check
 app.get('/health', (req, res) => {
@@ -114,7 +132,15 @@ app.get('/health', (req, res) => {
     services: {
       pesapal: 'initialized',
       escrow: 'initialized',
-      statusPoller: process.env.ENABLE_STATUS_POLLING !== 'false' ? 'running' : 'disabled'
+      statusPoller: process.env.ENABLE_STATUS_POLLING !== 'false' ? 'running' : 'disabled',
+      kycReminders: process.env.ENABLE_KYC_REMINDERS !== 'false' ? 'running' : 'disabled' // NEW
+    },
+    schedulers: {
+      statusPoller: {
+        enabled: process.env.ENABLE_STATUS_POLLING !== 'false',
+        status: 'running'
+      },
+      kycReminders: reminderScheduler.getStatus() // NEW
     }
   });
 });
@@ -127,11 +153,33 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
+// Graceful shutdown
+const gracefulShutdown = () => {
+  console.log('\n🛑 Received shutdown signal, cleaning up...');
+  
+  // Stop schedulers
+  if (process.env.ENABLE_STATUS_POLLING !== 'false') {
+    // statusPoller.stop(); // If StatusPollerService has a stop method
+  }
+  
+  if (process.env.ENABLE_KYC_REMINDERS !== 'false') {
+    reminderScheduler.stop();
+  }
+  
+  process.exit(0);
+};
+
+// Handle shutdown signals
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+
 app.listen(config.port, () => {
   console.log(`🚀 Server running on port ${config.port}`);
   console.log(`🌍 Environment: ${config.pesapal.environment}`);
   console.log(`💰 Default currency: ${config.escrow.defaultCurrency}`);
   console.log(`🔒 Escrow enabled: ${config.features.enableEscrowPayments}`);
+  console.log(`📧 KYC Reminders: ${process.env.ENABLE_KYC_REMINDERS !== 'false' ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`⏰ Status Poller: ${process.env.ENABLE_STATUS_POLLING !== 'false' ? 'ENABLED' : 'DISABLED'}`);
 });
 
 export default app;
