@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { PropertyService } from '../services/property.service';
-import { 
-  CreatePropertyDto, 
-  UpdatePropertyDto, 
+import { logger } from '../utils/logger';
+import {
+  CreatePropertyDto,
+  UpdatePropertyDto,
   PropertySearchFilters,
   BookingRequest,
   CreateReviewDto,
@@ -78,7 +79,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error creating property:', error);
+      logger.error('Failed to create property', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to create property'
@@ -116,7 +117,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error updating property:', error);
+      logger.error('Failed to update property', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to update property'
@@ -152,7 +153,7 @@ export class PropertyController {
         message: 'Property deleted successfully'
       });
     } catch (error: any) {
-      console.error('Error deleting property:', error);
+      logger.error('Failed to delete property', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to delete property'
@@ -189,7 +190,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error fetching property:', error);
+      logger.error('Failed to fetch property', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve property'
@@ -233,7 +234,7 @@ export class PropertyController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error searching properties:', error);
+      logger.error('Failed to search properties', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to search properties'
@@ -280,7 +281,7 @@ export class PropertyController {
         data: properties
       });
     } catch (error: any) {
-      console.error('Error fetching host properties:', error);
+      logger.error('Failed to fetch host properties', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve properties'
@@ -299,7 +300,7 @@ export class PropertyController {
         data: properties
       });
     } catch (error: any) {
-      console.error('Error fetching featured properties:', error);
+      logger.error('Failed to fetch featured properties', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve featured properties'
@@ -328,7 +329,7 @@ export class PropertyController {
         data: properties
       });
     } catch (error: any) {
-      console.error('Error fetching similar properties:', error);
+      logger.error('Failed to fetch similar properties', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve similar properties'
@@ -378,7 +379,7 @@ export class PropertyController {
         data: booking
       });
     } catch (error: any) {
-      console.error('Error creating booking:', error);
+      logger.error('Failed to create booking', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to create booking'
@@ -415,7 +416,7 @@ export class PropertyController {
         data: bookings
       });
     } catch (error: any) {
-      console.error('Error fetching property bookings:', error);
+      logger.error('Failed to fetch property bookings', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to retrieve bookings'
@@ -448,7 +449,7 @@ export class PropertyController {
 
       res.status(201).json({ success: true, message: 'Review created successfully', data: review });
     } catch (error: any) {
-      console.error('Error creating review:', error);
+      logger.error('Failed to create review', 'PropertyController', error);
       res.status(400).json({ success: false, message: error.message || 'Failed to create review' });
     }
   };
@@ -475,7 +476,7 @@ export class PropertyController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching property reviews:', error);
+      logger.error('Failed to fetch property reviews', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve reviews'
@@ -527,7 +528,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error uploading property images:', error);
+      logger.error('Failed to upload property images', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to upload images'
@@ -578,7 +579,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error removing property image:', error);
+      logger.error('Failed to remove property image', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to remove image'
@@ -616,7 +617,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error activating property:', error);
+      logger.error('Failed to activate property', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to activate property'
@@ -653,7 +654,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error deactivating property:', error);
+      logger.error('Failed to deactivate property', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to deactivate property'
@@ -681,7 +682,7 @@ export class PropertyController {
         data: dashboard
       });
     } catch (error: any) {
-      console.error('Error fetching host dashboard:', error);
+      logger.error('Failed to fetch host dashboard', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve dashboard data'
@@ -710,7 +711,7 @@ export class PropertyController {
         data: suggestions
       });
     } catch (error: any) {
-      console.error('Error fetching location suggestions:', error);
+      logger.error('Failed to fetch location suggestions', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve location suggestions'
@@ -756,7 +757,7 @@ export class PropertyController {
         data: guests
       });
     } catch (error: any) {
-      console.error('Error fetching guests:', error);
+      logger.error('Failed to fetch guests', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve guests'
@@ -793,7 +794,7 @@ export class PropertyController {
         data: guestHistory
       });
     } catch (error: any) {
-      console.error('Error fetching guest details:', error);
+      logger.error('Failed to fetch guest details', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to retrieve guest details'
@@ -842,7 +843,7 @@ export class PropertyController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching host bookings:', error);
+      logger.error('Failed to fetch host bookings', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve bookings'
@@ -880,7 +881,7 @@ export class PropertyController {
         data: booking
       });
     } catch (error: any) {
-      console.error('Error updating booking:', error);
+      logger.error('Failed to update booking', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to update booking'
@@ -918,7 +919,7 @@ export class PropertyController {
         data: calendar
       });
     } catch (error: any) {
-      console.error('Error fetching booking calendar:', error);
+      logger.error('Failed to fetch booking calendar', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve booking calendar'
@@ -946,7 +947,7 @@ export class PropertyController {
         data: earnings
       });
     } catch (error: any) {
-      console.error('Error fetching earnings overview:', error);
+      logger.error('Failed to fetch earnings overview', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve earnings overview'
@@ -973,7 +974,7 @@ export class PropertyController {
         data: breakdown
       });
     } catch (error: any) {
-      console.error('Error fetching earnings breakdown:', error);
+      logger.error('Failed to fetch earnings breakdown', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve earnings breakdown'
@@ -1003,7 +1004,7 @@ export class PropertyController {
         data: analytics
       });
     } catch (error: any) {
-      console.error('Error fetching analytics:', error);
+      logger.error('Failed to fetch analytics', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve analytics'
@@ -1031,7 +1032,7 @@ export class PropertyController {
         data: dashboard
       });
     } catch (error: any) {
-      console.error('Error fetching enhanced dashboard:', error);
+      logger.error('Failed to fetch enhanced dashboard', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve enhanced dashboard'
@@ -1083,7 +1084,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error updating property availability:', error);
+      logger.error('Failed to update property availability', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to update property availability'
@@ -1128,7 +1129,7 @@ export class PropertyController {
         message: 'Dates blocked successfully'
       });
     } catch (error: any) {
-      console.error('Error blocking dates:', error);
+      logger.error('Failed to block dates', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to block dates'
@@ -1180,7 +1181,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error updating property pricing:', error);
+      logger.error('Failed to update property pricing', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to update property pricing'
@@ -1242,7 +1243,7 @@ export class PropertyController {
         }
       });
     } catch (error: any) {
-      console.error('Error in bulk update:', error);
+      logger.error('Failed to perform bulk update', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to perform bulk update'
@@ -1270,7 +1271,7 @@ export class PropertyController {
         data: dashboard.quickStats
       });
     } catch (error: any) {
-      console.error('Error fetching quick stats:', error);
+      logger.error('Failed to fetch quick stats', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve quick stats'
@@ -1299,7 +1300,7 @@ export class PropertyController {
         data: dashboard.recentActivity.slice(0, limit)
       });
     } catch (error: any) {
-      console.error('Error fetching recent activity:', error);
+      logger.error('Failed to fetch recent activity', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve recent activity'
@@ -1327,7 +1328,7 @@ export class PropertyController {
         data: dashboard
       });
     } catch (error: any) {
-      console.error('Error fetching agent dashboard:', error);
+      logger.error('Failed to fetch agent dashboard', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve agent dashboard'
@@ -1372,7 +1373,7 @@ export class PropertyController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching agent properties:', error);
+      logger.error('Failed to fetch agent properties', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve agent properties'
@@ -1401,7 +1402,7 @@ export class PropertyController {
         data: performance
       });
     } catch (error: any) {
-      console.error('Error fetching agent property performance:', error);
+      logger.error('Failed to fetch agent property performance', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve property performance'
@@ -1438,7 +1439,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error fetching agent property details:', error);
+      logger.error('Failed to fetch agent property details', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to retrieve property details'
@@ -1476,7 +1477,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error updating agent property:', error);
+      logger.error('Failed to update agent property', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to update property'
@@ -1507,14 +1508,14 @@ export class PropertyController {
       }
 
       const bookings = await this.propertyService.getAgentPropertyBookings(agentId, propertyId);
-      
+
       res.json({
         success: true,
         message: 'Agent property bookings retrieved successfully',
         data: bookings
       });
     } catch (error: any) {
-      console.error('Error fetching agent property bookings:', error);
+      logger.error('Failed to fetch agent property bookings', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to retrieve bookings'
@@ -1554,7 +1555,7 @@ export class PropertyController {
         data: booking
       });
     } catch (error: any) {
-      console.error('Error creating agent booking:', error);
+      logger.error('Failed to create agent booking', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to create booking'
@@ -1602,7 +1603,7 @@ export class PropertyController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching agent bookings:', error);
+      logger.error('Failed to fetch agent bookings', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve agent bookings'
@@ -1640,7 +1641,7 @@ export class PropertyController {
         data: calendar
       });
     } catch (error: any) {
-      console.error('Error fetching agent booking calendar:', error);
+      logger.error('Failed to fetch agent booking calendar', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve booking calendar'
@@ -1678,7 +1679,7 @@ export class PropertyController {
         data: booking
       });
     } catch (error: any) {
-      console.error('Error updating agent booking:', error);
+      logger.error('Failed to update agent booking', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to update booking'
@@ -1717,7 +1718,7 @@ export class PropertyController {
         data: analytics
       });
     } catch (error: any) {
-      console.error('Error fetching agent property analytics:', error);
+      logger.error('Failed to fetch agent property analytics', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to retrieve analytics'
@@ -1746,7 +1747,7 @@ export class PropertyController {
         data: summary
       });
     } catch (error: any) {
-      console.error('Error fetching agent properties analytics summary:', error);
+      logger.error('Failed to fetch agent properties analytics summary', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve analytics summary'
@@ -1776,7 +1777,7 @@ export class PropertyController {
         data: earnings
       });
     } catch (error: any) {
-      console.error('Error fetching agent earnings:', error);
+      logger.error('Failed to fetch agent earnings', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve agent earnings'
@@ -1803,7 +1804,7 @@ export class PropertyController {
         data: breakdown
       });
     } catch (error: any) {
-      console.error('Error fetching agent earnings breakdown:', error);
+      logger.error('Failed to fetch agent earnings breakdown', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve earnings breakdown'
@@ -1841,7 +1842,7 @@ export class PropertyController {
         data: properties
       });
     } catch (error: any) {
-      console.error('Error fetching client properties:', error);
+      logger.error('Failed to fetch client properties', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to retrieve client properties'
@@ -1879,7 +1880,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error creating client property:', error);
+      logger.error('Failed to create client property', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to create client property'
@@ -1931,7 +1932,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error uploading agent property images:', error);
+      logger.error('Failed to upload agent property images', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to upload images'
@@ -1977,7 +1978,7 @@ export class PropertyController {
         data: guests
       });
     } catch (error: any) {
-      console.error('Error fetching agent guests:', error);
+      logger.error('Failed to fetch agent guests', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve agent guests'
@@ -2014,7 +2015,7 @@ export class PropertyController {
         data: guests
       });
     } catch (error: any) {
-      console.error('Error fetching client guests:', error);
+      logger.error('Failed to fetch client guests', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to retrieve client guests'
@@ -2054,7 +2055,7 @@ export class PropertyController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching agent property reviews:', error);
+      logger.error('Failed to fetch agent property reviews', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to retrieve reviews'
@@ -2081,7 +2082,7 @@ export class PropertyController {
         data: summary
       });
     } catch (error: any) {
-      console.error('Error fetching agent reviews summary:', error);
+      logger.error('Failed to fetch agent reviews summary', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve reviews summary'
@@ -2111,7 +2112,7 @@ export class PropertyController {
         data: property
       });
     } catch (error: any) {
-      console.error('Error creating agent own property:', error);
+      logger.error('Failed to create agent own property', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to create property'
@@ -2145,7 +2146,7 @@ export class PropertyController {
         data: properties
       });
     } catch (error: any) {
-      console.error('Error fetching agent own properties:', error);
+      logger.error('Failed to fetch agent own properties', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve properties'
@@ -2182,7 +2183,7 @@ export class PropertyController {
         data: bookings
       });
     } catch (error: any) {
-      console.error('Error fetching agent property bookings:', error);
+      logger.error('Failed to fetch agent own property bookings', 'PropertyController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to retrieve bookings'
@@ -2211,7 +2212,7 @@ export class PropertyController {
         data: guests
       });
     } catch (error: any) {
-      console.error('Error fetching agent property guests:', error);
+      logger.error('Failed to fetch agent property guests', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve guests'
@@ -2245,7 +2246,7 @@ export class PropertyController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching all agent properties:', error);
+      logger.error('Failed to fetch all agent properties', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve properties'
@@ -2273,7 +2274,7 @@ export class PropertyController {
         data: dashboard
       });
     } catch (error: any) {
-      console.error('Enhanced agent dashboard error:', error);
+      logger.error('Failed to fetch enhanced agent dashboard', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: error.message || 'Failed to fetch enhanced dashboard data'
@@ -2303,7 +2304,7 @@ export class PropertyController {
         }
       });
     } catch (error: any) {
-      console.error('Additional KPIs error:', error);
+      logger.error('Failed to fetch additional KPIs', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: error.message || 'Failed to fetch additional KPIs'
@@ -2330,7 +2331,7 @@ export class PropertyController {
         data: trends
       });
     } catch (error: any) {
-      console.error('Performance trends error:', error);
+      logger.error('Failed to fetch performance trends', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: error.message || 'Failed to fetch performance trends'
@@ -2357,7 +2358,7 @@ export class PropertyController {
         data: competitiveMetrics
       });
     } catch (error: any) {
-      console.error('Competitive metrics error:', error);
+      logger.error('Failed to fetch competitive metrics', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: error.message || 'Failed to fetch competitive metrics'
@@ -2384,7 +2385,7 @@ export class PropertyController {
         data: segmentation
       });
     } catch (error: any) {
-      console.error('Client segmentation error:', error);
+      logger.error('Failed to fetch client segmentation', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: error.message || 'Failed to fetch client segmentation'
@@ -2485,7 +2486,7 @@ export class PropertyController {
         }
       });
     } catch (error: any) {
-      console.error('Individual KPI error:', error);
+      logger.error('Failed to fetch individual KPI', 'PropertyController', error);
       res.status(500).json({
         success: false,
         message: error.message || 'Failed to fetch KPI data'

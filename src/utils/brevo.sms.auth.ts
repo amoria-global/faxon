@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { config } from '../config/config';
+import { PhoneUtils } from './phone.utils';
 
 interface BrevoSMSContact {
   number: string;
@@ -236,7 +237,7 @@ export class BrevoSMSService {
       console.log('✅ API connection successful');
       
       // Format phone number
-      const formattedPhone = this.formatPhoneNumber(phoneNumber);
+      const formattedPhone = PhoneUtils.formatPhone(phoneNumber, true);
       console.log('📞 Formatted phone number:', formattedPhone);
       
       // Default test message
@@ -278,7 +279,7 @@ export class BrevoSMSService {
   async sendWelcomeSMS(context: SMSContext): Promise<void> {
     if (!context.user.phone) return;
 
-    const phoneNumber = this.formatPhoneNumber(context.user.phone, context.user.phoneCountryCode);
+    const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
     const content = this.getWelcomeSMSContent(context);
 
     const smsData: BrevoSMSData = {
@@ -297,7 +298,7 @@ export class BrevoSMSService {
   async sendPhoneVerificationSMS(context: SMSContext): Promise<void> {
     if (!context.user.phone || !context.verification) return;
 
-    const phoneNumber = this.formatPhoneNumber(context.user.phone, context.user.phoneCountryCode);
+    const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
     const content = this.getPhoneVerificationSMSContent(context);
 
     const smsData: BrevoSMSData = {
@@ -315,7 +316,7 @@ export class BrevoSMSService {
   async sendPasswordResetSMS(context: SMSContext): Promise<void> {
     if (!context.user.phone || !context.verification) return;
 
-    const phoneNumber = this.formatPhoneNumber(context.user.phone, context.user.phoneCountryCode);
+    const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
     const content = this.getPasswordResetSMSContent(context);
 
     const smsData: BrevoSMSData = {
@@ -334,7 +335,7 @@ export class BrevoSMSService {
   async sendPasswordChangedSMS(context: SMSContext): Promise<void> {
     if (!context.user.phone) return;
 
-    const phoneNumber = this.formatPhoneNumber(context.user.phone, context.user.phoneCountryCode);
+    const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
     const content = this.getPasswordChangedSMSContent(context);
 
     const smsData: BrevoSMSData = {
@@ -353,7 +354,7 @@ export class BrevoSMSService {
   async sendLoginNotificationSMS(context: SMSContext): Promise<void> {
     if (!context.user.phone) return;
 
-    const phoneNumber = this.formatPhoneNumber(context.user.phone, context.user.phoneCountryCode);
+    const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
     const content = this.getLoginNotificationSMSContent(context);
 
     const smsData: BrevoSMSData = {
@@ -372,7 +373,7 @@ export class BrevoSMSService {
   async sendSuspiciousActivitySMS(context: SMSContext): Promise<void> {
     if (!context.user.phone) return;
 
-    const phoneNumber = this.formatPhoneNumber(context.user.phone, context.user.phoneCountryCode);
+    const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
     const content = this.getSuspiciousActivitySMSContent(context);
 
     const smsData: BrevoSMSData = {
@@ -391,7 +392,7 @@ export class BrevoSMSService {
   async sendAccountStatusChangeSMS(context: SMSContext, status: 'suspended' | 'reactivated'): Promise<void> {
     if (!context.user.phone) return;
 
-    const phoneNumber = this.formatPhoneNumber(context.user.phone, context.user.phoneCountryCode);
+    const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
     const content = this.getAccountStatusSMSContent(context, status);
 
     const smsData: BrevoSMSData = {
@@ -410,7 +411,7 @@ export class BrevoSMSService {
   async sendTwoFactorSMS(context: SMSContext): Promise<void> {
     if (!context.user.phone || !context.verification) return;
 
-    const phoneNumber = this.formatPhoneNumber(context.user.phone, context.user.phoneCountryCode);
+    const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
     const content = this.getTwoFactorSMSContent(context);
 
     const smsData: BrevoSMSData = {
@@ -428,7 +429,7 @@ export class BrevoSMSService {
   async sendKYCStatusSMS(context: SMSContext, kycStatus: 'approved' | 'rejected' | 'pending_review'): Promise<void> {
     if (!context.user.phone) return;
 
-    const phoneNumber = this.formatPhoneNumber(context.user.phone, context.user.phoneCountryCode);
+    const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
     const content = this.getKYCStatusSMSContent(context, kycStatus);
 
     const smsData: BrevoSMSData = {
@@ -500,41 +501,6 @@ export class BrevoSMSService {
 
   // --- UTILITY METHODS ---
 
-  private formatPhoneNumber(phone: string, countryCode?: string): string {
-    console.log('📞 Formatting phone number:', { phone, countryCode });
-    
-    // Remove any non-digit characters except +
-    let cleanPhone = phone.replace(/[^\d+]/g, '');
-    
-    // If phone already starts with +, return as is (assuming it's correct)
-    if (cleanPhone.startsWith('+')) {
-      console.log('📞 Phone already formatted:', cleanPhone);
-      return cleanPhone;
-    }
-    
-    // Remove any leading zeros
-    cleanPhone = cleanPhone.replace(/^0+/, '');
-    
-    // If country code is provided
-    if (countryCode) {
-      const cleanCountryCode = countryCode.replace(/[^\d]/g, '');
-      const formatted = `+${cleanCountryCode}${cleanPhone}`;
-      console.log('📞 Phone formatted with country code:', formatted);
-      return formatted;
-    }
-    
-    // Default to Rwanda (+250) if no country code and doesn't start with country code
-    if (!cleanPhone.startsWith('250')) {
-      const formatted = `+250${cleanPhone}`;
-      console.log('📞 Phone formatted with default +250:', formatted);
-      return formatted;
-    }
-    
-    // Already has 250, just add +
-    const formatted = `+${cleanPhone}`;
-    console.log('📞 Phone formatted:', formatted);
-    return formatted;
-  }
 
   private createSMSContext(user: any, security?: any, verification?: any): SMSContext {
     return {

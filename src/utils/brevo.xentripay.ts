@@ -16,6 +16,7 @@ interface DepositInitiatedEmailData {
   transactionId: string;
   description: string;
   instructions: string;
+  paymentMethod: string;
 }
 
 interface FundsHeldEmailData {
@@ -24,6 +25,7 @@ interface FundsHeldEmailData {
   transactionId: string;
   amount: number;
   description: string;
+  paymentMethod: string;
 }
 
 interface FundsHeldSellerEmailData {

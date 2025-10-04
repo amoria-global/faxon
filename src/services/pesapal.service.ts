@@ -2,6 +2,10 @@
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import crypto from 'crypto';
+import { config } from '../config/config';
+import { PhoneUtils } from '../utils/phone.utils';
+import { CurrencyUtils } from '../utils/currency.utils';
+import { logger } from '../utils/logger';
 import {
   PesapalConfig,
   PesapalCredentials,
@@ -22,13 +26,28 @@ interface IPNRegistration {
   expires_at?: Date;
 }
 
+// Exchange Rate Response from API (Hexarate)
+interface ExchangeRateResponse {
+  success: boolean;
+  base: string;
+  date: string;
+  rates: {
+    [key: string]: number;
+  };
+}
+
 export class PesapalService {
+  createOrder(arg0: { amount: number; description: any; buyerEmail: any; buyerPhone: any; reference: string; }) {
+    throw new Error('Method not implemented.');
+  }
   private client: AxiosInstance;
   private config: PesapalConfig;
   private credentials: PesapalCredentials = {};
   private ipnRegistration: IPNRegistration | null = null;
   private ipnRegistrationPromise: Promise<string> | null = null;
   private authPromise: Promise<string | null> | null = null;
+  private exchangeRateCache: { rate: number; timestamp: number } | null = null;
+  private readonly CACHE_DURATION = 3600000; // 1 hour in milliseconds
 
   constructor(config: PesapalConfig) {
     this.config = config;
@@ -59,10 +78,10 @@ export class PesapalService {
       (response) => response,
       async (error: AxiosError) => {
         if (error.response?.status === 401) {
-          console.log('[PESAPAL] 401 error - clearing credentials and retrying');
+          logger.warn('401 error - clearing credentials and retrying', 'PesapalService');
           this.credentials = {};
           this.authPromise = null;
-          
+
           if (error.config && !error.config.headers['X-Retry']) {
             const token = await this.getValidToken();
             if (token) {
@@ -102,15 +121,15 @@ export class PesapalService {
 
     } catch (error: any) {
       this.authPromise = null;
-      console.error('Pesapal authentication failed:', error.response?.data || error.message);
+      logger.error('Pesapal authentication failed', 'PesapalService', error);
       return null;
     }
   }
 
   private async fetchNewToken(): Promise<string | null> {
     try {
-      console.log('[PESAPAL] Fetching new authentication token...');
-      
+      logger.info('Fetching new authentication token', 'PesapalService');
+
       const authData: PesapalAuthRequest = {
         consumer_key: this.config.consumerKey,
         consumer_secret: this.config.consumerSecret
@@ -129,7 +148,10 @@ export class PesapalService {
       );
 
       if (response.data.error) {
-        throw new Error(`Pesapal auth error: ${response.data.error.message}`);
+        const errorMessage = typeof response.data.error === 'object' && response.data.error.message
+          ? response.data.error.message
+          : String(response.data.error);
+        throw new Error(`Pesapal auth error: ${errorMessage}`);
       }
 
       if (!response.data.token) {
@@ -137,29 +159,29 @@ export class PesapalService {
       }
 
       const expiresAt = new Date(response.data.expiryDate).getTime();
-      
+
       this.credentials = {
         accessToken: response.data.token,
         expiresAt
       };
 
-      console.log('[PESAPAL] ✅ Authentication successful. Token expires:', new Date(expiresAt).toISOString());
+      logger.info('Authentication successful', 'PesapalService', { expiresAt: new Date(expiresAt).toISOString() });
 
       return this.credentials.accessToken;
     } catch (error: any) {
-      console.error('[PESAPAL] ❌ Authentication failed:', {
+      logger.error('Authentication failed', 'PesapalService', {
         message: error.message,
-        response: error.response?.data,
         status: error.response?.status
       });
-      
+
       this.credentials = {};
-      
-      throw new Error(
-        error.response?.data?.error?.message || 
-        error.message || 
-        'Failed to authenticate with Pesapal'
-      );
+
+      const errorMessage = error.response?.data?.error
+        ? (typeof error.response.data.error === 'object' && error.response.data.error.message
+          ? error.response.data.error.message
+          : String(error.response.data.error))
+        : error.message || 'Failed to authenticate with Pesapal';
+      throw new Error(errorMessage);
     }
   }
 
@@ -184,24 +206,22 @@ export class PesapalService {
         this.ipnRegistrationPromise = null;
       }
     } catch (error: any) {
-      console.error('[PESAPAL] Failed to get valid IPN ID:', error);
+      logger.error('Failed to get valid IPN ID', 'PesapalService', error);
       throw new Error(`IPN registration failed: ${error.message}`);
     }
   }
 
   private async registerIPNUrl(): Promise<string> {
     try {
-      console.log('[PESAPAL] Registering IPN URL with Pesapal...');
-      
+      logger.info('Registering IPN URL with Pesapal', 'PesapalService');
+
       const token = await this.getValidToken();
       if (!token) {
         throw new Error('Failed to obtain authentication token for IPN registration');
       }
-      
+
       const ipnUrl = this.config.callbackUrl.replace('/callback', '/ipn');
-      
-      console.log('[PESAPAL] IPN URL:', ipnUrl);
-      
+
       const registrationData = {
         url: ipnUrl,
         ipn_notification_type: 'GET'
@@ -209,13 +229,11 @@ export class PesapalService {
 
       const response = await this.client.post('/api/URLSetup/RegisterIPN', registrationData);
 
-      console.log('[PESAPAL] IPN registration response:', {
-        status: response.status,
-        data: response.data
-      });
-
       if (response.data.error) {
-        throw new Error(`IPN registration error: ${response.data.error.message}`);
+        const errorMessage = typeof response.data.error === 'object' && response.data.error.message
+          ? response.data.error.message
+          : String(response.data.error);
+        throw new Error(`IPN registration error: ${errorMessage}`);
       }
 
       if (!response.data.ipn_id) {
@@ -229,24 +247,23 @@ export class PesapalService {
         expires_at: response.data.expires_at ? new Date(response.data.expires_at) : undefined
       };
 
-      console.log(`[PESAPAL] ✅ IPN URL registered successfully. IPN ID: ${response.data.ipn_id}`);
-      
+      logger.info('IPN URL registered successfully', 'PesapalService', { ipnId: response.data.ipn_id });
+
       return response.data.ipn_id;
     } catch (error: any) {
-      console.error('[PESAPAL] ❌ IPN registration failed:', {
+      logger.error('IPN registration failed', 'PesapalService', {
         message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-        url: error.config?.url
+        status: error.response?.status
       });
-      
+
       this.ipnRegistration = null;
-      
-      throw new Error(
-        error.response?.data?.error?.message || 
-        error.message || 
-        'Failed to register IPN URL'
-      );
+
+      const errorMessage = error.response?.data?.error
+        ? (typeof error.response.data.error === 'object' && error.response.data.error.message
+          ? error.response.data.error.message
+          : String(error.response.data.error))
+        : error.message || 'Failed to register IPN URL';
+      throw new Error(errorMessage);
     }
   }
 
@@ -270,23 +287,98 @@ export class PesapalService {
       const response = await this.client.get('/api/URLSetup/GetIpnList');
       return response.data || [];
     } catch (error: any) {
-      console.error('[PESAPAL] Failed to get registered IPNs:', error);
+      logger.error('Failed to get registered IPNs', 'PesapalService', error);
       return [];
     }
   }
 
+  // === EXCHANGE RATE METHODS ===
+
+  /**
+   * Fetch the latest USD to RWF exchange rate
+   */
+  async getExchangeRate(): Promise<number> {
+    try {
+      // Check cache first
+      if (this.exchangeRateCache) {
+        const now = Date.now();
+        if (now - this.exchangeRateCache.timestamp < this.CACHE_DURATION) {
+          return this.exchangeRateCache.rate;
+        }
+      }
+
+      // Fetch fresh rate from Hexarate API
+      const apiUrl = config.currencies.exchangeApiUrl;
+      const url = `${apiUrl}/USD?target=RWF`;
+
+      const response = await axios.get<ExchangeRateResponse>(url, {
+        timeout: 10000 // 10 seconds timeout
+      });
+
+      if (!response.data.success) {
+        throw new Error('Failed to fetch exchange rate');
+      }
+
+      const rate = response.data.rates.RWF;
+      if (!rate) {
+        throw new Error('RWF rate not found in response');
+      }
+
+      // Cache the rate
+      this.exchangeRateCache = {
+        rate,
+        timestamp: Date.now()
+      };
+
+      logger.debug('Exchange rate fetched and cached', 'PesapalService', { rate });
+
+      return rate;
+    } catch (error: any) {
+      logger.warn('Failed to fetch exchange rate', 'PesapalService', { error: error.message });
+
+      // Return cached rate if available, even if expired
+      if (this.exchangeRateCache) {
+        return this.exchangeRateCache.rate;
+      }
+
+      // Last resort: use a default rate (should be configured)
+      const fallbackRate = 1300; // Approximate USD to RWF rate
+      logger.warn('Using fallback exchange rate', 'PesapalService', { fallbackRate });
+      return fallbackRate;
+    }
+  }
+
+
   // === CHECKOUT (DEPOSIT) OPERATIONS ===
-  
+
   async createCheckout(request: PesapalCheckoutRequest): Promise<PesapalCheckoutResponse> {
     try {
       const ipnId = await this.getValidIPNId();
-      
+
+      // Convert USD amount to RWF if currency is USD
+      let finalAmount = request.amount;
+      const originalCurrency = request.currency;
+
+      if (originalCurrency.toUpperCase() === 'USD') {
+        const usdAmount = request.amount;
+        finalAmount = await CurrencyUtils.convertUsdToRwf(usdAmount);
+
+        logger.debug('Checkout currency conversion', 'PesapalService', {
+          originalAmount: usdAmount,
+          originalCurrency: 'USD',
+          convertedAmount: finalAmount,
+          convertedCurrency: 'RWF'
+        });
+      }
+
       const checkoutRequestWithIPN = {
         ...request,
+        amount: finalAmount,
+        currency: 'RWF', // Pesapal processes in RWF
         notification_id: ipnId
       };
 
-      console.log('[PESAPAL] Creating checkout with IPN ID:', ipnId);
+      logger.debug('Creating checkout with IPN', 'PesapalService', { ipnId });
 
       const response = await this.client.post<PesapalCheckoutResponse>(
         '/api/Transactions/SubmitOrderRequest',
@@ -294,21 +386,29 @@ export class PesapalService {
       );
 
       if (response.data.error) {
-        throw new Error(`Pesapal checkout error: ${response.data.error.message}`);
+        const errorMessage = typeof response.data.error === 'object' && response.data.error.message
+          ? response.data.error.message
+          : String(response.data.error);
+        throw new Error(`Pesapal checkout error: ${errorMessage}`);
       }
+
+      logger.info('Checkout created successfully', 'PesapalService', {
+        orderTrackingId: response.data.order_tracking_id,
+        merchantReference: response.data.merchant_reference
+      });
 
       return response.data;
     } catch (error: any) {
-      console.error('[PESAPAL] Checkout failed:', {
+      logger.error('Checkout failed', 'PesapalService', {
         message: error.message,
-        response: error.response?.data,
         status: error.response?.status
       });
-      throw new Error(
-        error.response?.data?.error?.message || 
-        error.message || 
-        'Checkout request failed'
-      );
+      const errorMessage = error.response?.data?.error
+        ? (typeof error.response.data.error === 'object' && error.response.data.error.message
+          ? error.response.data.error.message
+          : String(error.response.data.error))
+        : error.message || 'Checkout request failed';
+      throw new Error(errorMessage);
     }
   }
 
@@ -316,50 +416,78 @@ export class PesapalService {
   
   async getTransactionStatus(orderTrackingId: string): Promise<PesapalTransactionStatus> {
     try {
-      console.log(`[PESAPAL] Fetching status for tracking ID: ${orderTrackingId}`);
-      
+      logger.debug('Fetching transaction status', 'PesapalService', { orderTrackingId });
+
       const response = await this.client.get<PesapalTransactionStatus>(
         `/api/Transactions/GetTransactionStatus?orderTrackingId=${orderTrackingId}`
       );
 
-      console.log('[PESAPAL] Status response:', {
-        payment_status_description: response.data.payment_status_description,
-        status_code: response.data.status_code,
-        merchant_reference: response.data.merchant_reference
-      });
-
       return response.data;
     } catch (error: any) {
-      console.error('[PESAPAL] Get transaction status failed:', error);
-      throw new Error(
-        error.response?.data?.error?.message || 
-        error.message || 
-        'Failed to get transaction status'
-      );
+      logger.error('Get transaction status failed', 'PesapalService', error);
+      const errorMessage = error.response?.data?.error
+        ? (typeof error.response.data.error === 'object' && error.response.data.error.message
+          ? error.response.data.error.message
+          : String(error.response.data.error))
+        : error.message || 'Failed to get transaction status';
+      throw new Error(errorMessage);
     }
   }
 
   // === PAYOUT OPERATIONS ===
-  
+
   async createPayout(request: PesapalPayoutRequest): Promise<PesapalPayoutResponse> {
     try {
+      // Convert USD amount to RWF if currency is USD
+      let finalAmount = request.transfer_details.amount;
+      const originalCurrency = request.transfer_details.currency_code;
+
+      if (originalCurrency.toUpperCase() === 'USD') {
+        const usdAmount = request.transfer_details.amount;
+        finalAmount = await CurrencyUtils.convertUsdToRwf(usdAmount);
+
+        logger.debug('Payout currency conversion', 'PesapalService', {
+          originalAmount: usdAmount,
+          originalCurrency: 'USD',
+          convertedAmount: finalAmount,
+          convertedCurrency: 'RWF'
+        });
+      }
+
+      const payoutRequest: PesapalPayoutRequest = {
+        ...request,
+        transfer_details: {
+          ...request.transfer_details,
+          amount: finalAmount,
+          currency_code: 'RWF' // Pesapal processes in RWF
+        }
+      };
+
       const response = await this.client.post<PesapalPayoutResponse>(
         '/api/Transactions/Openfloat/SubmitDirectPayRequest',
-        request
+        payoutRequest
       );
 
       if (response.data.error) {
-        throw new Error(`Pesapal payout error: ${response.data.error.message}`);
+        const errorMessage = typeof response.data.error === 'object' && response.data.error.message
+          ? response.data.error.message
+          : String(response.data.error);
+        throw new Error(`Pesapal payout error: ${errorMessage}`);
       }
+
+      logger.info('Payout created successfully', 'PesapalService', {
+        requestId: response.data.requestId
+      });
 
       return response.data;
     } catch (error: any) {
-      console.error('[PESAPAL] Payout failed:', error);
-      throw new Error(
-        error.response?.data?.error?.message || 
-        error.message || 
-        'Payout request failed'
-      );
+      logger.error('Payout failed', 'PesapalService', error);
+      const errorMessage = error.response?.data?.error
+        ? (typeof error.response.data.error === 'object' && error.response.data.error.message
+          ? error.response.data.error.message
+          : String(error.response.data.error))
+        : error.message || 'Payout request failed';
+      throw new Error(errorMessage);
     }
   }
 
@@ -371,25 +499,41 @@ export class PesapalService {
 
       return response.data;
     } catch (error: any) {
-      console.error('[PESAPAL] Get payout status failed:', error);
-      throw new Error(
-        error.response?.data?.error?.message || 
-        error.message || 
-        'Failed to get payout status'
-      );
+      logger.error('Get payout status failed', 'PesapalService', error);
+      const errorMessage = error.response?.data?.error
+        ? (typeof error.response.data.error === 'object' && error.response.data.error.message
+          ? error.response.data.error.message
+          : String(error.response.data.error))
+        : error.message || 'Failed to get payout status';
+      throw new Error(errorMessage);
     }
   }
 
   // === REFUND OPERATIONS ===
-  
-  async processRefund(orderTrackingId: string, amount?: number): Promise<any> {
+
+  async processRefund(orderTrackingId: string, amount?: number, currency?: string): Promise<any> {
     try {
       const requestData: any = {
         order_tracking_id: orderTrackingId
       };
 
       if (amount) {
-        requestData.amount = amount;
+        // Convert USD amount to RWF if currency is USD
+        let finalAmount = amount;
+
+        if (currency && currency.toUpperCase() === 'USD') {
+          const usdAmount = amount;
+          finalAmount = await CurrencyUtils.convertUsdToRwf(usdAmount);
+
+          logger.debug('Refund currency conversion', 'PesapalService', {
+            originalAmount: usdAmount,
+            originalCurrency: 'USD',
+            convertedAmount: finalAmount,
+            convertedCurrency: 'RWF'
+          });
+        }
+
+        requestData.amount = finalAmount;
       }
 
       const response = await this.client.post(
@@ -398,17 +542,26 @@ export class PesapalService {
       );
 
       if (response.data.error) {
-        throw new Error(`Pesapal refund error: ${response.data.error.message}`);
+        const errorMessage = typeof response.data.error === 'object' && response.data.error.message
+          ? response.data.error.message
+          : String(response.data.error);
+        throw new Error(`Pesapal refund error: ${errorMessage}`);
       }
+
+      logger.info('Refund processed successfully', 'PesapalService', {
+        orderTrackingId,
+        amount: requestData.amount
+      });
 
       return response.data;
     } catch (error: any) {
-      console.error('[PESAPAL] Refund failed:', error);
-      throw new Error(
-        error.response?.data?.error|| error.message || 
-        error.message || 
-        'Refund request failed'
-      );
+      logger.error('Refund failed', 'PesapalService', error);
+      const errorMessage = error.response?.data?.error
+        ? (typeof error.response.data.error === 'object' && error.response.data.error.message
+          ? error.response.data.error.message
+          : String(error.response.data.error))
+        : error.message || 'Refund request failed';
+      throw new Error(errorMessage);
     }
   }
 
@@ -426,7 +579,7 @@ export class PesapalService {
         Buffer.from(expectedSignature, 'hex')
       );
     } catch (error) {
-      console.error('[PESAPAL] Webhook validation failed:', error);
+      logger.error('Webhook validation failed', 'PesapalService', error);
       return false;
     }
   }
@@ -439,55 +592,6 @@ export class PesapalService {
     return `${prefix}-${timestamp}-${random}`;
   }
 
-  validateMobileNumber(phoneNumber: string, countryCode: string = 'RW'): {
-    isValid: boolean;
-    formattedNumber?: string;
-    provider?: string;
-    errors?: string[];
-  } {
-    if (countryCode === 'RW') {
-      const cleanPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
-      const rwandaRegex = /^(\+250|250|0)?(7[0-9]{8})$/;
-      const match = cleanPhone.match(rwandaRegex);
-
-      if (!match) {
-        return {
-          isValid: false,
-          errors: ['Invalid Rwanda phone number format']
-        };
-      }
-
-      const nationalNumber = match[2];
-      const formattedNumber = '250' + nationalNumber;
-
-      let provider: string;
-      const prefix = nationalNumber.substring(1, 3);
-
-      if (['70', '71', '72', '73'].includes(prefix)) {
-        provider = 'MTN';
-      } else if (['75', '76'].includes(prefix)) {
-        provider = 'AIRTEL';
-      } else if (['78', '79'].includes(prefix)) {
-        provider = 'TIGO';
-      } else {
-        return {
-          isValid: false,
-          errors: ['Unsupported mobile provider']
-        };
-      }
-
-      return {
-        isValid: true,
-        formattedNumber,
-        provider
-      };
-    }
-
-    return {
-      isValid: false,
-      errors: ['Unsupported country code']
-    };
-  }
 
   validateBankAccount(accountNumber: string, bankCode: string): {
     isValid: boolean;
@@ -537,10 +641,9 @@ export class PesapalService {
     const paymentStatusDescription = pesapalResponse.payment_status_description;
     const status = pesapalResponse.status;
 
-    console.log('[PESAPAL] Mapping status:', {
+    logger.debug('Mapping Pesapal status', 'PesapalService', {
       status_code: statusCode,
-      payment_status_description: paymentStatusDescription,
-      status: status
+      payment_status_description: paymentStatusDescription
     });
 
     // Priority 1: Check status_code (most reliable)
@@ -555,7 +658,7 @@ export class PesapalService {
         case 3:
           return 'REFUNDED'; // REVERSED
         default:
-          console.warn(`[PESAPAL] Unknown status_code: ${statusCode}`);
+          logger.warn('Unknown status_code from Pesapal', 'PesapalService', { statusCode });
           return 'PENDING';
       }
     }
@@ -606,7 +709,7 @@ export class PesapalService {
     }
 
     // Default to PENDING if we can't determine status
-    console.warn('[PESAPAL] Could not determine payment status, defaulting to PENDING');
+    logger.warn('Could not determine payment status, defaulting to PENDING', 'PesapalService');
     return 'PENDING';
   }
 

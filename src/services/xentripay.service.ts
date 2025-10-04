@@ -1,7 +1,11 @@
-// services/xentripay.service.ts - Corrected to match API documentation
+// services/xentripay.service.ts - Regenerated to match API documentation exactly, with validation fixes and provider mapping enhancements
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import crypto from 'crypto';
+import { config } from '../config/config';
+import { PhoneUtils } from '../utils/phone.utils';
+import { CurrencyUtils } from '../utils/currency.utils';
+import { logger } from '../utils/logger';
 
 // ==================== TYPES ====================
 
@@ -12,14 +16,26 @@ export interface XentriPayConfig {
   timeout?: number;
 }
 
+// Exchange Rate Response from API (Hexarate)
+interface ExchangeRateResponse {
+  status_code: number;
+  data: {
+    base: string;
+    target: string;
+    mid: number;
+    unit: number;
+    timestamp: string;
+  };
+}
+
 // COLLECTIONS (Deposits)
 export interface CollectionRequest {
   email: string;
   cname: string;
-  amount: number; // Must be whole number (no decimals)
+  amount: number; // USD amount - will be converted to RWF
   cnumber: string; // 10 digits, customer phone without country code
   msisdn: string; // Full phone with country code e.g. 250780371519
-  currency: string; // Must be "RWF"
+  currency: string; // Currency of the amount (USD)
   pmethod: string; // e.g. "momo"
   chargesIncluded?: string; // "true" or "false"
 }
@@ -40,15 +56,15 @@ export interface CollectionStatusResponse {
   updatedAt: string;
 }
 
-// PAYOUTS (Withdrawals)
+// PAYOUTS (Withdrawals/Refunds)
 export interface PayoutRequest {
   customerReference: string; // Unique reference from your business
   telecomProviderId: string; // e.g. "63510" for MTN, "63514" for Airtel
   msisdn: string; // Phone without country code e.g. "0795876908"
   name: string; // Recipient's registered name
   transactionType: string; // "PAYOUT"
-  currency: string; // "RWF"
-  amount: number; // Must be whole number (no decimals)
+  currency: string; // Currency of the amount (USD)
+  amount: number; // USD amount - will be converted to RWF
 }
 
 export interface PayoutResponse {
@@ -101,18 +117,37 @@ export interface WalletBalanceResponse {
   active: boolean;
 }
 
+// Bulk Payout Request (for admin bulk releases)
+export interface BulkPayoutRequest {
+  payouts: PayoutRequest[];
+}
+
+// Bulk Payout Response
+export interface BulkPayoutResponse {
+  success: number;
+  failed: number;
+  results: Array<{
+    customerReference: string;
+    status: string;
+    internalRef?: string;
+    error?: string;
+  }>;
+}
+
 // ==================== SERVICE ====================
 
 export class XentriPayService {
   private client: AxiosInstance;
   private config: XentriPayConfig;
+  private exchangeRateCache: { rate: number; timestamp: number } | null = null;
+  private readonly CACHE_DURATION = 3600000; // 1 hour in milliseconds
 
   constructor(config: XentriPayConfig) {
     this.config = {
       ...config,
       timeout: config.timeout || 30000
     };
-    
+
     this.client = axios.create({
       baseURL: this.config.baseUrl,
       timeout: this.config.timeout,
@@ -126,15 +161,14 @@ export class XentriPayService {
     // Request interceptor
     this.client.interceptors.request.use(
       (config) => {
-        console.log('[XENTRIPAY] Request:', {
+        logger.debug('XentriPay API request', 'XentriPayService', {
           method: config.method?.toUpperCase(),
-          url: config.url,
-          data: config.data
+          url: config.url
         });
         return config;
       },
       (error) => {
-        console.error('[XENTRIPAY] Request error:', error);
+        logger.error('XentriPay request error', 'XentriPayService', error);
         return Promise.reject(error);
       }
     );
@@ -142,17 +176,11 @@ export class XentriPayService {
     // Response interceptor
     this.client.interceptors.response.use(
       (response) => {
-        console.log('[XENTRIPAY] Response:', {
-          status: response.status,
-          data: response.data
-        });
         return response;
       },
       async (error: AxiosError) => {
-        console.error('[XENTRIPAY] API Error:', {
+        logger.error('XentriPay API error', 'XentriPayService', {
           status: error.response?.status,
-          statusText: error.response?.statusText,
-          data: error.response?.data,
           message: error.message
         });
         return Promise.reject(this.handleError(error));
@@ -160,29 +188,90 @@ export class XentriPayService {
     );
   }
 
+  // ==================== EXCHANGE RATE METHODS ====================
+
+  /**
+   * Fetch the latest USD to RWF exchange rate
+   */
+  async getExchangeRate(): Promise<number> {
+    try {
+      // Check cache first
+      if (this.exchangeRateCache) {
+        const now = Date.now();
+        if (now - this.exchangeRateCache.timestamp < this.CACHE_DURATION) {
+          return this.exchangeRateCache.rate;
+        }
+      }
+
+      // Fetch fresh rate from Hexarate API
+      const apiUrl = config.currencies.exchangeApiUrl;
+      const url = `${apiUrl}/USD?target=RWF`;
+
+      const response = await axios.get<ExchangeRateResponse>(url, {
+        timeout: 10000 // 10 seconds timeout
+      });
+
+      if (response.data.status_code !== 200) {
+        throw new Error('Failed to fetch exchange rate');
+      }
+
+      const rate = response.data.data.mid;
+      if (!rate) {
+        throw new Error('Exchange rate not found in response');
+      }
+
+      // Cache the rate
+      this.exchangeRateCache = {
+        rate,
+        timestamp: Date.now()
+      };
+
+      return rate;
+    } catch (error: any) {
+      logger.warn('Failed to fetch exchange rate', 'XentriPayService', { error: error.message });
+
+      // Return cached rate if available, even if expired
+      if (this.exchangeRateCache) {
+        return this.exchangeRateCache.rate;
+      }
+
+      // Last resort: use a default rate (should be configured)
+      const fallbackRate = 1300; // Approximate USD to RWF rate
+      logger.warn('Using fallback exchange rate', 'XentriPayService', { fallbackRate });
+      return fallbackRate;
+    }
+  }
+
+
   // ==================== COLLECTIONS API ====================
 
   /**
    * Initiate a collection (deposit) from customer
    * Endpoint: POST /api/collections/initiate
+   * Note: Accepts USD amount but processes in RWF
    */
   async initiateCollection(request: CollectionRequest): Promise<CollectionResponse> {
     try {
-      // Validate amount is whole number
-      if (!Number.isInteger(request.amount)) {
-        throw new Error('Amount must be a whole number (no decimals)');
-      }
+      // Convert USD amount to RWF
+      const usdAmount = request.amount;
+      const rwfAmount = await CurrencyUtils.convertUsdToRwf(usdAmount);
 
       // Validate customer number format (10 digits)
       if (!/^\d{10}$/.test(request.cnumber)) {
-        throw new Error('Customer number must be exactly 10 digits');
+        throw new Error('Customer number must be exactly 10 digits with no spaces or letters');
       }
 
-      // Ensure currency is RWF
+      // Prepare payload with RWF amount and currency
       const payload = {
         ...request,
-        currency: 'RWF'
+        amount: rwfAmount, // Send RWF amount to XentriPay
+        currency: 'RWF' // XentriPay processes in RWF
       };
+
+      logger.debug('Collection currency conversion', 'XentriPayService', {
+        originalAmount: usdAmount,
+        convertedAmount: rwfAmount
+      });
 
       const response = await this.client.post<CollectionResponse>(
         '/api/collections/initiate',
@@ -193,14 +282,13 @@ export class XentriPayService {
         throw new Error(response.data.reply || 'Collection initiation failed');
       }
 
-      console.log('[XENTRIPAY] ✅ Collection initiated:', {
-        refid: response.data.refid,
-        tid: response.data.tid
+      logger.info('Collection initiated successfully', 'XentriPayService', {
+        refid: response.data.refid
       });
 
       return response.data;
     } catch (error: any) {
-      console.error('[XENTRIPAY] ❌ Collection initiation failed:', error);
+      logger.error('Collection initiation failed', 'XentriPayService', error);
       throw error;
     }
   }
@@ -215,14 +303,9 @@ export class XentriPayService {
         `/api/collections/status/${refid}`
       );
 
-      console.log('[XENTRIPAY] Collection status:', {
-        refid: response.data.refid,
-        status: response.data.status
-      });
-
       return response.data;
     } catch (error: any) {
-      console.error('[XENTRIPAY] ❌ Failed to get collection status:', error);
+      logger.error('Failed to get collection status', 'XentriPayService', error);
       throw error;
     }
   }
@@ -230,25 +313,25 @@ export class XentriPayService {
   // ==================== PAYOUTS API ====================
 
   /**
-   * Create a payout (withdrawal) to customer
+   * Create a payout (withdrawal/refund) to customer
    * Endpoint: POST /api/payment-requests
+   * Note: Accepts USD amount but processes in RWF
    */
   async createPayout(request: PayoutRequest): Promise<PayoutResponse> {
     try {
-      // Validate amount is whole number
-      if (!Number.isInteger(request.amount)) {
-        throw new Error('Amount must be a whole number (no decimals)');
-      }
+      // Convert USD amount to RWF
+      const usdAmount = request.amount;
+      const rwfAmount = await CurrencyUtils.convertUsdToRwf(usdAmount);
 
-      // Ensure required fields
+      // Prepare payload with RWF amount and currency
       const payload: PayoutRequest = {
         customerReference: request.customerReference,
         telecomProviderId: request.telecomProviderId,
         msisdn: request.msisdn,
         name: request.name,
         transactionType: 'PAYOUT',
-        currency: 'RWF',
-        amount: request.amount
+        currency: 'RWF', // XentriPay processes in RWF
+        amount: rwfAmount // Send RWF amount to XentriPay
       };
 
       const response = await this.client.post<PayoutResponse>(
@@ -256,15 +339,56 @@ export class XentriPayService {
         payload
       );
 
-      console.log('[XENTRIPAY] ✅ Payout created:', {
+      logger.info('Payout created successfully', 'XentriPayService', {
         internalRef: response.data.internalRef,
-        status: response.data.status,
-        customerReference: response.data.customerReference
+        status: response.data.status
       });
 
       return response.data;
     } catch (error: any) {
-      console.error('[XENTRIPAY] ❌ Payout creation failed:', error);
+      logger.error('Payout creation failed', 'XentriPayService', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Bulk create payouts (for admin bulk approvals)
+   * Endpoint: POST /api/payment-requests (loop with validation)
+   */
+  async createBulkPayouts(request: BulkPayoutRequest): Promise<BulkPayoutResponse> {
+    try {
+      const results: BulkPayoutResponse['results'] = [];
+      let successCount = 0;
+      let failedCount = 0;
+
+      for (const payoutReq of request.payouts) {
+        try {
+          const result = await this.createPayout(payoutReq);
+          results.push({
+            customerReference: payoutReq.customerReference,
+            status: result.status,
+            internalRef: result.internalRef
+          });
+          successCount++;
+        } catch (error: any) {
+          results.push({
+            customerReference: payoutReq.customerReference,
+            status: 'FAILED',
+            error: error.message
+          });
+          failedCount++;
+        }
+      }
+
+      logger.info('Bulk payout completed', 'XentriPayService', { successCount, failedCount });
+
+      return {
+        success: successCount,
+        failed: failedCount,
+        results
+      };
+    } catch (error: any) {
+      logger.error('Bulk payout failed', 'XentriPayService', error);
       throw error;
     }
   }
@@ -282,14 +406,9 @@ export class XentriPayService {
         }
       );
 
-      console.log('[XENTRIPAY] Payout status:', {
-        customerRef,
-        status: response.data.data.status
-      });
-
       return response.data;
     } catch (error: any) {
-      console.error('[XENTRIPAY] ❌ Failed to get payout status:', error);
+      logger.error('Failed to get payout status', 'XentriPayService', error);
       throw error;
     }
   }
@@ -311,14 +430,9 @@ export class XentriPayService {
         }
       );
 
-      console.log('[XENTRIPAY] Account validated:', {
-        accountNumber,
-        registeredName: response.data.registeredName
-      });
-
       return response.data;
     } catch (error: any) {
-      console.error('[XENTRIPAY] ❌ Account validation failed:', error);
+      logger.error('Account validation failed', 'XentriPayService', error);
       throw error;
     }
   }
@@ -333,15 +447,9 @@ export class XentriPayService {
         '/api/wallets/my-business'
       );
 
-      console.log('[XENTRIPAY] Wallet balance:', {
-        businessName: response.data.businessName,
-        balance: response.data.balance,
-        currency: response.data.currency
-      });
-
       return response.data;
     } catch (error: any) {
-      console.error('[XENTRIPAY] ❌ Failed to get wallet balance:', error);
+      logger.error('Failed to get wallet balance', 'XentriPayService', error);
       throw error;
     }
   }
@@ -357,35 +465,6 @@ export class XentriPayService {
     return `${prefix}-${timestamp}-${random}`;
   }
 
-  /**
-   * Format phone number to required format
-   * Collections: needs full format with country code (250780371519)
-   * Payouts: needs format without country code (0780371519)
-   */
-  formatPhoneNumber(phone: string, includeCountryCode: boolean = true): string {
-    // Remove all non-digit characters
-    const cleaned = phone.replace(/\D/g, '');
-    
-    // Remove leading country code if present
-    let nationalNumber = cleaned;
-    if (cleaned.startsWith('250')) {
-      nationalNumber = cleaned.substring(3);
-    }
-    
-    // Ensure it starts with 0
-    if (!nationalNumber.startsWith('0')) {
-      nationalNumber = '0' + nationalNumber;
-    }
-    
-    // Return based on requirement
-    if (includeCountryCode) {
-      // For collections: 250780371519
-      return '250' + nationalNumber.substring(1);
-    } else {
-      // For payouts: 0780371519
-      return nationalNumber;
-    }
-  }
 
   /**
    * Validate and get provider ID from phone number

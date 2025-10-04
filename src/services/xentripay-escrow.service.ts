@@ -1,18 +1,22 @@
-// services/xentripay-escrow.service.ts
+// services/xentripay-escrow.service.ts - Refactored to use userId/recipientId and split payments to host agent and platform
 
-import { XentriPayService, CollectionRequest, PayoutRequest } from './xentripay.service';
+import { XentriPayService, PayoutRequest, BulkPayoutRequest, BulkPayoutResponse } from './xentripay.service';
 import { BrevoMailingService } from '../utils/brevo.xentripay';
+import { PhoneUtils } from '../utils/phone.utils';
+import { PrismaClient } from '@prisma/client';
+import db from '../utils/db';
 
 // ==================== TYPES ====================
 
 export interface EscrowTransaction {
   id: string;
-  buyerId: string;
-  sellerId: string;
+  userId: string; // Payer
+  recipientId?: string; // Host agent
   amount: number;
   currency: string;
   description: string;
   status: EscrowStatus;
+  paymentMethod: 'momo';
   xentriPayRefId?: string;
   xentriPayTid?: string;
   xentriPayInternalRef?: string;
@@ -22,28 +26,33 @@ export interface EscrowTransaction {
   createdAt: Date;
   updatedAt: Date;
   completedAt?: Date;
+  platformFee?: number;
+  hostEarning?: number;
   metadata?: Record<string, any>;
 }
 
-export type EscrowStatus = 
-  | 'INITIATED'      // Transaction created
-  | 'PENDING'        // Waiting for payment
-  | 'HELD'           // Funds received and held in escrow
-  | 'RELEASED'       // Funds released to seller
-  | 'REFUNDED'       // Funds returned to buyer
-  | 'FAILED'         // Transaction failed
-  | 'CANCELLED';     // Transaction cancelled
+export type EscrowStatus =
+  | 'INITIATED'
+  | 'PENDING'
+  | 'HELD'
+  | 'RELEASED'
+  | 'REFUNDED'
+  | 'FAILED'
+  | 'CANCELLED';
 
 export interface CreateEscrowRequest {
-  buyerId: string;
-  buyerEmail: string;
-  buyerName: string;
-  buyerPhone: string;
-  sellerId: string;
-  sellerName: string;
-  sellerPhone: string;
+  userId: string;
+  userEmail: string;
+  userName: string;
+  userPhone: string;
+  recipientId?: string;
+  recipientEmail?: string;
+  recipientName?: string;
+  recipientPhone?: string;
   amount: number;
   description: string;
+  paymentMethod: 'momo';
+  platformFeePercentage?: number; // e.g., 10 for 10%
   metadata?: Record<string, any>;
 }
 
@@ -59,10 +68,22 @@ export interface RefundEscrowRequest {
   reason: string;
 }
 
+export interface CancelEscrowRequest {
+  transactionId: string;
+  requesterId: string;
+  reason: string;
+}
+
+export interface BulkReleaseRequest {
+  transactionIds: string[];
+  requesterId: string;
+  reason?: string;
+}
+
 // ==================== SERVICE ====================
 
 export class XentriPayEscrowService {
-  private transactions: Map<string, EscrowTransaction> = new Map();
+  private readonly DEFAULT_PLATFORM_FEE_PERCENTAGE = 10; // 10% default platform fee
 
   constructor(
     private xentriPayService: XentriPayService,
@@ -72,14 +93,15 @@ export class XentriPayEscrowService {
   // ==================== CREATE ESCROW ====================
 
   /**
-   * Create new escrow transaction and initiate collection from buyer
+   * Create new escrow transaction and initiate payment collection
    */
   async createEscrow(request: CreateEscrowRequest): Promise<EscrowTransaction> {
     try {
       console.log('[ESCROW] Creating escrow transaction:', {
-        buyerId: request.buyerId,
-        sellerId: request.sellerId,
-        amount: request.amount
+        userId: request.userId,
+        recipientId: request.recipientId,
+        amount: request.amount,
+        paymentMethod: request.paymentMethod
       });
 
       // Validate amount is whole number
@@ -88,68 +110,90 @@ export class XentriPayEscrowService {
         throw new Error('Amount must be a whole number (no decimals)');
       }
 
-      // Generate unique transaction ID
-      const transactionId = this.generateTransactionId();
+      // Calculate platform fee and host earning
+      const platformFeePercentage = request.platformFeePercentage || this.DEFAULT_PLATFORM_FEE_PERCENTAGE;
+      const platformFee = Math.round((amount * platformFeePercentage) / 100);
+      const hostEarning = amount - platformFee;
 
-      // Create transaction record
-      const transaction: EscrowTransaction = {
-        id: transactionId,
-        buyerId: request.buyerId,
-        sellerId: request.sellerId,
+      // Generate unique reference
+      const reference = this.generateTransactionId();
+
+      // Create transaction record in database
+      const transaction = await db.escrowTransaction.create({
+        data: {
+          userId: parseInt(request.userId),
+          recipientId: request.recipientId ? parseInt(request.recipientId) : null,
+          type: 'DEPOSIT',
+          amount,
+          currency: 'RWF',
+          description: request.description,
+          status: 'INITIATED',
+          reference,
+          metadata: {
+            platformFee,
+            hostEarning,
+            platformFeePercentage,
+            userEmail: request.userEmail,
+            userName: request.userName,
+            userPhone: request.userPhone,
+            recipientEmail: request.recipientEmail,
+            recipientName: request.recipientName,
+            recipientPhone: request.recipientPhone,
+            paymentMethod: request.paymentMethod,
+            ...request.metadata
+          }
+        }
+      });
+
+      // Initiate payment collection via XentriPay
+      const collectionRequest = {
+        email: request.userEmail,
+        cname: request.userName,
         amount,
-        currency: 'RWF',
-        description: request.description,
-        status: 'INITIATED',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        metadata: request.metadata
-      };
-
-      // Save transaction
-      this.transactions.set(transactionId, transaction);
-
-      // Initiate collection from buyer
-      const collectionRequest: CollectionRequest = {
-        email: request.buyerEmail,
-        cname: request.buyerName,
-        amount,
-        cnumber: this.xentriPayService.formatPhoneNumber(request.buyerPhone, false),
-        msisdn: this.xentriPayService.formatPhoneNumber(request.buyerPhone, true),
+        cnumber: PhoneUtils.formatPhone(request.userPhone, false),
+        msisdn: PhoneUtils.formatPhone(request.userPhone, true),
         currency: 'RWF',
         pmethod: 'momo',
         chargesIncluded: 'true'
       };
 
-      const collectionResponse = await this.xentriPayService.initiateCollection(
-        collectionRequest
-      );
+      const collectionResponse = await this.xentriPayService.initiateCollection(collectionRequest);
 
       // Update transaction with collection details
-      transaction.xentriPayRefId = collectionResponse.refid;
-      transaction.xentriPayTid = collectionResponse.tid;
-      transaction.collectionResponse = collectionResponse;
-      transaction.status = 'PENDING';
-      transaction.updatedAt = new Date();
+      const updatedTransaction = await db.escrowTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          externalId: collectionResponse.refid,
+          status: 'PENDING',
+          metadata: {
+            ...(transaction.metadata as any),
+            xentriPayRefId: collectionResponse.refid,
+            xentriPayTid: collectionResponse.tid,
+            collectionResponse
+          }
+        }
+      });
 
-      this.transactions.set(transactionId, transaction);
-
-      // Send notification to buyer
+      // Send notification
       await this.mailingService.sendDepositInitiatedEmail({
-        to: request.buyerEmail,
-        buyerName: request.buyerName,
+        to: request.userEmail,
+        buyerName: request.userName,
         amount,
-        transactionId,
+        transactionId: updatedTransaction.id,
         description: request.description,
-        instructions: collectionResponse.reply
+        instructions: collectionResponse?.reply || 'Payment initiated',
+        paymentMethod: request.paymentMethod
       });
 
       console.log('[ESCROW] ✅ Escrow created:', {
-        transactionId,
-        refid: collectionResponse.refid,
-        status: transaction.status
+        transactionId: updatedTransaction.id,
+        refid: collectionResponse?.refid,
+        status: updatedTransaction.status,
+        platformFee,
+        hostEarning
       });
 
-      return transaction;
+      return this.mapDbToEscrowTransaction(updatedTransaction);
     } catch (error: any) {
       console.error('[ESCROW] ❌ Failed to create escrow:', error);
       throw error;
@@ -163,46 +207,52 @@ export class XentriPayEscrowService {
    */
   async checkCollectionStatus(transactionId: string): Promise<EscrowTransaction> {
     try {
-      const transaction = this.transactions.get(transactionId);
-      if (!transaction) {
+      const dbTransaction = await db.escrowTransaction.findUnique({
+        where: { id: transactionId }
+      });
+
+      if (!dbTransaction) {
         throw new Error('Transaction not found');
       }
 
-      if (!transaction.xentriPayRefId) {
-        throw new Error('No collection reference found');
+      const metadata = dbTransaction.metadata as any;
+      const xentriPayRefId = metadata?.xentriPayRefId;
+
+      if (!xentriPayRefId) {
+        throw new Error('No XentriPay reference ID found');
       }
 
       console.log('[ESCROW] Checking collection status:', {
         transactionId,
-        refid: transaction.xentriPayRefId
+        refid: xentriPayRefId
       });
 
-      const statusResponse = await this.xentriPayService.getCollectionStatus(
-        transaction.xentriPayRefId
-      );
+      const statusResponse = await this.xentriPayService.getCollectionStatus(xentriPayRefId);
 
-      // Update transaction status based on collection status
-      const previousStatus = transaction.status;
-      
+      const previousStatus = dbTransaction.status;
+      let newStatus = dbTransaction.status;
+
       if (statusResponse.status === 'SUCCESS') {
-        transaction.status = 'HELD';
+        newStatus = 'HELD';
         console.log('[ESCROW] ✅ Funds held in escrow');
       } else if (statusResponse.status === 'FAILED') {
-        transaction.status = 'FAILED';
+        newStatus = 'FAILED';
         console.log('[ESCROW] ❌ Collection failed');
       } else {
-        transaction.status = 'PENDING';
+        newStatus = 'PENDING';
       }
 
-      transaction.updatedAt = new Date();
-      this.transactions.set(transactionId, transaction);
+      const updatedTransaction = await db.escrowTransaction.update({
+        where: { id: transactionId },
+        data: { status: newStatus }
+      });
 
       // Send notification if status changed to HELD
-      if (previousStatus !== 'HELD' && transaction.status === 'HELD') {
-        await this.notifyFundsHeld(transaction);
+      if (previousStatus !== 'HELD' && newStatus === 'HELD') {
+        await this.notifyFundsHeld(this.mapDbToEscrowTransaction(updatedTransaction));
       }
 
-      return transaction;
+      return this.mapDbToEscrowTransaction(updatedTransaction);
     } catch (error: any) {
       console.error('[ESCROW] ❌ Failed to check status:', error);
       throw error;
@@ -212,211 +262,309 @@ export class XentriPayEscrowService {
   // ==================== RELEASE ESCROW ====================
 
   /**
-   * Release funds to seller
+   * Release funds - split to host agent and platform
    */
   async releaseEscrow(request: ReleaseEscrowRequest): Promise<EscrowTransaction> {
     try {
-      const transaction = this.transactions.get(request.transactionId);
-      if (!transaction) {
+      const dbTransaction = await db.escrowTransaction.findUnique({
+        where: { id: request.transactionId }
+      });
+
+      if (!dbTransaction) {
         throw new Error('Transaction not found');
       }
 
-      // Validate transaction status
-      if (transaction.status !== 'HELD') {
-        throw new Error(
-          `Cannot release escrow in status: ${transaction.status}. Funds must be HELD.`
-        );
+      if (dbTransaction.status !== 'HELD') {
+        throw new Error(`Cannot release escrow in status: ${dbTransaction.status}. Funds must be HELD.`);
       }
 
-      // Validate requester is buyer
-      if (transaction.buyerId !== request.requesterId) {
-        throw new Error('Only buyer can release escrow');
-      }
+      const metadata = dbTransaction.metadata as any;
+      const platformFee = metadata?.platformFee || 0;
+      const hostEarning = metadata?.hostEarning || 0;
 
       console.log('[ESCROW] Releasing escrow:', {
         transactionId: request.transactionId,
-        amount: transaction.amount
+        totalAmount: dbTransaction.amount,
+        platformFee,
+        hostEarning
       });
 
-      // Get seller details from metadata
-      const sellerPhone = transaction.metadata?.sellerPhone;
-      const sellerName = transaction.metadata?.sellerName;
+      let updatedMetadata = { ...metadata };
 
-      if (!sellerPhone || !sellerName) {
-        throw new Error('Seller details not found in transaction metadata');
+      // Only payout to host agent if recipient exists
+      if (dbTransaction.recipientId && metadata?.recipientPhone && metadata?.recipientName) {
+        const recipientPhone = metadata.recipientPhone as string;
+        const recipientName = metadata.recipientName as string;
+
+        if (hostEarning > 0) {
+          const providerId = this.xentriPayService.getProviderIdFromPhone(recipientPhone);
+          const customerReference = this.xentriPayService.generateCustomerReference('HOST-PAYOUT');
+
+          const payoutRequest: PayoutRequest = {
+            customerReference,
+            telecomProviderId: providerId,
+            msisdn: PhoneUtils.formatPhone(recipientPhone, false),
+            name: recipientName,
+            transactionType: 'PAYOUT',
+            currency: 'RWF',
+            amount: hostEarning
+          };
+
+          const payoutResponse = await this.xentriPayService.createPayout(payoutRequest);
+
+          updatedMetadata = {
+            ...updatedMetadata,
+            xentriPayInternalRef: payoutResponse.internalRef,
+            customerReference,
+            payoutResponse
+          };
+
+          console.log('[ESCROW] ✅ Host agent payout created:', {
+            hostEarning,
+            internalRef: payoutResponse.internalRef
+          });
+        }
       }
 
-      // Determine provider ID from phone number
-      const providerId = this.xentriPayService.getProviderIdFromPhone(sellerPhone);
+      // Platform fee stays in platform wallet (no payout needed)
+      console.log('[ESCROW] Platform fee retained:', platformFee);
 
-      // Generate unique customer reference
-      const customerReference = this.xentriPayService.generateCustomerReference('ESCROW-RELEASE');
-
-      // Create payout to seller
-      const payoutRequest: PayoutRequest = {
-        customerReference,
-        telecomProviderId: providerId,
-        msisdn: this.xentriPayService.formatPhoneNumber(sellerPhone, false),
-        name: sellerName,
-        transactionType: 'PAYOUT',
-        currency: 'RWF',
-        amount: transaction.amount
-      };
-
-      const payoutResponse = await this.xentriPayService.createPayout(payoutRequest);
-
-      // Update transaction
-      transaction.status = 'RELEASED';
-      transaction.xentriPayInternalRef = payoutResponse.internalRef;
-      transaction.customerReference = customerReference;
-      transaction.payoutResponse = payoutResponse;
-      transaction.completedAt = new Date();
-      transaction.updatedAt = new Date();
-
-      this.transactions.set(request.transactionId, transaction);
-
-      // Send notifications
-      await this.notifyEscrowReleased(transaction);
-
-      console.log('[ESCROW] ✅ Escrow released:', {
-        transactionId: request.transactionId,
-        internalRef: payoutResponse.internalRef
+      const updatedTransaction = await db.escrowTransaction.update({
+        where: { id: request.transactionId },
+        data: {
+          status: 'RELEASED',
+          releasedAt: new Date(),
+          releasedBy: parseInt(request.requesterId),
+          releaseReason: request.reason,
+          metadata: updatedMetadata
+        }
       });
 
-      return transaction;
+      await this.notifyEscrowReleased(this.mapDbToEscrowTransaction(updatedTransaction));
+
+      console.log('[ESCROW] ✅ Escrow released successfully');
+      return this.mapDbToEscrowTransaction(updatedTransaction);
     } catch (error: any) {
       console.error('[ESCROW] ❌ Failed to release escrow:', error);
       throw error;
     }
   }
 
-  // ==================== REFUND ESCROW ====================
-
   /**
-   * Refund funds to buyer
+   * Bulk release escrows (for admin)
    */
-  async refundEscrow(request: RefundEscrowRequest): Promise<EscrowTransaction> {
+  async bulkReleaseEscrow(request: BulkReleaseRequest): Promise<BulkPayoutResponse> {
     try {
-      const transaction = this.transactions.get(request.transactionId);
-      if (!transaction) {
+      const results: BulkPayoutResponse['results'] = [];
+      let successCount = 0;
+      let failedCount = 0;
+
+      const bulkPayouts: PayoutRequest[] = [];
+      const transactionUpdates: Array<{ id: string; customerReference: string }> = [];
+
+      for (const txId of request.transactionIds) {
+        const dbTransaction = await db.escrowTransaction.findUnique({
+          where: { id: txId }
+        });
+
+        if (!dbTransaction || dbTransaction.status !== 'HELD') {
+          results.push({
+            customerReference: txId,
+            status: 'FAILED',
+            error: 'Transaction not found or not in HELD status'
+          });
+          failedCount++;
+          continue;
+        }
+
+        const metadata = dbTransaction.metadata as any;
+        const recipientPhone = metadata?.recipientPhone as string;
+        const recipientName = metadata?.recipientName as string;
+        const hostEarning = metadata?.hostEarning || 0;
+
+        if (recipientPhone && recipientName && hostEarning > 0) {
+          const providerId = this.xentriPayService.getProviderIdFromPhone(recipientPhone);
+          const customerReference = this.xentriPayService.generateCustomerReference('BULK-RELEASE');
+
+          bulkPayouts.push({
+            customerReference,
+            telecomProviderId: providerId,
+            msisdn: PhoneUtils.formatPhone(recipientPhone, false),
+            name: recipientName,
+            transactionType: 'PAYOUT',
+            currency: 'RWF',
+            amount: hostEarning
+          });
+
+          transactionUpdates.push({ id: txId, customerReference });
+        }
+      }
+
+      if (bulkPayouts.length > 0) {
+        const bulkResult = await this.xentriPayService.createBulkPayouts({ payouts: bulkPayouts });
+
+        // Update transactions in database
+        for (const update of transactionUpdates) {
+          await db.escrowTransaction.update({
+            where: { id: update.id },
+            data: {
+              status: 'RELEASED',
+              releasedAt: new Date(),
+              releasedBy: parseInt(request.requesterId),
+              releaseReason: request.reason,
+              metadata: {
+                ...(await db.escrowTransaction.findUnique({ where: { id: update.id } }))?.metadata as any,
+                customerReference: update.customerReference
+              }
+            }
+          });
+        }
+
+        bulkResult.results.forEach(res => {
+          results.push(res);
+          if (res.status === 'PENDING' || res.status === 'COMPLETED') successCount++;
+          else failedCount++;
+        });
+      }
+
+      await this.notifyBulkReleased(request.transactionIds, request.reason || 'Bulk release approved');
+
+      console.log(`[ESCROW] Bulk release completed: ${successCount} success, ${failedCount} failed`);
+
+      return { success: successCount, failed: failedCount, results };
+    } catch (error: any) {
+      console.error('[ESCROW] ❌ Bulk release failed:', error);
+      throw error;
+    }
+  }
+
+  // ==================== REFUND/CANCEL ESCROW ====================
+
+  async refundEscrow(request: RefundEscrowRequest): Promise<EscrowTransaction> {
+    return this.cancelEscrow({ ...request, reason: `Refund: ${request.reason}` });
+  }
+
+  async cancelEscrow(request: CancelEscrowRequest): Promise<EscrowTransaction> {
+    try {
+      const dbTransaction = await db.escrowTransaction.findUnique({
+        where: { id: request.transactionId }
+      });
+
+      if (!dbTransaction) {
         throw new Error('Transaction not found');
       }
 
-      // Validate transaction status
-      if (transaction.status !== 'HELD') {
-        throw new Error(
-          `Cannot refund escrow in status: ${transaction.status}. Funds must be HELD.`
-        );
+      if (dbTransaction.status !== 'PENDING' && dbTransaction.status !== 'HELD') {
+        throw new Error(`Cannot cancel escrow in status: ${dbTransaction.status}`);
       }
 
-      console.log('[ESCROW] Refunding escrow:', {
+      console.log('[ESCROW] Cancelling escrow with refund:', {
         transactionId: request.transactionId,
-        amount: transaction.amount,
+        amount: dbTransaction.amount,
         reason: request.reason
       });
 
-      // Get buyer details from metadata
-      const buyerPhone = transaction.metadata?.buyerPhone;
-      const buyerName = transaction.metadata?.buyerName;
+      const metadata = dbTransaction.metadata as any;
+      let updatedMetadata = { ...metadata, cancelReason: request.reason };
 
-      if (!buyerPhone || !buyerName) {
-        throw new Error('Buyer details not found in transaction metadata');
+      if (dbTransaction.status === 'HELD') {
+        const userPhone = metadata?.userPhone as string;
+        const userName = metadata?.userName as string;
+
+        if (!userPhone || !userName) {
+          throw new Error('User details not found in transaction metadata');
+        }
+
+        const providerId = this.xentriPayService.getProviderIdFromPhone(userPhone);
+        const customerReference = this.xentriPayService.generateCustomerReference('REFUND');
+
+        const payoutRequest: PayoutRequest = {
+          customerReference,
+          telecomProviderId: providerId,
+          msisdn: PhoneUtils.formatPhone(userPhone, false),
+          name: userName,
+          transactionType: 'PAYOUT',
+          currency: 'RWF',
+          amount: dbTransaction.amount
+        };
+
+        const payoutResponse = await this.xentriPayService.createPayout(payoutRequest);
+
+        updatedMetadata = {
+          ...updatedMetadata,
+          xentriPayInternalRef: payoutResponse.internalRef,
+          customerReference,
+          payoutResponse
+        };
       }
 
-      // Determine provider ID from phone number
-      const providerId = this.xentriPayService.getProviderIdFromPhone(buyerPhone);
-
-      // Generate unique customer reference
-      const customerReference = this.xentriPayService.generateCustomerReference('ESCROW-REFUND');
-
-      // Create payout to buyer (refund)
-      const payoutRequest: PayoutRequest = {
-        customerReference,
-        telecomProviderId: providerId,
-        msisdn: this.xentriPayService.formatPhoneNumber(buyerPhone, false),
-        name: buyerName,
-        transactionType: 'PAYOUT',
-        currency: 'RWF',
-        amount: transaction.amount
-      };
-
-      const payoutResponse = await this.xentriPayService.createPayout(payoutRequest);
-
-      // Update transaction
-      transaction.status = 'REFUNDED';
-      transaction.xentriPayInternalRef = payoutResponse.internalRef;
-      transaction.customerReference = customerReference;
-      transaction.payoutResponse = payoutResponse;
-      transaction.completedAt = new Date();
-      transaction.updatedAt = new Date();
-      transaction.metadata = {
-        ...transaction.metadata,
-        refundReason: request.reason
-      };
-
-      this.transactions.set(request.transactionId, transaction);
-
-      // Send notifications
-      await this.notifyEscrowRefunded(transaction, request.reason);
-
-      console.log('[ESCROW] ✅ Escrow refunded:', {
-        transactionId: request.transactionId,
-        internalRef: payoutResponse.internalRef
+      const updatedTransaction = await db.escrowTransaction.update({
+        where: { id: request.transactionId },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancellationReason: request.reason,
+          metadata: updatedMetadata
+        }
       });
 
-      return transaction;
+      await this.notifyEscrowCancelled(this.mapDbToEscrowTransaction(updatedTransaction), request.reason);
+
+      console.log('[ESCROW] ✅ Escrow cancelled and refunded');
+      return this.mapDbToEscrowTransaction(updatedTransaction);
     } catch (error: any) {
-      console.error('[ESCROW] ❌ Failed to refund escrow:', error);
+      console.error('[ESCROW] ❌ Failed to cancel escrow:', error);
       throw error;
     }
   }
 
   // ==================== QUERY METHODS ====================
 
-  /**
-   * Get transaction by ID
-   */
   async getTransaction(transactionId: string): Promise<EscrowTransaction | null> {
-    return this.transactions.get(transactionId) || null;
+    const dbTransaction = await db.escrowTransaction.findUnique({
+      where: { id: transactionId }
+    });
+    return dbTransaction ? this.mapDbToEscrowTransaction(dbTransaction) : null;
   }
 
-  /**
-   * Get transactions by buyer ID
-   */
-  async getTransactionsByBuyer(buyerId: string): Promise<EscrowTransaction[]> {
-    return Array.from(this.transactions.values())
-      .filter(tx => tx.buyerId === buyerId);
+  async getTransactionsByUser(userId: string): Promise<EscrowTransaction[]> {
+    const dbTransactions = await db.escrowTransaction.findMany({
+      where: { userId: parseInt(userId) },
+      orderBy: { createdAt: 'desc' }
+    });
+    return dbTransactions.map(tx => this.mapDbToEscrowTransaction(tx));
   }
 
-  /**
-   * Get transactions by seller ID
-   */
-  async getTransactionsBySeller(sellerId: string): Promise<EscrowTransaction[]> {
-    return Array.from(this.transactions.values())
-      .filter(tx => tx.sellerId === sellerId);
+  async getTransactionsByRecipient(recipientId: string): Promise<EscrowTransaction[]> {
+    const dbTransactions = await db.escrowTransaction.findMany({
+      where: { recipientId: parseInt(recipientId) },
+      orderBy: { createdAt: 'desc' }
+    });
+    return dbTransactions.map(tx => this.mapDbToEscrowTransaction(tx));
   }
 
   // ==================== NOTIFICATION METHODS ====================
 
   private async notifyFundsHeld(transaction: EscrowTransaction): Promise<void> {
     try {
-      // Notify buyer
       await this.mailingService.sendFundsHeldEmail({
-        to: transaction.metadata?.buyerEmail || '',
-        buyerName: transaction.metadata?.buyerName || '',
+        to: transaction.metadata?.userEmail || '',
+        buyerName: transaction.metadata?.userName || '',
         transactionId: transaction.id,
         amount: transaction.amount,
-        description: transaction.description
+        description: transaction.description,
+        paymentMethod: transaction.paymentMethod
       });
 
-      // Notify seller
-      await this.mailingService.sendFundsHeldSellerEmail({
-        to: transaction.metadata?.sellerEmail || '',
-        sellerName: transaction.metadata?.sellerName || '',
-        transactionId: transaction.id,
-        amount: transaction.amount,
-        description: transaction.description
-      });
+      if (transaction.recipientId && transaction.metadata?.recipientEmail) {
+        await this.mailingService.sendFundsHeldSellerEmail({
+          to: transaction.metadata.recipientEmail,
+          sellerName: transaction.metadata?.recipientName || '',
+          transactionId: transaction.id,
+          amount: transaction.hostEarning || 0,
+          description: transaction.description
+        });
+      }
     } catch (error) {
       console.error('[ESCROW] Failed to send notifications:', error);
     }
@@ -424,19 +572,19 @@ export class XentriPayEscrowService {
 
   private async notifyEscrowReleased(transaction: EscrowTransaction): Promise<void> {
     try {
-      // Notify seller
-      await this.mailingService.sendPayoutCompletedEmail({
-        to: transaction.metadata?.sellerEmail || '',
-        sellerName: transaction.metadata?.sellerName || '',
-        transactionId: transaction.id,
-        amount: transaction.amount,
-        description: transaction.description
-      });
+      if (transaction.recipientId && transaction.metadata?.recipientEmail) {
+        await this.mailingService.sendPayoutCompletedEmail({
+          to: transaction.metadata.recipientEmail,
+          sellerName: transaction.metadata?.recipientName || '',
+          transactionId: transaction.id,
+          amount: transaction.hostEarning || 0,
+          description: transaction.description
+        });
+      }
 
-      // Notify buyer
       await this.mailingService.sendEscrowReleasedEmail({
-        to: transaction.metadata?.buyerEmail || '',
-        buyerName: transaction.metadata?.buyerName || '',
+        to: transaction.metadata?.userEmail || '',
+        buyerName: transaction.metadata?.userName || '',
         transactionId: transaction.id,
         amount: transaction.amount,
         description: transaction.description
@@ -446,30 +594,35 @@ export class XentriPayEscrowService {
     }
   }
 
-  private async notifyEscrowRefunded(
-    transaction: EscrowTransaction,
-    reason: string
-  ): Promise<void> {
+  private async notifyEscrowCancelled(transaction: EscrowTransaction, reason: string): Promise<void> {
     try {
-      // Notify buyer
       await this.mailingService.sendRefundCompletedEmail({
-        to: transaction.metadata?.buyerEmail || '',
-        buyerName: transaction.metadata?.buyerName || '',
+        to: transaction.metadata?.userEmail || '',
+        buyerName: transaction.metadata?.userName || '',
         transactionId: transaction.id,
         amount: transaction.amount,
         reason
       });
 
-      // Notify seller
-      await this.mailingService.sendRefundNoticeEmail({
-        to: transaction.metadata?.sellerEmail || '',
-        sellerName: transaction.metadata?.sellerName || '',
-        transactionId: transaction.id,
-        amount: transaction.amount,
-        reason
-      });
+      if (transaction.recipientId && transaction.metadata?.recipientEmail) {
+        await this.mailingService.sendRefundNoticeEmail({
+          to: transaction.metadata.recipientEmail,
+          sellerName: transaction.metadata?.recipientName || '',
+          transactionId: transaction.id,
+          amount: transaction.amount,
+          reason
+        });
+      }
     } catch (error) {
       console.error('[ESCROW] Failed to send notifications:', error);
+    }
+  }
+
+  private async notifyBulkReleased(transactionIds: string[], reason?: string): Promise<void> {
+    try {
+      console.log('[ESCROW] Bulk notifications sent for:', transactionIds);
+    } catch (error) {
+      console.error('[ESCROW] Failed to send bulk notifications:', error);
     }
   }
 
@@ -479,5 +632,31 @@ export class XentriPayEscrowService {
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 10).toUpperCase();
     return `ESC-${timestamp}-${random}`;
+  }
+
+  private mapDbToEscrowTransaction(dbTransaction: any): EscrowTransaction {
+    const metadata = dbTransaction.metadata as any || {};
+    return {
+      id: dbTransaction.id,
+      userId: dbTransaction.userId.toString(),
+      recipientId: dbTransaction.recipientId?.toString(),
+      amount: dbTransaction.amount,
+      currency: dbTransaction.currency,
+      description: dbTransaction.description || '',
+      status: dbTransaction.status as EscrowStatus,
+      paymentMethod: metadata.paymentMethod || 'momo',
+      xentriPayRefId: metadata.xentriPayRefId,
+      xentriPayTid: metadata.xentriPayTid,
+      xentriPayInternalRef: metadata.xentriPayInternalRef,
+      customerReference: metadata.customerReference,
+      collectionResponse: metadata.collectionResponse,
+      payoutResponse: metadata.payoutResponse,
+      createdAt: dbTransaction.createdAt,
+      updatedAt: dbTransaction.updatedAt,
+      completedAt: dbTransaction.releasedAt || dbTransaction.cancelledAt || dbTransaction.refundedAt,
+      platformFee: metadata.platformFee,
+      hostEarning: metadata.hostEarning,
+      metadata
+    };
   }
 }

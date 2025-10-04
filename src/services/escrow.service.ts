@@ -1,6 +1,8 @@
 // services/escrow.service.ts
 import { PrismaClient } from '@prisma/client';
 import { PesapalService } from './pesapal.service';
+import { PhoneUtils } from '../utils/phone.utils';
+import { logger } from '../utils/logger';
 import {
   CreateDepositDto,
   ReleaseEscrowDto,
@@ -53,10 +55,7 @@ export class EscrowService {
     try {
       const guestIdNum = this.parseUserId(guestId);
       
-      console.log(`[ESCROW] Creating deposit for user ${guestIdNum}`, {
-        amount: depositData.amount,
-        currency: depositData.currency
-      });
+      logger.info('Creating deposit', 'EscrowService', { userId: guestIdNum, amount: depositData.amount });
 
       // Validate users exist
       const [guest, host, agent] = await Promise.all([
@@ -97,7 +96,6 @@ export class EscrowService {
         }
       });
 
-      console.log(`[ESCROW] Database transaction created: ${escrowTransaction.id}`);
 
       // Create Pesapal checkout
       const checkoutRequest: PesapalCheckoutRequest = {
@@ -127,9 +125,8 @@ export class EscrowService {
         }
       });
 
-      console.log(`[ESCROW] ✅ Deposit created successfully:`, {
+      logger.info('Deposit created successfully', 'EscrowService', {
         transactionId: escrowTransaction.id,
-        trackingId: checkoutResponse.order_tracking_id,
         reference: merchantReference
       });
 
@@ -150,7 +147,7 @@ export class EscrowService {
       };
 
     } catch (error: any) {
-      console.error('[ESCROW] ❌ Deposit creation failed:', error.message);
+      logger.error('Deposit creation failed', 'EscrowService', error);
       throw this.handleError(error, 'CREATE_DEPOSIT_FAILED');
     }
   }
@@ -159,11 +156,7 @@ export class EscrowService {
 
   async handlePesapalWebhook(webhookData: PesapalWebhookData): Promise<void> {
     try {
-      console.log('[ESCROW] Processing webhook:', {
-        trackingId: webhookData.OrderTrackingId,
-        reference: webhookData.OrderMerchantReference,
-        type: webhookData.OrderNotificationType
-      });
+      logger.debug('Processing webhook', 'EscrowService', { trackingId: webhookData.OrderTrackingId });
 
       // Find transaction by tracking ID OR by reference
       let transaction = await prisma.escrowTransaction.findFirst({
@@ -188,29 +181,14 @@ export class EscrowService {
       
       if (!transaction) {
         const error = `Transaction not found for tracking ID: ${webhookData.OrderTrackingId} or reference: ${webhookData.OrderMerchantReference}`;
-        console.error('[ESCROW]', error);
+        logger.error('Transaction not found', 'EscrowService', error);
         throw new Error(error);
       }
 
-      console.log('[ESCROW] Found transaction:', {
-        id: transaction.id,
-        currentStatus: transaction.status,
-        reference: transaction.reference
-      });
-
       // Get current status from Pesapal
-      console.log('[ESCROW] Fetching latest status from Pesapal...');
       const statusResponse: any = await this.pesapalService.getTransactionStatus(
         webhookData.OrderTrackingId
       );
-      
-      console.log('[ESCROW] Pesapal status response:', {
-        payment_status_description: statusResponse.payment_status_description,
-        status_code: statusResponse.status_code,
-        confirmation_code: statusResponse.confirmation_code,
-        amount: statusResponse.amount,
-        currency: statusResponse.currency
-      });
 
       // Map Pesapal status to escrow status using the FIXED mapper
       const newStatus = this.pesapalService.mapPesapalStatusToEscrowStatus(
@@ -260,22 +238,20 @@ export class EscrowService {
         data: updates
       });
 
-      console.log(`[ESCROW] ✅ Transaction ${transaction.id} updated to: ${newStatus}`);
+      // Transaction updated
 
       // Send status notification (non-blocking)
       this.sendStatusUpdateNotification(
         this.transformToEscrowTransaction({ ...transaction, ...updates }),
         newStatus
       ).catch(err => {
-        console.error('[ESCROW] Failed to send notification:', err.message);
+        logger.error('Failed to send notification', 'EscrowService', err);
       });
 
     } catch (error: any) {
-      console.error('[ESCROW] ❌ Webhook processing failed:', {
-        error: error.message,
-        stack: error.stack,
-        trackingId: webhookData.OrderTrackingId,
-        reference: webhookData.OrderMerchantReference
+      logger.error('Webhook processing failed', 'EscrowService', {
+        message: error.message,
+        trackingId: webhookData.OrderTrackingId
       });
       throw error;
     }
@@ -352,7 +328,7 @@ export class EscrowService {
       return this.transformToEscrowTransaction(updatedTransaction);
 
     } catch (error: any) {
-      console.error('[ESCROW] ❌ Release failed:', error.message);
+      logger.error('Release failed', 'EscrowService', error);
       throw this.handleError(error, 'RELEASE_FAILED');
     }
   }
@@ -428,7 +404,7 @@ export class EscrowService {
       return this.transformWithdrawalRequest(updatedWithdrawal);
 
     } catch (error: any) {
-      console.error('[ESCROW] ❌ Withdrawal creation failed:', error.message);
+      logger.error('Withdrawal creation failed', 'EscrowService', error);
       throw this.handleError(error, 'WITHDRAWAL_FAILED');
     }
   }
@@ -494,7 +470,7 @@ export class EscrowService {
       return this.transformToEscrowTransaction(updatedTransaction);
 
     } catch (error: any) {
-      console.error('[ESCROW] ❌ Refund processing failed:', error.message);
+      logger.error('Refund processing failed', 'EscrowService', error);
       throw this.handleError(error, 'REFUND_FAILED');
     }
   }
@@ -774,20 +750,19 @@ export class EscrowService {
 
   private async validateWithdrawalDestination(withdrawData: WithdrawDto): Promise<void> {
     if (withdrawData.method === 'MOBILE') {
-      const validation = this.pesapalService.validateMobileNumber(
-        withdrawData.destination.accountNumber,
-        withdrawData.destination.countryCode || 'RW'
+      const validation = PhoneUtils.validateRwandaPhone(
+        withdrawData.destination.accountNumber
       );
-      
+
       if (!validation.isValid) {
-        throw new Error(validation.errors?.[0] || 'Invalid mobile number');
+        throw new Error(validation.error || 'Invalid mobile number');
       }
     } else if (withdrawData.method === 'BANK') {
       const validation = this.pesapalService.validateBankAccount(
         withdrawData.destination.accountNumber,
         withdrawData.destination.bankCode || ''
       );
-      
+
       if (!validation.isValid) {
         throw new Error(validation.errors?.[0] || 'Invalid bank account');
       }
@@ -935,7 +910,7 @@ export class EscrowService {
         });
       }
     } catch (error) {
-      console.error('[ESCROW] Notification failed:', error);
+      logger.error('Notification failed', 'EscrowService', error);
     }
   }
 
@@ -952,7 +927,7 @@ export class EscrowService {
         });
       }
     } catch (error) {
-      console.error('[ESCROW] Notification failed:', error);
+      logger.error('Notification failed', 'EscrowService', error);
     }
   }
 
@@ -965,7 +940,7 @@ export class EscrowService {
         });
       }
     } catch (error) {
-      console.error('[ESCROW] Notification failed:', error);
+      logger.error('Notification failed', 'EscrowService', error);
     }
   }
 
@@ -977,7 +952,7 @@ export class EscrowService {
         withdrawal
       });
     } catch (error) {
-      console.error('[ESCROW] Notification failed:', error);
+      logger.error('Notification failed', 'EscrowService', error);
     }
   }
 
@@ -994,7 +969,7 @@ export class EscrowService {
         });
       }
     } catch (error) {
-      console.error('[ESCROW] Notification failed:', error);
+      logger.error('Notification failed', 'EscrowService', error);
     }
   }
 
@@ -1016,7 +991,7 @@ export class EscrowService {
         await prisma.$queryRaw`SELECT 1`;
         databaseHealthy = true;
       } catch (dbError) {
-        console.error('[ESCROW] Database health check failed:', dbError);
+        logger.error('Database health check failed', 'EscrowService', dbError);
       }
 
       const healthy = pesapalHealthy && databaseHealthy;
@@ -1028,7 +1003,7 @@ export class EscrowService {
         message: healthy ? 'All systems operational' : 'Some systems are experiencing issues'
       };
     } catch (error: any) {
-      console.error('[ESCROW] Health check error:', error);
+      logger.error('Health check error', 'EscrowService', error);
       return {
         healthy: false,
         pesapalStatus: 'unknown',

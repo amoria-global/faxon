@@ -1,10 +1,11 @@
-// routes/xentripay.routes.ts - Corrected based on API documentation
+// routes/xentripay.routes.ts - Regenerated with added routes for bulk admin, cancellations, payment methods, and user collections/payouts
 
 import { Router } from 'express';
 import { XentriPayController } from '../controllers/xentripay.controller';
 import { XentriPayEscrowService } from '../services/xentripay-escrow.service';
 import { XentriPayService } from '../services/xentripay.service';
 import { BrevoMailingService } from '../utils/brevo.xentripay';
+import { PhoneUtils } from '../utils/phone.utils';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import {
   rateLimitXentriPayOperations,
@@ -14,9 +15,11 @@ import {
   validateXentriPayRefund,
   validateXentriPayRelease,
   validateTransactionId,
+  validateBulkRelease,
+  validateCancelEscrow,
   sanitizeXentriPayData,
   logXentriPayRequest
-} from '../middleware/xentripay.middleware';
+} from '../middleware/xentripay.middleware'; // Assume updated middleware for bulk/cancel
 
 const router = Router();
 
@@ -40,8 +43,9 @@ const xentriPayEscrowService = new XentriPayEscrowService(
   xentriPayService, 
   brevoMailingService
 );
+
 const xentriPayController = new XentriPayController(
-  xentriPayEscrowService, 
+  xentriPayEscrowService,
   xentriPayService
 );
 
@@ -49,6 +53,15 @@ const xentriPayController = new XentriPayController(
 
 // Health check endpoint
 router.get('/health', xentriPayController.healthCheck);
+
+// Configuration endpoints (public - for frontend payment choice)
+router.get('/currencies', xentriPayController.getSupportedCurrencies);
+router.get('/mobile-providers', xentriPayController.getSupportedMobileProviders);
+router.get('/payment-methods', xentriPayController.getPaymentMethods); // Added for frontend choice
+
+// Validation endpoints (public - useful for frontend validation)
+router.post('/validate/mobile-number', xentriPayController.validateMobileNumber);
+router.post('/validate/bank-account', xentriPayController.validateBankAccount);
 
 // XentriPay webhook endpoint (must be public)
 router.post(
@@ -60,14 +73,6 @@ router.post(
 // XentriPay callback endpoint (for payment redirects)
 router.get('/callback', xentriPayController.handleXentriPayCallback);
 
-// Configuration endpoints (public)
-router.get('/currencies', xentriPayController.getSupportedCurrencies);
-router.get('/mobile-providers', xentriPayController.getSupportedMobileProviders);
-
-// Validation endpoints (public - useful for frontend validation)
-router.post('/validate/mobile-number', xentriPayController.validateMobileNumber);
-router.post('/validate/bank-account', xentriPayController.validateBankAccount);
-
 // ==================== PROTECTED USER ROUTES ====================
 
 // Apply authentication and logging to all protected routes
@@ -75,12 +80,20 @@ router.use(authenticate);
 router.use(logXentriPayRequest);
 router.use(sanitizeXentriPayData);
 
-// === DEPOSIT OPERATIONS (Escrow Creation) ===
+// === COLLECTIONS/DEPOSITS ===
 router.post(
   '/deposits',
   rateLimitXentriPayOperations,
   validateXentriPayDeposit,
   xentriPayController.createDeposit
+);
+
+// === PAYOUTS/WITHDRAWALS ===
+router.post(
+  '/withdrawals',
+  rateLimitXentriPayOperations,
+  validateXentriPayWithdrawal,
+  xentriPayController.createWithdrawal
 );
 
 // === TRANSACTION STATUS ===
@@ -90,7 +103,7 @@ router.get(
   xentriPayController.getTransactionStatus
 );
 
-// === ESCROW MANAGEMENT ===
+// === ESCROW MANAGEMENT (User) ===
 router.post(
   '/transactions/:transactionId/release',
   rateLimitXentriPayOperations,
@@ -100,24 +113,24 @@ router.post(
 );
 
 router.post(
-  '/transactions/:transactionId/refund',
+  '/transactions/:transactionId/cancel',
   rateLimitXentriPayOperations,
   validateTransactionId,
-  validateXentriPayRefund,
-  xentriPayController.processRefund
-);
-
-// === WITHDRAWAL OPERATIONS ===
-router.post(
-  '/withdrawals',
-  rateLimitXentriPayOperations,
-  validateXentriPayWithdrawal,
-  xentriPayController.createWithdrawal
+  validateCancelEscrow,
+  xentriPayController.cancelEscrow
 );
 
 // ==================== ADMIN ROUTES ====================
 
 router.use('/admin', authorize('admin'));
+
+// Admin bulk release for withdrawals/escrows (agents/hosts/platform)
+router.post(
+  '/admin/bulk-release',
+  rateLimitXentriPayOperations,
+  validateBulkRelease,
+  xentriPayController.bulkReleaseWithdrawals
+);
 
 // Admin can perform all operations on behalf of users
 router.post(
@@ -129,11 +142,11 @@ router.post(
 );
 
 router.post(
-  '/admin/transactions/:transactionId/refund',
+  '/admin/transactions/:transactionId/cancel',
   rateLimitXentriPayOperations,
   validateTransactionId,
-  validateXentriPayRefund,
-  xentriPayController.processRefund
+  validateCancelEscrow,
+  xentriPayController.cancelEscrow
 );
 
 // ==================== TEST/DEBUG ROUTES ====================
@@ -178,16 +191,16 @@ if (!isProduction) {
   // Test collection endpoint
   router.post('/test-collection', authenticate, async (req, res) => {
     try {
-      const { amount = 100, phone = '0780371519' } = req.body;
+      const { amount = 100, phone = '0780371519', userId = 1, recipientId } = req.body;
 
-      console.log('🧪 Testing collection with:', { amount, phone });
+      console.log('🧪 Testing collection with:', { amount, phone, userId, recipientId });
 
       const result = await xentriPayService.initiateCollection({
         email: 'test@centrika.rw',
         cname: 'Test User',
         amount: Math.round(amount),
-        cnumber: xentriPayService.formatPhoneNumber(phone, false),
-        msisdn: xentriPayService.formatPhoneNumber(phone, true),
+        cnumber: PhoneUtils.formatPhone(phone, false),
+        msisdn: PhoneUtils.formatPhone(phone, true),
         currency: 'RWF',
         pmethod: 'momo',
         chargesIncluded: 'true'
