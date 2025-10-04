@@ -89,7 +89,6 @@ export interface PaymentTransactionInfo {
   status: 'pending' | 'processing' | 'completed' | 'success' | 'failed' | 'cancelled';
   reference: string;
   externalId?: string;
-  jengaTransactionId?: string;
   description?: string;
   metadata?: any;
   charges?: number;

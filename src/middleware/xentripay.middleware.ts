@@ -1,4 +1,4 @@
-// middleware/xentripay.middleware.ts
+// middleware/xentripay.middleware.ts - Regenerated with all validators, typo-free, matching server
 
 import { Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
@@ -44,29 +44,25 @@ export const validateXentriPayDeposit = (
   next: NextFunction
 ): void => {
   const {
-    buyerId,
-    buyerEmail,
-    buyerName,
-    buyerPhone,
-    sellerId,
-    sellerName,
-    sellerPhone,
+    userId,
+    userEmail,
+    userName,
+    userPhone,
+    recipientId,
+    recipientName,
+    recipientPhone,
     amount,
-    description
+    description,
+    paymentMethod
   } = req.body;
 
   const errors: string[] = [];
 
-  // Buyer validation
-  if (!buyerId) errors.push('buyerId is required');
-  if (!buyerEmail) errors.push('buyerEmail is required');
-  if (!buyerName) errors.push('buyerName is required');
-  if (!buyerPhone) errors.push('buyerPhone is required');
-
-  // Seller validation
-  if (!sellerId) errors.push('sellerId is required');
-  if (!sellerName) errors.push('sellerName is required');
-  if (!sellerPhone) errors.push('sellerPhone is required');
+  // User validation
+  if (!userId) errors.push('userId is required');
+  if (!userEmail) errors.push('userEmail is required');
+  if (!userName) errors.push('userName is required');
+  if (!userPhone) errors.push('userPhone is required');
 
   // Amount validation
   if (!amount) {
@@ -77,17 +73,23 @@ export const validateXentriPayDeposit = (
     errors.push('amount must be a whole number (no decimals)');
   }
 
+  // Payment method
+  if (!paymentMethod) errors.push('paymentMethod is required');
+  if (paymentMethod && paymentMethod !== 'momo') {
+    errors.push('paymentMethod must be "momo"');
+  }
+
   // Email validation
-  if (buyerEmail && !isValidEmail(buyerEmail)) {
-    errors.push('buyerEmail must be a valid email address');
+  if (userEmail && !isValidEmail(userEmail)) {
+    errors.push('userEmail must be a valid email address');
   }
 
   // Phone validation
-  if (buyerPhone && !isValidRwandaPhone(buyerPhone)) {
-    errors.push('buyerPhone must be a valid Rwanda phone number');
+  if (userPhone && !isValidRwandaPhone(userPhone)) {
+    errors.push('userPhone must be a valid Rwanda phone number');
   }
-  if (sellerPhone && !isValidRwandaPhone(sellerPhone)) {
-    errors.push('sellerPhone must be a valid Rwanda phone number');
+  if (recipientPhone && !isValidRwandaPhone(recipientPhone)) {
+    errors.push('recipientPhone must be a valid Rwanda phone number');
   }
 
   if (errors.length > 0) {
@@ -195,6 +197,125 @@ export const validateXentriPayRefund = (
   next();
 };
 
+export const validateCancelEscrow = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  const { requesterId, reason } = req.body;
+
+  const errors: string[] = [];
+
+  if (!requesterId) errors.push('requesterId is required');
+  if (!reason) errors.push('reason is required');
+  if (reason && typeof reason !== 'string') errors.push('reason must be a string');
+  if (reason && reason.length < 10) errors.push('reason must be at least 10 characters');
+
+  if (errors.length > 0) {
+    res.status(400).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid cancel request',
+        errors
+      }
+    });
+    return;
+  }
+
+  next();
+};
+
+export const validateBulkRelease = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  const { transactionIds, requesterId } = req.body;
+
+  const errors: string[] = [];
+
+  if (!transactionIds) errors.push('transactionIds is required');
+  if (transactionIds && !Array.isArray(transactionIds)) errors.push('transactionIds must be an array');
+  if (transactionIds && Array.isArray(transactionIds) && transactionIds.length === 0) errors.push('transactionIds array cannot be empty');
+
+  if (!requesterId) errors.push('requesterId is required');
+
+  if (errors.length > 0) {
+    res.status(400).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid bulk release request',
+        errors
+      }
+    });
+    return;
+  }
+
+  next();
+};
+
+export const validateCreateDispute = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  const { reason } = req.body;
+
+  const errors: string[] = [];
+
+  if (!reason) errors.push('reason is required');
+  if (reason && typeof reason !== 'string') errors.push('reason must be a string');
+  if (reason && reason.length < 20) errors.push('reason must be at least 20 characters');
+
+  if (errors.length > 0) {
+    res.status(400).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid dispute creation request',
+        errors
+      }
+    });
+    return;
+  }
+
+  next();
+};
+
+export const validateResolveDispute = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  const { resolution, reason } = req.body;
+
+  const errors: string[] = [];
+
+  if (!resolution) errors.push('resolution is required');
+  if (resolution && !['RELEASE', 'REFUND'].includes(resolution)) {
+    errors.push('resolution must be RELEASE or REFUND');
+  }
+  if (!reason) errors.push('reason is required');
+  if (reason && typeof reason !== 'string') errors.push('reason must be a string');
+  if (reason && reason.length < 20) errors.push('reason must be at least 20 characters');
+
+  if (errors.length > 0) {
+    res.status(400).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid dispute resolution request',
+        errors
+      }
+    });
+    return;
+  }
+
+  next();
+};
+
 export const validateTransactionId = (
   req: Request,
   res: Response,
@@ -265,11 +386,11 @@ export const sanitizeXentriPayData = (
     });
 
     // Remove extra spaces from phone numbers
-    if (req.body.buyerPhone) {
-      req.body.buyerPhone = req.body.buyerPhone.replace(/\s+/g, '');
+    if (req.body.userPhone) {
+      req.body.userPhone = req.body.userPhone.replace(/\s+/g, '');
     }
-    if (req.body.sellerPhone) {
-      req.body.sellerPhone = req.body.sellerPhone.replace(/\s+/g, '');
+    if (req.body.recipientPhone) {
+      req.body.recipientPhone = req.body.recipientPhone.replace(/\s+/g, '');
     }
     if (req.body.phoneNumber) {
       req.body.phoneNumber = req.body.phoneNumber.replace(/\s+/g, '');
@@ -301,12 +422,12 @@ export const logXentriPayRequest = (
   // Log request body (excluding sensitive data)
   if (req.body && Object.keys(req.body).length > 0) {
     const sanitizedBody = { ...req.body };
-    
+
     // Remove sensitive fields from logs
-    if (sanitizedBody.buyerPhone) sanitizedBody.buyerPhone = '***';
-    if (sanitizedBody.sellerPhone) sanitizedBody.sellerPhone = '***';
+    if (sanitizedBody.userPhone) sanitizedBody.userPhone = '***';
+    if (sanitizedBody.recipientPhone) sanitizedBody.recipientPhone = '***';
     if (sanitizedBody.phoneNumber) sanitizedBody.phoneNumber = '***';
-    
+
     console.log('[XENTRIPAY] Request body:', JSON.stringify(sanitizedBody, null, 2));
   }
 

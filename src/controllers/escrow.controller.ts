@@ -2,6 +2,8 @@
 import { Request, Response } from 'express';
 import { EscrowService } from '../services/escrow.service';
 import { PesapalService } from '../services/pesapal.service';
+import { PhoneUtils } from '../utils/phone.utils';
+import { logger } from '../utils/logger';
 import {
   CreateDepositDto,
   ReleaseEscrowDto,
@@ -53,7 +55,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Create deposit error:', error);
+      logger.error('Failed to create deposit', 'EscrowController', error);
       res.status(error.code === 'VALIDATION_ERROR' ? 400 : 500).json({
         success: false,
         error: {
@@ -70,9 +72,7 @@ export class EscrowController {
   getTransactionByReference = async (req: Request, res: Response): Promise<void> => {
     try {
       const { reference } = req.params;
-      
-      console.log(`[ESCROW] Fetching transaction by reference: ${reference}`);
-      
+
       const transaction = await prisma.escrowTransaction.findFirst({
         where: { reference },
         include: {
@@ -128,7 +128,7 @@ export class EscrowController {
             return;
           }
         } catch (error) {
-          console.error('[ESCROW] Error checking Pesapal status:', error);
+          logger.error('Error checking Pesapal status', 'EscrowController', error);
           // Continue with current status
         }
       }
@@ -139,7 +139,7 @@ export class EscrowController {
       });
       
     } catch (error: any) {
-      console.error('[ESCROW] Error fetching transaction:', error);
+      logger.error('Failed to fetch transaction', 'EscrowController', error);
       res.status(500).json({
         success: false,
         error: {
@@ -153,8 +153,6 @@ export class EscrowController {
     checkTransactionStatus = async (req: Request, res: Response) => {
     try {
       const { transactionId } = req.params;
-      
-      console.log(`[CONTROLLER] Manual status check for transaction: ${transactionId}`);
 
       // Get transaction
       const transaction = await prisma.escrowTransaction.findUnique({
@@ -202,15 +200,12 @@ export class EscrowController {
       }
 
       // Get latest status from Pesapal
-      console.log(`[CONTROLLER] Fetching status from Pesapal: ${transaction.externalId}`);
       const statusResponse = await this.pesapalService.getTransactionStatus(
         transaction.externalId
       );
 
       // Map to escrow status
       const newStatus = this.pesapalService.mapPesapalStatusToEscrowStatus(statusResponse);
-
-      console.log(`[CONTROLLER] Status check result: ${transaction.status} → ${newStatus}`);
 
       // If status changed, update via webhook handler
       if (newStatus !== transaction.status) {
@@ -262,7 +257,7 @@ export class EscrowController {
       }
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Check status error:', error);
+      logger.error('Failed to check transaction status', 'EscrowController', error);
       res.status(500).json({
         success: false,
         error: {
@@ -309,8 +304,6 @@ export class EscrowController {
   checkStatusByReference = async (req: Request, res: Response) => {
     try {
       const { reference } = req.params;
-      
-      console.log(`[CONTROLLER] Status check by reference: ${reference}`);
 
       // Find transaction
       const transaction = await prisma.escrowTransaction.findFirst({
@@ -387,7 +380,7 @@ export class EscrowController {
       }
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Check status by reference error:', error);
+      logger.error('Failed to check status by reference', 'EscrowController', error);
       res.status(500).json({
         success: false,
         error: {
@@ -421,7 +414,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Release escrow error:', error);
+      logger.error('Failed to release escrow', 'EscrowController', error);
       res.status(error.code === 'VALIDATION_ERROR' ? 400 : 500).json({
         success: false,
         error: {
@@ -454,7 +447,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Process refund error:', error);
+      logger.error('Failed to process refund', 'EscrowController', error);
       res.status(error.code === 'VALIDATION_ERROR' ? 400 : 500).json({
         success: false,
         error: {
@@ -484,7 +477,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Create withdrawal error:', error);
+      logger.error('Failed to create withdrawal', 'EscrowController', error);
       res.status(error.code === 'VALIDATION_ERROR' ? 400 : 500).json({
         success: false,
         error: {
@@ -524,7 +517,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Get transaction error:', error);
+      logger.error('Failed to get transaction', 'EscrowController', error);
       res.status(error.message?.includes('not found') ? 404 : 500).json({
         success: false,
         error: {
@@ -568,7 +561,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Get user transactions error:', error);
+      logger.error('Failed to get user transactions', 'EscrowController', error);
       res.status(500).json({
         success: false,
         error: {
@@ -596,7 +589,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Get wallet error:', error);
+      logger.error('Failed to get user wallet', 'EscrowController', error);
       res.status(500).json({
         success: false,
         error: {
@@ -639,7 +632,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Get all transactions error:', error);
+      logger.error('Failed to get all transactions', 'EscrowController', error);
       res.status(500).json({
         success: false,
         error: {
@@ -674,7 +667,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Admin release error:', error);
+      logger.error('Failed to admin release escrow', 'EscrowController', error);
       res.status(error.code === 'VALIDATION_ERROR' ? 400 : 500).json({
         success: false,
         error: {
@@ -704,7 +697,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[CONTROLLER] Get stats error:', error);
+      logger.error('Failed to get transaction stats', 'EscrowController', error);
       res.status(500).json({
         success: false,
         error: {
@@ -724,8 +717,6 @@ export class EscrowController {
    */
   handlePesapalWebhook = async (req: Request, res: Response) => {
     try {
-      console.log('[WEBHOOK] Pesapal webhook received');
-
       const webhookData = req.body;
 
       await this.escrowService.handlePesapalWebhook(webhookData);
@@ -736,8 +727,8 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[WEBHOOK] Processing error:', error);
-      
+      logger.error('Failed to process Pesapal webhook', 'EscrowController', error);
+
       // Still return 200 to prevent Pesapal retries
       res.status(200).json({
         success: false,
@@ -754,12 +745,6 @@ export class EscrowController {
   handlePesapalCallback = async (req: Request, res: Response) => {
     try {
       const { OrderTrackingId, OrderMerchantReference, Status } = req.query;
-
-      console.log('[CALLBACK] Payment callback received:', {
-        trackingId: OrderTrackingId,
-        reference: OrderMerchantReference,
-        status: Status
-      });
 
       // Process webhook data
       if (OrderTrackingId) {
@@ -783,7 +768,7 @@ export class EscrowController {
       }
 
     } catch (error: any) {
-      console.error('[CALLBACK] Error:', error);
+      logger.error('Failed to handle Pesapal callback', 'EscrowController', error);
       const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
       return res.redirect(`${clientUrl}/payment/error`);
     }
@@ -812,7 +797,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[HEALTH] Check error:', error);
+      logger.error('Health check failed', 'EscrowController', error);
       res.status(503).json({
         success: false,
         error: {
@@ -932,18 +917,15 @@ export class EscrowController {
     try {
       const { phoneNumber, countryCode } = req.body;
 
-      const validation = this.pesapalService.validateMobileNumber(
-        phoneNumber,
-        countryCode || 'RW'
-      );
+      const validation = PhoneUtils.validateRwandaPhone(phoneNumber);
 
       res.status(200).json({
         success: validation.isValid,
         data: validation.isValid ? {
-          formattedNumber: validation.formattedNumber,
+          formattedNumber: validation.formattedPhone,
           provider: validation.provider
         } : null,
-        errors: validation.errors
+        errors: validation.error ? [validation.error] : []
       });
 
     } catch (error: any) {
@@ -996,8 +978,6 @@ export class EscrowController {
    */
   forceIPNRegistration = async (req: Request, res: Response) => {
     try {
-      console.log('[ADMIN] Forcing IPN re-registration');
-
       const ipnId = await this.pesapalService.forceRegisterIPN();
 
       res.status(200).json({
@@ -1010,7 +990,7 @@ export class EscrowController {
       });
 
     } catch (error: any) {
-      console.error('[ADMIN] IPN registration error:', error);
+      logger.error('Failed to force IPN registration', 'EscrowController', error);
       res.status(500).json({
         success: false,
         error: {

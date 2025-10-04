@@ -1,8 +1,9 @@
-// controllers/xentripay.controller.ts
+// controllers/xentripay.controller.ts - Refactored to use userId/recipientId pattern
 
 import { Request, Response } from 'express';
 import { XentriPayService } from '../services/xentripay.service';
-import { XentriPayEscrowService } from '../services/xentripay-escrow.service';
+import { XentriPayEscrowService, CreateEscrowRequest, BulkReleaseRequest, CancelEscrowRequest } from '../services/xentripay-escrow.service';
+import { PhoneUtils } from '../utils/phone.utils';
 
 export class XentriPayController {
   constructor(
@@ -15,13 +16,14 @@ export class XentriPayController {
   healthCheck = async (req: Request, res: Response): Promise<void> => {
     try {
       const isHealthy = await this.xentriPayService.healthCheck();
-      
+
       res.status(200).json({
         success: true,
         message: 'XentriPay service is operational',
         data: {
           status: isHealthy ? 'healthy' : 'degraded',
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          supportedMethods: ['momo']
         }
       });
     } catch (error: any) {
@@ -58,6 +60,17 @@ export class XentriPayController {
     });
   };
 
+  getPaymentMethods = async (req: Request, res: Response): Promise<void> => {
+    res.status(200).json({
+      success: true,
+      data: {
+        methods: [
+          { id: 'momo', name: 'Mobile Money (MTN/Airtel)', providers: ['MTN', 'AIRTEL'] }
+        ]
+      }
+    });
+  };
+
   // ==================== VALIDATION ====================
 
   validateMobileNumber = async (req: Request, res: Response): Promise<void> => {
@@ -75,7 +88,7 @@ export class XentriPayController {
         return;
       }
 
-      const formatted = this.xentriPayService.formatPhoneNumber(phoneNumber, true);
+      const formatted = PhoneUtils.formatPhone(phoneNumber, true);
       const providerId = this.xentriPayService.getProviderIdFromPhone(phoneNumber);
 
       res.status(200).json({
@@ -143,37 +156,28 @@ export class XentriPayController {
   createDeposit = async (req: Request, res: Response): Promise<void> => {
     try {
       const {
-        buyerId,
-        buyerEmail,
-        buyerName,
-        buyerPhone,
-        sellerId,
-        sellerEmail,
-        sellerName,
-        sellerPhone,
+        userId,
+        userEmail,
+        userName,
+        userPhone,
+        recipientId,
+        recipientEmail,
+        recipientName,
+        recipientPhone,
         amount,
         description,
+        paymentMethod,
+        platformFeePercentage,
         metadata
       } = req.body;
 
       // Validate required fields
-      if (!buyerId || !buyerEmail || !buyerName || !buyerPhone) {
+      if (!userId || !userEmail || !userName || !userPhone) {
         res.status(400).json({
           success: false,
           error: {
-            code: 'MISSING_BUYER_INFO',
-            message: 'Buyer information is incomplete'
-          }
-        });
-        return;
-      }
-
-      if (!sellerId || !sellerName || !sellerPhone) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'MISSING_SELLER_INFO',
-            message: 'Seller information is incomplete'
+            code: 'MISSING_USER_INFO',
+            message: 'User information is incomplete'
           }
         });
         return;
@@ -190,38 +194,55 @@ export class XentriPayController {
         return;
       }
 
+      if (!paymentMethod || paymentMethod !== 'momo') {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_PAYMENT_METHOD',
+            message: 'Payment method must be "momo"'
+          }
+        });
+        return;
+      }
+
       // Create escrow transaction
       const transaction = await this.escrowService.createEscrow({
-        buyerId,
-        buyerEmail,
-        buyerName,
-        buyerPhone,
-        sellerId,
-        sellerName,
-        sellerPhone,
+        userId,
+        userEmail,
+        userName,
+        userPhone,
+        recipientId,
+        recipientEmail,
+        recipientName,
+        recipientPhone,
         amount: Math.round(amount),
-        description: description || 'Escrow payment',
+        description: description || 'Payment',
+        paymentMethod,
+        platformFeePercentage,
         metadata: {
           ...metadata,
-          buyerEmail,
-          buyerPhone,
-          sellerEmail,
-          sellerPhone,
-          buyerName,
-          sellerName
+          userEmail,
+          userPhone,
+          recipientEmail,
+          recipientPhone,
+          userName,
+          recipientName
         }
       });
 
       res.status(201).json({
         success: true,
-        message: 'Escrow transaction created successfully',
+        message: 'Payment initiated successfully',
         data: {
           transactionId: transaction.id,
           status: transaction.status,
           amount: transaction.amount,
+          platformFee: transaction.platformFee,
+          hostEarning: transaction.hostEarning,
           currency: transaction.currency,
+          paymentMethod,
           xentriPayRefId: transaction.xentriPayRefId,
-          instructions: transaction.collectionResponse?.reply,
+          instructions: transaction.collectionResponse?.reply || 'Payment initiated',
           createdAt: transaction.createdAt
         }
       });
@@ -256,10 +277,13 @@ export class XentriPayController {
       }
 
       // Check current status first
-      await this.escrowService.checkCollectionStatus(transactionId);
+      const transaction = await this.escrowService.getTransaction(transactionId);
+      if (transaction?.paymentMethod === 'momo') {
+        await this.escrowService.checkCollectionStatus(transactionId);
+      }
 
       // Release escrow
-      const transaction = await this.escrowService.releaseEscrow({
+      const updatedTransaction = await this.escrowService.releaseEscrow({
         transactionId,
         requesterId,
         reason
@@ -267,13 +291,15 @@ export class XentriPayController {
 
       res.status(200).json({
         success: true,
-        message: 'Escrow released successfully',
+        message: 'Payment released successfully',
         data: {
-          transactionId: transaction.id,
-          status: transaction.status,
-          amount: transaction.amount,
-          xentriPayInternalRef: transaction.xentriPayInternalRef,
-          completedAt: transaction.completedAt
+          transactionId: updatedTransaction.id,
+          status: updatedTransaction.status,
+          amount: updatedTransaction.amount,
+          platformFee: updatedTransaction.platformFee,
+          hostEarning: updatedTransaction.hostEarning,
+          xentriPayInternalRef: updatedTransaction.xentriPayInternalRef,
+          completedAt: updatedTransaction.completedAt
         }
       });
     } catch (error: any) {
@@ -288,7 +314,7 @@ export class XentriPayController {
     }
   };
 
-  processRefund = async (req: Request, res: Response): Promise<void> => {
+  cancelEscrow = async (req: Request, res: Response): Promise<void> => {
     try {
       const { transactionId } = req.params;
       const { requesterId, reason } = req.body;
@@ -309,14 +335,14 @@ export class XentriPayController {
           success: false,
           error: {
             code: 'MISSING_REASON',
-            message: 'Refund reason is required'
+            message: 'Cancellation reason is required'
           }
         });
         return;
       }
 
-      // Process refund
-      const transaction = await this.escrowService.refundEscrow({
+      // Cancel with refund
+      const transaction = await this.escrowService.cancelEscrow({
         transactionId,
         requesterId,
         reason
@@ -324,7 +350,7 @@ export class XentriPayController {
 
       res.status(200).json({
         success: true,
-        message: 'Refund processed successfully',
+        message: 'Payment cancelled and refunded successfully',
         data: {
           transactionId: transaction.id,
           status: transaction.status,
@@ -335,11 +361,63 @@ export class XentriPayController {
         }
       });
     } catch (error: any) {
-      console.error('[CONTROLLER] Process refund failed:', error);
+      console.error('[CONTROLLER] Cancel escrow failed:', error);
       res.status(400).json({
         success: false,
         error: {
-          code: 'REFUND_FAILED',
+          code: 'CANCEL_FAILED',
+          message: error.message
+        }
+      });
+    }
+  };
+
+  // ==================== ADMIN BULK OPERATIONS ====================
+
+  bulkReleaseWithdrawals = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { transactionIds, requesterId, reason } = req.body;
+
+      if (!transactionIds || !Array.isArray(transactionIds) || transactionIds.length === 0) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'MISSING_TRANSACTION_IDS',
+            message: 'Array of transaction IDs is required'
+          }
+        });
+        return;
+      }
+
+      if (!requesterId) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'MISSING_REQUESTER_ID',
+            message: 'Admin requester ID is required'
+          }
+        });
+        return;
+      }
+
+      // Bulk release (for host agents/platform approvals)
+      const result = await this.escrowService.bulkReleaseEscrow({
+        transactionIds,
+        requesterId,
+        reason
+      });
+
+      res.status(200).json({
+        success: true,
+        message: `Bulk release processed: ${result.success} successful, ${result.failed} failed`,
+        data: result
+      });
+    } catch (error: any) {
+      console.error('[CONTROLLER] Bulk release failed:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'BULK_RELEASE_FAILED',
           message: error.message
         }
       });
@@ -372,18 +450,18 @@ export class XentriPayController {
       }
 
       // Determine provider ID if not provided
-      const finalProviderId = providerId || 
+      const finalProviderId = providerId ||
         this.xentriPayService.getProviderIdFromPhone(phoneNumber);
 
       // Generate customer reference
-      const customerReference = reference || 
+      const customerReference = reference ||
         this.xentriPayService.generateCustomerReference('WD');
 
       // Create payout
       const payoutResponse = await this.xentriPayService.createPayout({
         customerReference,
         telecomProviderId: finalProviderId,
-        msisdn: this.xentriPayService.formatPhoneNumber(phoneNumber, false),
+        msisdn: PhoneUtils.formatPhone(phoneNumber, true),
         name: recipientName,
         transactionType: 'PAYOUT',
         currency: 'RWF',
@@ -437,7 +515,7 @@ export class XentriPayController {
       }
 
       // Update status if needed
-      if (transaction.status === 'PENDING' && transaction.xentriPayRefId) {
+      if (transaction.status === 'PENDING' && transaction.paymentMethod === 'momo' && transaction.xentriPayRefId) {
         await this.escrowService.checkCollectionStatus(transactionId);
       }
 
@@ -467,7 +545,7 @@ export class XentriPayController {
 
       // Find transaction by refid
       // Note: In production, you'd query database by xentriPayRefId
-      
+
       // Acknowledge webhook
       res.status(200).json({
         success: true,
@@ -496,7 +574,7 @@ export class XentriPayController {
       console.log('[CONTROLLER] Payment callback:', { transactionId, status });
 
       // Redirect to appropriate page based on status
-      const redirectUrl = status === 'success' 
+      const redirectUrl = status === 'success'
         ? `/payment/success?tx=${transactionId}`
         : `/payment/failed?tx=${transactionId}`;
 
@@ -506,4 +584,5 @@ export class XentriPayController {
       res.redirect('/payment/error');
     }
   };
+
 }

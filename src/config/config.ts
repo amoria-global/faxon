@@ -45,20 +45,25 @@ export const config = {
     }
   },
 
-  // LEGACY: Jenga API Configuration (Keeping as backup/alternative)
-  jenga: {
-    baseUrl: process.env.JENGA_BASE_URL || 'https://sandbox.jengahq.io',
-    username: process.env.JENGA_USERNAME || '',
-    password: process.env.JENGA_PASSWORD || '',
-    apiKey: process.env.JENGA_API_KEY || '',
-    privateKey: process.env.JENGA_PRIVATE_KEY || '',
-    environment: process.env.JENGA_ENVIRONMENT || 'sandbox',
-    callbackUrl: process.env.JENGA_CALLBACK_URL || 'https://jambolush.com/payments/webhook/jenga',
-    sourceAccount: process.env.JENGA_SOURCE_ACCOUNT || '',
-    enabled: process.env.ENABLE_JENGA === 'true' // Disabled by default, use Pesapal
+  // XentriPay API Configuration (Mobile Money - Rwanda)
+  xentripay: {
+    apiKey: process.env.XENTRIPAY_API_KEY!,
+    baseUrl: process.env.XENTRIPAY_BASE_URL || (process.env.NODE_ENV === 'production' ? 'https://xentripay.com' : 'https://test.xentripay.com'),
+    environment: (process.env.NODE_ENV === 'production' ? 'production' : 'sandbox') as 'production' | 'sandbox',
+    webhookSecret: process.env.XENTRIPAY_WEBHOOK_SECRET || '',
+    callbackUrl: process.env.XENTRIPAY_CALLBACK_URL || 'http://localhost:5000/api/xentripay/callback',
+    merchantAccount: process.env.XENTRIPAY_MERCHANT_ACCOUNT || '',
+    timeout: parseInt(process.env.XENTRIPAY_TIMEOUT || '30000'), // 30 seconds
+
+    // Supported payment methods via XentriPay
+    supportedMethods: ['momo'],
+    supportedProviders: {
+      mobile: ['MTN', 'AIRTEL'],
+      countries: ['RW'] // Rwanda focus
+    }
   },
 
-  // UPDATED: Escrow Configuration (Pesapal-based)
+  // Escrow Configuration (Pesapal-based)
   escrow: {
     // Primary provider is now Pesapal
     primaryProvider: 'pesapal',
@@ -108,8 +113,8 @@ export const config = {
     // Primary payment mode is now escrow-based
     defaultMode: process.env.PAYMENT_DEFAULT_MODE || 'escrow', // 'escrow' or 'direct'
     defaultCurrency: 'RWF', // Rwanda Franc as primary
-    
-    // Traditional payment limits (for direct payments via Jenga)
+
+    // Traditional payment limits
     limits: {
       daily: {
         deposit: parseFloat(process.env.DAILY_DEPOSIT_LIMIT || '500000'), // 500K RWF
@@ -168,7 +173,7 @@ export const config = {
   currencies: {
     default: 'RWF', // Rwanda Franc primary
     supported: (process.env.SUPPORTED_CURRENCIES || 'RWF,USD,UGX,TZS,KES').split(','),
-    exchangeApiKey: process.env.EXCHANGE_RATE_API_KEY || '',
+    exchangeApiUrl: 'https://hexarate.paikama.co/api/rates/latest',
     
     // Currency-specific settings for East Africa
     rwf: {
@@ -218,16 +223,12 @@ export const config = {
     }
   },
 
-  // UPDATED: Enhanced Webhook Security
+  // Enhanced Webhook Security
   webhooks: {
-    // Pesapal webhook settings (primary)
+    // Pesapal webhook settings
     pesapalSecret: process.env.PESAPAL_WEBHOOK_SECRET || '',
     pesapalAllowedIPs: process.env.PESAPAL_WEBHOOK_IPS?.split(',') || [],
-    
-    // Legacy Jenga webhook settings
-    jengaSecret: process.env.JENGA_WEBHOOK_SECRET || '',
-    jengaAllowedIPs: process.env.JENGA_WEBHOOK_IPS?.split(',') || [],
-    
+
     // General webhook settings
     timeout: parseInt(process.env.WEBHOOK_TIMEOUT || '30000'), // 30 seconds
     retryAttempts: parseInt(process.env.WEBHOOK_RETRY_ATTEMPTS || '3'),
@@ -332,15 +333,11 @@ export const config = {
     enableEscrowAnalytics: process.env.ENABLE_ESCROW_ANALYTICS !== 'false',
     enableAutoRelease: process.env.ENABLE_AUTO_RELEASE !== 'false',
     enableEmailNotifications: process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'false',
-    
+
     // Integration features
     enableMobileApp: process.env.ENABLE_MOBILE_APP === 'true',
     enableWebhookLogs: process.env.ENABLE_WEBHOOK_LOGS !== 'false',
-    enableApiDocumentation: process.env.ENABLE_API_DOCS !== 'false',
-    
-    // Legacy features
-    enableJengaPayments: process.env.ENABLE_JENGA_PAYMENTS === 'true', // Disabled by default
-    enableDirectPayments: process.env.ENABLE_DIRECT_PAYMENTS === 'true' // For non-escrow payments
+    enableApiDocumentation: process.env.ENABLE_API_DOCS !== 'false'
   },
 
   // NEW: Background Jobs Configuration (for escrow automation)
@@ -447,6 +444,16 @@ export function validateConfig() {
   const errors: string[] = [];
   const warnings: string[] = [];
 
+  // Critical XentriPay configuration validation
+  const requiredXentriPayVars = [
+    'XENTRIPAY_API_KEY'
+  ];
+
+  const missingXentriPayVars = requiredXentriPayVars.filter(varName => !process.env[varName]);
+  if (missingXentriPayVars.length > 0) {
+    warnings.push(`Missing XentriPay environment variables: ${missingXentriPayVars.join(', ')}`);
+  }
+
   // Critical Pesapal configuration validation
   const requiredPesapalVars = [
     'PESAPAL_CONSUMER_KEY',
@@ -457,7 +464,7 @@ export function validateConfig() {
 
   const missingPesapalVars = requiredPesapalVars.filter(varName => !process.env[varName]);
   if (missingPesapalVars.length > 0) {
-    errors.push(`Missing critical Pesapal environment variables: ${missingPesapalVars.join(', ')}`);
+    warnings.push(`Missing Pesapal environment variables: ${missingPesapalVars.join(', ')}`);
   }
 
   // Validate Pesapal URLs for auto-registration
@@ -475,23 +482,6 @@ export function validateConfig() {
     // If auto-registration is disabled, check for manual IPN ID
     if (!process.env.PESAPAL_IPN_ID) {
       warnings.push('Auto IPN registration disabled and no manual PESAPAL_IPN_ID provided');
-    }
-  }
-
-  // Optional Jenga validation (only if enabled)
-  if (config.features.enableJengaPayments) {
-    const requiredJengaVars = [
-      'JENGA_USERNAME',
-      'JENGA_PASSWORD', 
-      'JENGA_API_KEY',
-      'JENGA_PRIVATE_KEY',
-      'JENGA_SOURCE_ACCOUNT',
-      'JENGA_WEBHOOK_SECRET'
-    ];
-
-    const missingJengaVars = requiredJengaVars.filter(varName => !process.env[varName]);
-    if (missingJengaVars.length > 0) {
-      warnings.push(`Jenga payments enabled but missing variables: ${missingJengaVars.join(', ')}`);
     }
   }
 
@@ -541,12 +531,6 @@ export function validateConfig() {
   }
 
   console.log('✅ Configuration validated successfully');
-  console.log(`🌍 Supported currencies: ${config.currencies.supported.join(', ')}`);
-  console.log(`💰 Default currency: ${config.currencies.default}`);
-  console.log(`🔒 Escrow payments: ${config.features.enableEscrowPayments ? 'Enabled (Pesapal)' : 'Disabled'}`);
-  console.log(`🔄 Auto IPN registration: ${config.pesapal.autoRegisterIPN ? 'Enabled' : 'Disabled'}`);
-  console.log(`🏦 Jenga payments: ${config.features.enableJengaPayments ? 'Enabled' : 'Disabled'}`);
-  console.log(`📧 Email notifications: ${config.features.enableEmailNotifications ? 'Enabled' : 'Disabled'}`);
 }
 
 // Enhanced Configuration Helper Functions
@@ -581,14 +565,12 @@ export const configUtils = {
   // Get webhook URLs
   getWebhookUrls: () => ({
     pesapal: config.pesapal.callbackUrl,
-    pesapalIpn: config.pesapal.ipnUrl,
-    jenga: config.jenga.callbackUrl
+    pesapalIpn: config.pesapal.ipnUrl
   }),
 
   // Get payment provider settings
   getPaymentProvider: () => ({
     primary: 'pesapal',
-    secondary: config.features.enableJengaPayments ? 'jenga' : null,
     escrowEnabled: config.features.enableEscrowPayments,
     autoIPNRegistration: config.pesapal.autoRegisterIPN
   }),

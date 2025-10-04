@@ -3,6 +3,7 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
+import { PhoneUtils } from '../utils/phone.utils';
 
 const prisma = new PrismaClient();
 
@@ -75,33 +76,6 @@ export class BrevoSMSService {
     }
   }
 
-  /**
-   * Format phone number for international SMS
-   */
-  private formatPhoneNumber(phoneNumber: string, countryCode: string = '+250'): string {
-    // Remove all non-digit characters
-    let cleaned = phoneNumber.replace(/\D/g, '');
-    
-    // Handle Rwanda phone numbers specifically
-    if (countryCode === '+250' || countryCode === '250') {
-      // Remove leading zeros
-      if (cleaned.startsWith('0')) {
-        cleaned = cleaned.substring(1);
-      }
-      // Add Rwanda country code
-      if (!cleaned.startsWith('250')) {
-        cleaned = '250' + cleaned;
-      }
-      return '+' + cleaned;
-    }
-    
-    // For other countries, add provided country code
-    if (!cleaned.startsWith(countryCode.replace('+', ''))) {
-      cleaned = countryCode.replace('+', '') + cleaned;
-    }
-    
-    return '+' + cleaned;
-  }
 
   /**
    * Send withdrawal OTP - ONLY to registered phone number in database
@@ -164,7 +138,7 @@ export class BrevoSMSService {
       const expiryTime = Date.now() + (5 * 60 * 1000); // 5 minutes
 
       // Format the REGISTERED phone number
-      const formattedPhone = this.formatPhoneNumber(registeredPhoneNumber);
+      const formattedPhone = PhoneUtils.formatPhone(registeredPhoneNumber, true);
 
       // Create SMS message with user's name for personalization
       const userName = userFromDB.firstName || 'User';
@@ -357,7 +331,7 @@ export class BrevoSMSService {
     messageId?: string;
     error?: string;
   }> {
-    const formattedPhone = this.formatPhoneNumber(phoneNumber);
+    const formattedPhone = PhoneUtils.formatPhone(phoneNumber, true);
     return this.sendSMS(formattedPhone, `Jambolush: ${message}`);
   }
 

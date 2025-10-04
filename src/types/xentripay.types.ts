@@ -114,8 +114,8 @@ export interface WalletBalanceResponse {
 
 export interface EscrowTransaction {
   id: string;
-  buyerId: string;
-  sellerId: string;
+  userId: string; // Payer (guest/user making payment)
+  recipientId?: string; // Host agent receiving payment
   amount: number;
   currency: string;
   description: string;
@@ -129,10 +129,12 @@ export interface EscrowTransaction {
   createdAt: Date;
   updatedAt: Date;
   completedAt?: Date;
+  platformFee?: number; // Platform commission
+  hostEarning?: number; // Host agent earning
   metadata?: Record<string, any>;
 }
 
-export type EscrowStatus = 
+export type EscrowStatus =
   | 'INITIATED'
   | 'PENDING'
   | 'HELD'
@@ -142,15 +144,18 @@ export type EscrowStatus =
   | 'CANCELLED';
 
 export interface CreateEscrowRequest {
-  buyerId: string;
-  buyerEmail: string;
-  buyerName: string;
-  buyerPhone: string;
-  sellerId: string;
-  sellerName: string;
-  sellerPhone: string;
+  userId: string;
+  userEmail: string;
+  userName: string;
+  userPhone: string;
+  recipientId?: string;
+  recipientEmail?: string;
+  recipientName?: string;
+  recipientPhone?: string;
   amount: number;
   description: string;
+  paymentMethod?: 'momo';
+  platformFeePercentage?: number; // e.g., 10 for 10%
   metadata?: Record<string, any>;
 }
 
@@ -259,24 +264,26 @@ export type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
 
 export interface DepositInitiatedEmailData {
   to: string;
-  buyerName: string;
+  userName: string;
   amount: number;
   transactionId: string;
   description: string;
   instructions: string;
+  paymentMethod: string;
 }
 
 export interface FundsHeldEmailData {
   to: string;
-  buyerName: string;
+  userName: string;
   transactionId: string;
   amount: number;
   description: string;
+  paymentMethod: string;
 }
 
 export interface PayoutCompletedEmailData {
   to: string;
-  sellerName: string;
+  recipientName: string;
   transactionId: string;
   amount: number;
   description: string;
@@ -284,7 +291,7 @@ export interface PayoutCompletedEmailData {
 
 export interface RefundCompletedEmailData {
   to: string;
-  buyerName: string;
+  userName: string;
   transactionId: string;
   amount: number;
   reason: string;
@@ -318,4 +325,17 @@ export interface TransactionStatistics {
   pendingTransactions: number;
   averageTransactionAmount: number;
   averageProcessingTime: number; // in milliseconds
+}
+
+export type PaymentMethod = 'momo' | 'card';
+
+export interface PaymentChoice {
+  method: PaymentMethod;
+  provider?: string; // For MoMo: 'MTN' | 'AIRTEL'
+}
+
+export interface BulkOperationResult {
+  success: number;
+  failed: number;
+  results: Array<{ id: string; status: string; error?: string }>;
 }
