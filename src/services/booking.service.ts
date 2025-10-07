@@ -209,22 +209,24 @@ export class BookingService {
       });
 
       // Send notification to host
-      await this.emailService.sendNewBookingNotification({
-        user: {
-          firstName: booking.property.host.firstName,
-          lastName: booking.property.host.lastName,
-          email: booking.property.host.email,
-          id: booking.property.hostId
-        },
+      if (booking.property.host && booking.property.hostId) {
+        await this.emailService.sendNewBookingNotification({
+          user: {
+            firstName: booking.property.host.firstName,
+            lastName: booking.property.host.lastName,
+            email: booking.property.host.email,
+            id: booking.property.hostId
+          },
         company: {
           name: 'Jambolush',
           website: 'https://jambolush.com',
           supportEmail: 'support@jambolush.com',
           logo: 'https://jambolush.com/favicon.ico'
         },
-        booking: this.transformToPropertyBookingInfo(booking),
-        recipientType: 'host'
-      });
+          booking: this.transformToPropertyBookingInfo(booking),
+          recipientType: 'host'
+        });
+      }
     } catch (emailError) {
       console.error('Failed to send property booking emails:', emailError);
       // Don't fail the booking if email fails

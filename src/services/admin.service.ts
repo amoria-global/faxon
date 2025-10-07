@@ -166,7 +166,7 @@ export class AdminService {
           _count: {
             select: {
               bookingsAsGuest: true,
-              properties: true,
+              ownedProperties: true,
               toursAsGuide: true
             }
           }
@@ -189,9 +189,9 @@ export class AdminService {
       kycStatus: user.kycStatus,
       provider: user.provider,
       country: user.country,
-      totalBookings: user._count.bookingsAsGuest,
-      totalProperties: user._count.properties,
-      totalTours: user._count.toursAsGuide,
+      totalBookings: user._count?.bookingsAsGuest || 0,
+      totalProperties: user._count?.ownedProperties || 0,
+      totalTours: user._count?.toursAsGuide || 0,
       lastLogin: user.lastLogin?.toISOString(),
       createdAt: user.createdAt.toISOString(),
       isVerified: user.isVerified,
@@ -220,22 +220,8 @@ export class AdminService {
         _count: {
           select: {
             bookingsAsGuest: true,
-            properties: true,
+            ownedProperties: true,
             toursAsGuide: true
-          }
-        },
-        sessions: {
-          select: {
-            id: true,
-            sessionToken: true,
-            device: true,
-            browser: true,
-            location: true,
-            ipAddress: true,
-            isActive: true,
-            lastActivity: true,
-            expiresAt: true,
-            createdAt: true
           }
         },
         bankAccounts: true,
@@ -263,9 +249,9 @@ export class AdminService {
       kycStatus: user.kycStatus,
       provider: user.provider,
       country: user.country,
-      totalBookings: user._count.bookingsAsGuest,
-      totalProperties: user._count.properties,
-      totalTours: user._count.toursAsGuide,
+      totalBookings: user._count?.bookingsAsGuest || 0,
+      totalProperties: user._count?.ownedProperties || 0,
+      totalTours: user._count?.toursAsGuide || 0,
       lastLogin: user.lastLogin?.toISOString(),
       createdAt: user.createdAt.toISOString(),
       isVerified: user.isVerified,
@@ -311,18 +297,7 @@ export class AdminService {
       },
       metrics,
       recentActivity,
-      sessions: user.sessions.map(session => ({
-        id: session.id,
-        sessionToken: session.sessionToken,
-        device: session.device,
-        browser: session.browser,
-        location: session.location,
-        ipAddress: session.ipAddress,
-        isActive: session.isActive,
-        lastActivity: session.lastActivity.toISOString(),
-        expiresAt: session.expiresAt.toISOString(),
-        createdAt: session.createdAt.toISOString()
-      }))
+      sessions: []
     };
 
     return userDetails;
@@ -711,9 +686,9 @@ export class AdminService {
       status: property.status,
       isVerified: property.isVerified,
       isInstantBook: property.isInstantBook,
-      hostId: property.hostId,
-      hostName: `${property.host.firstName} ${property.host.lastName}`,
-      hostEmail: property.host.email,
+      hostId: property.hostId || 0,
+      hostName: property.host ? `${property.host.firstName} ${property.host.lastName}` : 'N/A',
+      hostEmail: property.host?.email || 'N/A',
       totalBookings: property.totalBookings,
       averageRating: property.averageRating,
       reviewsCount: property.reviewsCount,
@@ -797,9 +772,9 @@ export class AdminService {
       status: property.status,
       isVerified: property.isVerified,
       isInstantBook: property.isInstantBook,
-      hostId: property.hostId,
-      hostName: `${property.host.firstName} ${property.host.lastName}`,
-      hostEmail: property.host.email,
+      hostId: property.hostId || 0,
+      hostName: property.host ? `${property.host.firstName} ${property.host.lastName}` : 'N/A',
+      hostEmail: property.host?.email || 'N/A',
       totalBookings: property.totalBookings,
       averageRating: property.averageRating,
       reviewsCount: property.reviewsCount,
@@ -817,7 +792,6 @@ export class AdminService {
       minStay: property.minStay,
       maxStay: property.maxStay,
       propertyAddress: property.propertyAddress,
-      ownerDetails: property.ownerDetails,
       metrics,
       recentBookings: property.bookings.map(booking => this.transformToAdminBookingListItem(booking, 'property')),
       reviews: property.reviews.map(review => ({
@@ -901,8 +875,8 @@ export class AdminService {
         type: 'property'
       },
       metadata: {
-        hostName: `${property.host.firstName} ${property.host.lastName}`,
-        hostEmail: property.host.email,
+        hostName: property.host ? `${property.host.firstName} ${property.host.lastName}` : 'N/A',
+        hostEmail: property.host?.email || 'N/A',
         approvedBy: adminId,
         notes
       }
@@ -950,8 +924,8 @@ export class AdminService {
         type: 'property'
       },
       metadata: {
-        hostName: `${property.host.firstName} ${property.host.lastName}`,
-        hostEmail: property.host.email,
+        hostName: property.host ? `${property.host.firstName} ${property.host.lastName}` : 'N/A',
+        hostEmail: property.host?.email || 'N/A',
         rejectedBy: adminId,
         reason
       }
@@ -998,8 +972,8 @@ export class AdminService {
         type: 'property'
       },
       metadata: {
-        hostName: `${property.host.firstName} ${property.host.lastName}`,
-        hostEmail: property.host.email,
+        hostName: property.host ? `${property.host.firstName} ${property.host.lastName}` : 'N/A',
+        hostEmail: property.host?.email || 'N/A',
         suspendedBy: adminId,
         reason
       }
