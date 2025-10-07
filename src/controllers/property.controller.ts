@@ -237,7 +237,7 @@ export class PropertyController {
       logger.error('Failed to search properties', 'PropertyController', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to search properties'
+        message: 'Failed to search properties' + error
       });
     }
   };

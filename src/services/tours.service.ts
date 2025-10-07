@@ -47,7 +47,13 @@ export class TourService {
     const skip = (page - 1) * limit;
 
     const whereConditions: any = {
-      isActive: true
+      isActive: true,
+      // Only show tours with at least one upcoming schedule
+      schedules: {
+        some: {
+          startDate: { gte: new Date() }
+        }
+      }
     };
 
     // Build where conditions based on filters
@@ -265,7 +271,13 @@ export class TourService {
     const tours = await prisma.tour.findMany({
       where: {
         isActive: true,
-        rating: { gte: 4.0 }
+        rating: { gte: 4.0 },
+        // Only show tours with at least one upcoming schedule
+        schedules: {
+          some: {
+            startDate: { gte: new Date() }
+          }
+        }
       },
       include: {
         tourGuide: {

@@ -63,6 +63,29 @@ export const config = {
     }
   },
 
+  // PawaPay API Configuration (Mobile Money - Pan-African)
+  pawapay: {
+    apiKey: process.env.PAWAPAY_API_KEY! || "eyJraWQiOiIxIiwiYWxnIjoiRVMyNTYifQ.eyJ0dCI6IkFBVCIsInN1YiI6IjEwNjU1IiwibWF2IjoiMSIsImV4cCI6MjA3NTMyMzA4MSwiaWF0IjoxNzU5NzkwMjgxLCJwbSI6IkRBRixQQUYiLCJqdGkiOiJlYzk3MjRiZC03ZTBiLTQ3ODMtYjJlYS02NDkzNDI5Y2ZlZmQifQ.XPOiMKncSbCzfPlXAqrrRcLJkDko6Y87eAllWTDX2U55VPwj28p3V4jET-zJ76AJmHs-XIzlHtroVGB8tGH2NQ",
+    baseUrl: process.env.PAWAPAY_BASE_URL || (process.env.PAWAPAY_ENVIRONMENT === 'production' ? 'https://api.pawapay.io' : 'https://api.sandbox.pawapay.io/v2'),
+    environment: (process.env.PAWAPAY_ENVIRONMENT || 'sandbox') as 'production' | 'sandbox',
+    webhookSecret: process.env.PAWAPAY_WEBHOOK_SECRET || '',
+    callbackUrl: process.env.PAWAPAY_CALLBACK_URL || 'http://localhost:5000/api/pawapay/callback',
+    timeout: parseInt(process.env.PAWAPAY_TIMEOUT || '30000'), // 30 seconds
+
+    // Supported payment methods via PawaPay
+    supportedMethods: ['deposit', 'payout', 'refund'],
+    supportedProviders: {
+      mobile: ['MTN', 'AIRTEL', 'MPESA', 'VODAFONE', 'TIGO', 'ORANGE', 'ZAMTEL'],
+      countries: ['RW', 'KE', 'UG', 'TZ', 'ZM', 'GH', 'NG', 'MW', 'BJ', 'CM', 'CD'] // Pan-African
+    },
+
+    // PawaPay-specific settings
+    enableBulkPayouts: process.env.PAWAPAY_ENABLE_BULK_PAYOUTS !== 'false',
+    bulkPayoutBatchSize: parseInt(process.env.PAWAPAY_BULK_BATCH_SIZE || '100'),
+    retryAttempts: parseInt(process.env.PAWAPAY_RETRY_ATTEMPTS || '3'),
+    retryDelay: parseInt(process.env.PAWAPAY_RETRY_DELAY || '5000'), // 5 seconds
+  },
+
   // Escrow Configuration (Pesapal-based)
   escrow: {
     // Primary provider is now Pesapal

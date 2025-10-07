@@ -90,6 +90,7 @@ model User {
   escrowNotifications             EscrowNotification[]
   escrowTransactionsAsRecipient   EscrowTransaction[]      @relation("RecipientEscrowTransactions")
   escrowTransactions              EscrowTransaction[]      @relation("UserEscrowTransactions")
+  ownerEarnings                   OwnerEarning[]           @relation("OwnerEarnings")
   hostEarnings                    HostEarning[]            @relation("HostEarnings")
   agentInquiries                  Inquiry[]                @relation("AgentInquiries")
   clientInquiries                 Inquiry[]                @relation("ClientInquiries")
@@ -98,7 +99,8 @@ model User {
   paymentSettings                 PaymentSettings?
   paymentTransactions             PaymentTransaction[]
   hostPayouts                     Payout[]                 @relation("HostPayouts")
-  properties                      Property[]
+  ownedProperties                 Property[]               @relation("OwnedProperties")
+  agentManagedProperties          Property[]               @relation("AgentProperties")
   propertyViews                   PropertyView[]           @relation("UserPropertyViews")
   reviews                         Review[]
   tourBookingsAsGuest             TourBooking[]            @relation("GuestTourBookings")
@@ -112,11 +114,15 @@ model User {
   wallet                          Wallet?
   wishlists                       Wishlist[]
   withdrawalRequests              WithdrawalRequest[]
+  withdrawalMethods               WithdrawalMethod[]
   activityLogs                    ActivityLog[]
   contactMessages                 ContactMessage[]
   connected_accounts              connected_accounts[]
   user_settings                   user_settings?
   user_verifications              user_verifications[]
+  agentCommissions                AgentCommission[]        @relation("AgentCommissions")
+  ownerPayments                   OwnerPayment[]           @relation("OwnerPayments")
+  hostPayments                    HostPayment[]            @relation("HostPayments")
 
   // Referral self-relation
   referrer                        User?                    @relation("UserReferrals", fields: [referredBy], references: [id])
@@ -196,24 +202,33 @@ model EscrowTransaction {
 }
 
 model WithdrawalRequest {
-  id              String    @id @default(cuid())
-  userId          Int
-  amount          Float
-  currency        String    @default("RWF")
-  method          String
-  status          String    @default("PENDING")
-  destination     Json
-  pesapalPayoutId String?
-  reference       String    @unique
-  failureReason   String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  completedAt     DateTime?
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                    String             @id @default(cuid())
+  userId                Int
+  amount                Float
+  currency              String             @default("RWF")
+  withdrawalMethodId    String?            // Links to approved withdrawal method
+  method                String             // Type: bank, mobile_money, etc
+  status                String             @default("PENDING")  // PENDING, APPROVED, PROCESSING, COMPLETED, REJECTED, CANCELLED
+  destination           Json               // Account details
+  pesapalPayoutId       String?
+  reference             String             @unique
+  failureReason         String?
+  adminNotes            String?
+  approvedBy            Int?               // Admin who approved
+  approvedAt            DateTime?
+  rejectedBy            Int?
+  rejectedAt            DateTime?
+  processedBy           Int?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  completedAt           DateTime?
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  withdrawalMethod      WithdrawalMethod?  @relation(fields: [withdrawalMethodId], references: [id])
 
   @@index([userId])
   @@index([status])
   @@index([reference])
+  @@index([withdrawalMethodId])
   @@index([createdAt])
   @@map("withdrawal_requests")
 }
@@ -247,19 +262,22 @@ model EscrowNotification {
 }
 
 model Wallet {
-  id            String              @id @default(cuid())
-  userId        Int                 @unique
-  balance       Float               @default(0)
-  currency      String              @default("RWF")
-  accountNumber String?
-  isActive      Boolean             @default(true)
-  isVerified    Boolean             @default(false)
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  transactions  WalletTransaction[]
-  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String              @id @default(cuid())
+  userId            Int                 @unique
+  balance           Float               @default(0)
+  pendingBalance    Float               @default(0)  // Balance pending approval/release
+  currency          String              @default("RWF")
+  walletNumber      String?             @unique     // Unique wallet identifier for transfers
+  accountNumber     String?
+  isActive          Boolean             @default(true)
+  isVerified        Boolean             @default(false)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  transactions      WalletTransaction[]
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([walletNumber])
   @@map("wallets")
 }
 
@@ -314,8 +332,8 @@ model Property {
   features          Json
   images            Json
   video3D           String?
-  hostId            Int
-  ownerDetails      Json?
+  hostId            Int?            // Property host
+  agentId           Int?           // Agent who uploaded/manages the property
   availableFrom     DateTime?
   availableTo       DateTime?
   minStay           Int            @default(1)
@@ -331,16 +349,22 @@ model Property {
   updatedAt         DateTime       @updatedAt
   propertyAddress   String?
   upiNumber         String?
+  commissionRate    Float?         @default(0.10) // Agent commission rate (default 10%)
   blockedDates      BlockedDate[]
   bookings          Booking[]
-  hostEarnings      HostEarning[]  @relation("PropertyEarnings")
-  pricingRules      PricingRule[]
-  host              User           @relation(fields: [hostId], references: [id], onDelete: Cascade)
-  propertyViews     PropertyView[] @relation("PropertyViews")
-  reviews           Review[]
-  wishlistedBy      Wishlist[]
+  ownerEarnings      OwnerEarning[]  @relation("PropertyEarnings")
+  legacyHostEarnings HostEarning[]   @relation("LegacyPropertyEarnings")
+  pricingRules       PricingRule[]
+  host               User?            @relation("OwnedProperties", fields: [hostId], references: [id], onDelete: Cascade)
+  agent              User?           @relation("AgentProperties", fields: [agentId], references: [id], onDelete: SetNull)
+  propertyViews      PropertyView[]  @relation("PropertyViews")
+  reviews            Review[]
+  wishlistedBy       Wishlist[]
+  agentCommissions   AgentCommission[]
+  ownerPayments      OwnerPayment[]
 
   @@index([hostId])
+  @@index([agentId])
   @@index([status])
   @@map("properties")
 }
@@ -354,7 +378,7 @@ model Booking {
   guests               Int
   totalPrice           Float
   message              String?
-  hostResponse         String?
+  ownerResponse        String?
   status               String       @default("pending")
   paymentStatus        String       @default("pending")
   paymentMethod        String?
@@ -364,18 +388,32 @@ model Booking {
   checkInInstructions  String?
   checkOutInstructions String?
   guestNotes           String?
+  // Check-in/Check-out validation - ONLY OWNER can approve
+  checkInValidated     Boolean      @default(false)
+  checkInValidatedAt   DateTime?
+  checkInValidatedBy   Int?         // Must be property owner
+  checkOutValidated    Boolean      @default(false)
+  checkOutValidatedAt  DateTime?
+  checkOutValidatedBy  Int?         // Must be property owner
+  checkInCode          String?      // Optional: Code for guest to provide at check-in
+  checkOutCode         String?      // Optional: Code for guest to provide at check-out
   createdAt            DateTime     @default(now())
   updatedAt            DateTime     @updatedAt
   cancellationReason   String?
   cancelledAt          DateTime?
   guest                User         @relation("GuestBookings", fields: [guestId], references: [id], onDelete: Cascade)
   property             Property     @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  hostEarning          HostEarning? @relation("BookingEarning")
+  ownerEarning         OwnerEarning? @relation("BookingEarning")
+  legacyHostEarning    HostEarning?  @relation("LegacyBookingEarning")
   reviews              Review[]
+  agentCommissions     AgentCommission[]
+  ownerPayments        OwnerPayment[]
+  legacyHostPayments   HostPayment[]
 
   @@index([propertyId])
   @@index([guestId])
   @@index([status])
+  @@index([paymentStatus])
   @@map("bookings")
 }
 
@@ -776,30 +814,58 @@ model PaymentSettings {
 }
 
 model Payout {
-  id            String        @id @default(cuid())
-  hostId        Int
-  amount        Float
-  currency      String        @default("USD")
-  status        String        @default("pending")
-  method        String
-  periodStart   DateTime
-  periodEnd     DateTime
-  fees          Float         @default(0)
-  netAmount     Float
-  reference     String        @unique
-  externalId    String?
-  failureReason String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  processedAt   DateTime?
-  earnings      HostEarning[] @relation("PayoutEarnings")
-  host          User          @relation("HostPayouts", fields: [hostId], references: [id], onDelete: Cascade)
+  id                  String          @id @default(cuid())
+  hostId              Int
+  amount              Float
+  currency            String          @default("USD")
+  status              String          @default("pending")
+  method              String
+  periodStart         DateTime
+  periodEnd           DateTime
+  fees                Float           @default(0)
+  netAmount           Float
+  reference           String          @unique
+  externalId          String?
+  failureReason       String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  processedAt         DateTime?
+  ownerEarnings       OwnerEarning[]  @relation("PayoutEarnings")
+  legacyHostEarnings  HostEarning[]   @relation("LegacyPayoutEarnings")
+  host                User            @relation("HostPayouts", fields: [hostId], references: [id], onDelete: Cascade)
 
   @@index([hostId])
   @@index([status])
   @@map("payouts")
 }
 
+model OwnerEarning {
+  id           String   @id @default(cuid())
+  ownerId      Int
+  bookingId    String   @unique
+  propertyId   Int
+  grossAmount  Float
+  platformFee  Float
+  ownerEarning Float
+  currency     String   @default("USD")
+  payoutId     String?
+  status       String   @default("pending")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  earnedAt     DateTime?
+  booking      Booking  @relation("BookingEarning", fields: [bookingId], references: [id], onDelete: Cascade)
+  owner        User     @relation("OwnerEarnings", fields: [ownerId], references: [id], onDelete: Cascade)
+  payout       Payout?  @relation("PayoutEarnings", fields: [payoutId], references: [id])
+  property     Property @relation("PropertyEarnings", fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([bookingId])
+  @@index([propertyId])
+  @@index([status])
+  @@map("owner_earnings")
+}
+
+// Legacy model - kept for backward compatibility
 model HostEarning {
   id          String   @id @default(cuid())
   hostId      Int
@@ -814,10 +880,10 @@ model HostEarning {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   earnedAt    DateTime?
-  booking     Booking  @relation("BookingEarning", fields: [bookingId], references: [id], onDelete: Cascade)
+  booking     Booking  @relation("LegacyBookingEarning", fields: [bookingId], references: [id], onDelete: Cascade)
   host        User     @relation("HostEarnings", fields: [hostId], references: [id], onDelete: Cascade)
-  payout      Payout?  @relation("PayoutEarnings", fields: [payoutId], references: [id])
-  property    Property @relation("PropertyEarnings", fields: [propertyId], references: [id], onDelete: Cascade)
+  payout      Payout?  @relation("LegacyPayoutEarnings", fields: [payoutId], references: [id])
+  property    Property @relation("LegacyPropertyEarnings", fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@index([hostId])
   @@index([bookingId])
@@ -1217,4 +1283,239 @@ model user_verifications {
   @@index([emailVerified])
   @@index([phoneVerified])
   @@index([userId])
+}
+
+// --- AGENT COMMISSION MODEL ---
+model AgentCommission {
+  id              String    @id @default(cuid())
+  agentId         Int
+  propertyId      Int
+  bookingId       String
+  amount          Float
+  commissionRate  Float
+  status          String    @default("pending")  // pending, earned, paid, cancelled
+  earnedAt        DateTime?
+  paidAt          DateTime?
+  payoutMethod    String?
+  transactionId   String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  agent           User      @relation("AgentCommissions", fields: [agentId], references: [id], onDelete: Cascade)
+  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  booking         Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([propertyId])
+  @@index([bookingId])
+  @@index([status])
+  @@map("agent_commissions")
+}
+
+// --- OWNER PAYMENT MODEL ---
+model OwnerPayment {
+  id                    String    @id @default(cuid())
+  ownerId               Int
+  propertyId            Int
+  bookingId             String
+  amount                Float
+  platformFee           Float     @default(0)
+  netAmount             Float
+  currency              String    @default("USD")
+  status                String    @default("pending")  // pending, approved, paid, cancelled
+  checkInRequired       Boolean   @default(true)
+  checkInValidated      Boolean   @default(false)
+  checkInValidatedAt    DateTime?
+  approvedAt            DateTime?
+  paidAt                DateTime?
+  payoutMethod          String?
+  transactionId         String?
+  notes                 String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  owner                 User      @relation("OwnerPayments", fields: [ownerId], references: [id], onDelete: Cascade)
+  property              Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  booking               Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([propertyId])
+  @@index([bookingId])
+  @@index([status])
+  @@index([checkInValidated])
+  @@map("owner_payments")
+}
+
+// --- HOST PAYMENT MODEL (LEGACY) ---
+model HostPayment {
+  id                    String    @id @default(cuid())
+  hostId                Int
+  bookingId             String
+  amount                Float
+  platformFee           Float     @default(0)
+  netAmount             Float
+  currency              String    @default("USD")
+  status                String    @default("pending")  // pending, approved, paid, cancelled
+  checkInRequired       Boolean   @default(true)
+  checkInValidated      Boolean   @default(false)
+  checkInValidatedAt    DateTime?
+  approvedAt            DateTime?
+  paidAt                DateTime?
+  payoutMethod          String?
+  transactionId         String?
+  notes                 String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  host                  User      @relation("HostPayments", fields: [hostId], references: [id], onDelete: Cascade)
+  booking               Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([hostId])
+  @@index([bookingId])
+  @@index([status])
+  @@index([checkInValidated])
+  @@map("host_payments")
+}
+
+// --- WITHDRAWAL METHOD MODEL ---
+model WithdrawalMethod {
+  id                  String              @id @default(cuid())
+  userId              Int
+  methodType          String              // bank_account, mobile_money, crypto, paypal, etc
+  accountName         String
+  accountDetails      Json                // Flexible storage for different method types
+  isDefault           Boolean             @default(false)
+  isVerified          Boolean             @default(false)
+  isApproved          Boolean             @default(false)  // Admin approval required
+  approvedBy          Int?
+  approvedAt          DateTime?
+  rejectedBy          Int?
+  rejectedAt          DateTime?
+  rejectionReason     String?
+  verificationStatus  String              @default("pending")  // pending, verified, rejected
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  withdrawalRequests  WithdrawalRequest[]
+
+  @@index([userId])
+  @@index([isApproved])
+  @@index([methodType])
+  @@map("withdrawal_methods")
+}
+
+// --- PAWAPAY TRANSACTION MODEL ---
+model PawaPayTransaction {
+  id                    String    @id @default(cuid())
+  userId                Int?
+  transactionId         String    @unique  // depositId, payoutId, or refundId from PawaPay
+  transactionType       String    // DEPOSIT, PAYOUT, REFUND
+  status                String    @default("PENDING")  // ACCEPTED, SUBMITTED, COMPLETED, FAILED, REJECTED, CANCELLED
+  amount                String    // Amount in smallest currency unit
+  currency              String    // ISO 4217 currency code
+  country               String?   // ISO 3166-1 alpha-3 country code
+  correspondent         String    // MNO provider code (e.g., MTN_MOMO_RWA)
+
+  // Payer/Recipient information
+  payerPhone            String?
+  recipientPhone        String?
+
+  // Transaction details
+  customerTimestamp     DateTime?
+  statementDescription  String?
+  requestedAmount       String?
+  depositedAmount       String?
+  refundedAmount        String?
+
+  // PawaPay specific IDs
+  providerTransactionId String?
+  financialTransactionId String?
+  relatedDepositId      String?   // For refunds, link to original deposit
+
+  // Failure information
+  failureCode           String?
+  failureMessage        String?
+
+  // Metadata and tracking
+  metadata              Json?
+  internalReference     String?   // Your internal reference (e.g., booking ID, escrow ID)
+  callbackReceived      Boolean   @default(false)
+  callbackReceivedAt    DateTime?
+
+  // Timestamps
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  receivedByPawaPay     DateTime?
+  completedAt           DateTime?
+
+  @@index([userId])
+  @@index([transactionId])
+  @@index([transactionType])
+  @@index([status])
+  @@index([currency])
+  @@index([country])
+  @@index([correspondent])
+  @@index([internalReference])
+  @@index([createdAt])
+  @@index([payerPhone])
+  @@index([recipientPhone])
+  @@map("pawapay_transactions")
+}
+
+// --- PAWAPAY BULK PAYOUT MODEL ---
+model PawaPayBulkPayout {
+  id                  String    @id @default(cuid())
+  bulkPayoutId        String    @unique
+  userId              Int?
+  totalPayouts        Int
+  successfulPayouts   Int       @default(0)
+  failedPayouts       Int       @default(0)
+  status              String    @default("PENDING")  // ACCEPTED, PROCESSING, COMPLETED, PARTIAL_SUCCESS, FAILED
+
+  // Transaction details
+  totalAmount         String?
+  currency            String?
+
+  // Metadata
+  metadata            Json?
+  description         String?
+
+  // Timestamps
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  completedAt         DateTime?
+
+  @@index([userId])
+  @@index([bulkPayoutId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("pawapay_bulk_payouts")
+}
+
+// --- PAWAPAY WEBHOOK LOG MODEL ---
+model PawaPayWebhookLog {
+  id                String    @id @default(cuid())
+  transactionId     String?   // depositId, payoutId, or refundId
+  transactionType   String?   // DEPOSIT, PAYOUT, REFUND
+
+  // Webhook details
+  payload           Json
+  signature         String?
+  signatureValid    Boolean   @default(false)
+
+  // Processing status
+  processed         Boolean   @default(false)
+  processedAt       DateTime?
+  processingError   String?
+
+  // Request details
+  ipAddress         String?
+  userAgent         String?
+
+  // Timestamps
+  createdAt         DateTime  @default(now())
+
+  @@index([transactionId])
+  @@index([transactionType])
+  @@index([processed])
+  @@index([createdAt])
+  @@map("pawapay_webhook_logs")
 }

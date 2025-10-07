@@ -465,7 +465,7 @@ export const validateAgentPropertyAccess = async (req: AuthenticatedRequest, res
     });
 
     let clientProperty = null;
-    if (property) {
+    if (property && property.hostId) {
       // Check if agent has access to this host as a client
       const agentBooking = await prisma.agentBooking.findFirst({
         where: {

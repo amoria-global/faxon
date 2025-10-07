@@ -139,7 +139,6 @@ export class PropertyService {
         video3D: data.video3D,
         availableFrom: new Date(data.availabilityDates.start),
         availableTo: new Date(data.availabilityDates.end),
-        ownerDetails: data.ownerDetails ? JSON.stringify(data.ownerDetails) : undefined,
         status: 'pending' // Default status for new properties
       },
       include: {
@@ -565,7 +564,7 @@ export class PropertyService {
         include: { host: true }
       });
 
-      if (propertyWithHost) {
+      if (propertyWithHost && propertyWithHost.host && propertyWithHost.hostId) {
         await this.emailService.sendNewReviewNotificationEmail({
           host: {
             firstName: propertyWithHost.host.firstName,
@@ -1858,7 +1857,7 @@ export class PropertyService {
 
   private async transformToPropertyInfo(property: any): Promise<PropertyInfo> {
     const blockedDates = await this.getBlockedDates(property.id);
-    
+
     return {
       id: property.id,
       name: property.name,
@@ -1879,8 +1878,8 @@ export class PropertyService {
       rating: property.averageRating || 0,
       reviewsCount: property.reviewsCount || 0,
       hostId: property.hostId,
-      hostName: `${property.host.firstName} ${property.host.lastName}`.trim(),
-      hostProfileImage: property.host.profileImage,
+      hostName: property.host ? `${property.host.firstName} ${property.host.lastName}`.trim() : 'Unknown Host',
+      hostProfileImage: property.host?.profileImage || null,
       status: property.status,
       availability: {
         isAvailable: property.status === 'active' &&
@@ -1901,20 +1900,20 @@ export class PropertyService {
   private transformToPropertySummary(property: any): PropertySummary {
     const images = property.images ? JSON.parse(property.images as string) : {};
     const mainImage = this.getMainImage(images);
-    
+
     return {
       id: property.id,
       name: property.name,
       location: property.location,
       category: property.category,
-      type: property.type, 
+      type: property.type,
       pricePerNight: property.pricePerNight,
       image: mainImage,
       rating: property.averageRating || 0,
       reviewsCount: property.reviewsCount || 0,
       beds: property.beds,
       baths: property.baths,
-      hostName: `${property.host.firstName} ${property.host.lastName}`.trim(),
+      hostName: property.host ? `${property.host.firstName} ${property.host.lastName}`.trim() : 'Unknown Host',
       availability: property.status === 'active' ? 'Available' : 'Unavailable'
     };
   }
@@ -2309,23 +2308,25 @@ export class PropertyService {
     });
 
     try {
-      await this.emailService.sendPropertyStatusUpdateEmail({
-        host: {
-          firstName: updatedProperty.host.firstName,
-          lastName: updatedProperty.host.lastName,
-          email: updatedProperty.host.email,
-          id: updatedProperty.hostId
-        },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/logo.png'
-        },
-        property: await this.transformToPropertyInfo(updatedProperty),
-        newStatus: status,
-        rejectionReason
-      });
+      if (updatedProperty.host && updatedProperty.hostId) {
+        await this.emailService.sendPropertyStatusUpdateEmail({
+          host: {
+            firstName: updatedProperty.host.firstName,
+            lastName: updatedProperty.host.lastName,
+            email: updatedProperty.host.email,
+            id: updatedProperty.hostId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/logo.png'
+          },
+          property: await this.transformToPropertyInfo(updatedProperty),
+          newStatus: status,
+          rejectionReason
+        });
+      }
     } catch (emailError) {
       console.error('Failed to send property status update email:', emailError);
     }
@@ -2531,22 +2532,24 @@ export class PropertyService {
     });
 
     try {
-      await this.emailService.sendPropertyStatusUpdateEmail({
-        host: {
-          firstName: updatedProperty.host.firstName,
-          lastName: updatedProperty.host.lastName,
-          email: updatedProperty.host.email,
-          id: updatedProperty.hostId
-        },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/logo.png'
-        },
-        property: await this.transformToPropertyInfo(updatedProperty),
-        newStatus: status as 'active' | 'pending' | 'rejected' | 'inactive'
-      });
+      if (updatedProperty.host && updatedProperty.hostId) {
+        await this.emailService.sendPropertyStatusUpdateEmail({
+          host: {
+            firstName: updatedProperty.host.firstName,
+            lastName: updatedProperty.host.lastName,
+            email: updatedProperty.host.email,
+            id: updatedProperty.hostId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/logo.png'
+          },
+          property: await this.transformToPropertyInfo(updatedProperty),
+          newStatus: status as 'active' | 'pending' | 'rejected' | 'inactive'
+        });
+      }
     } catch (emailError) {
       console.error('Failed to send property status update email:', emailError);
     }
@@ -3190,6 +3193,10 @@ export class PropertyService {
       throw new Error('Property not found');
     }
 
+    if (!property.hostId) {
+      throw new Error('Property has no host');
+    }
+
     return this.uploadPropertyImages(propertyId, property.hostId, category, imageUrls);
   }
 
@@ -3542,7 +3549,7 @@ export class PropertyService {
       select: { hostId: true }
     });
 
-    if (!property) {
+    if (!property || !property.hostId) {
       return false;
     }
 
