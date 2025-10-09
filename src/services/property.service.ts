@@ -1,6 +1,7 @@
-//src/services/property.service.ts - Cleaned with Enhanced KPIs
+//src/services/property.service.ts - Unified Property Service
 import { PrismaClient } from '@prisma/client';
 import { BrevoPropertyMailingService } from '../utils/brevo.property';
+import { EnhancedPropertyService } from './enhanced-property.service';
 import {
   CreatePropertyDto,
   UpdatePropertyDto,
@@ -92,6 +93,7 @@ const prisma = new PrismaClient();
 
 export class PropertyService {
   private emailService = new BrevoPropertyMailingService();
+  private enhancedService = new EnhancedPropertyService();
   
   // --- PROPERTY CRUD OPERATIONS ---
   async createProperty(hostId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
@@ -3623,5 +3625,34 @@ export class PropertyService {
       totalBookings: 0,
       occupancyRate: 0
     };
+  }
+
+  // --- TRANSACTION MONITORING METHODS (delegated to enhanced service) ---
+  async getAgentDashboardWithTransactions(agentId: number) {
+    return await this.enhancedService.getAgentDashboardWithTransactions(agentId);
+  }
+
+  async getAgentEarningsWithTransactions(agentId: number, timeRange: 'week' | 'month' | 'quarter' | 'year') {
+    return await this.enhancedService.getAgentEarningsWithTransactions(agentId, timeRange);
+  }
+
+  async getTransactionMonitoringDashboard(agentId: number) {
+    return await this.enhancedService.getTransactionMonitoringDashboard(agentId);
+  }
+
+  async getAgentEscrowTransactions(agentId: number) {
+    return await this.enhancedService.getAgentEscrowTransactions(agentId);
+  }
+
+  async getAgentPaymentTransactions(agentId: number) {
+    return await this.enhancedService.getAgentPaymentTransactions(agentId);
+  }
+
+  async getAgentTransactionSummary(agentId: number) {
+    return await this.enhancedService.getAgentTransactionSummary(agentId);
+  }
+
+  async getAgentMonthlyCommissionsWithTransactions(agentId: number) {
+    return await this.enhancedService.getAgentMonthlyCommissionsWithTransactions(agentId);
   }
 }

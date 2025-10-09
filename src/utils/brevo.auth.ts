@@ -549,165 +549,137 @@ export class BrevoMailingService {
   private getBaseTemplate(): string {
   return `
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-      
-      * { 
-        margin: 0; 
-        padding: 0; 
-        box-sizing: border-box; 
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
-      
+
       body {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         line-height: 1.6;
         color: #374151;
-        background: linear-gradient(135deg, #f0fdfa 0%, #cffafe 50%, #e0f2fe 100%);
-        min-height: 100vh;
-        padding: 20px;
+        background: #f9fafb;
+        padding: 10px;
       }
-      
+
       .email-wrapper {
+        width: 98%;
         max-width: 600px;
         margin: 0 auto;
-        padding: 20px;
       }
-      
+
       /* Main card container */
       .email-container {
-        background: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(8px);
-        border-radius: 24px;
-        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
-        border: 1px solid rgba(20, 184, 166, 0.2);
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        border: 1px solid #e5e7eb;
         overflow: hidden;
-        transition: all 0.5s ease;
       }
-      
+
       /* Header */
       .header {
         background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
-        padding: 40px 30px;
+        padding: 32px 24px;
         text-align: center;
         color: white;
-        position: relative;
-      }
-      
-      .header::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, transparent 50%);
-        pointer-events: none;
       }
       
       .logo {
-        font-size: 28px;
-        font-weight: 700;
-        margin-bottom: 8px;
-        letter-spacing: -0.025em;
-        position: relative;
-        z-index: 1;
-      }
-      
-      .header-subtitle {
-        font-size: 16px;
-        font-weight: 400;
-        opacity: 0.95;
-        position: relative;
-        z-index: 1;
-      }
-      
-      /* Content section */
-      .content {
-        padding: 40px 30px;
-        background: rgba(255, 255, 255, 0.95);
-      }
-      
-      .greeting {
         font-size: 24px;
         font-weight: 600;
+        margin-bottom: 6px;
+      }
+
+      .header-subtitle {
+        font-size: 14px;
+        font-weight: 400;
+        opacity: 0.9;
+      }
+
+      /* Content section */
+      .content {
+        padding: 28px 20px;
+        background: #ffffff;
+      }
+
+      .greeting {
+        font-size: 20px;
+        font-weight: 600;
         color: #111827;
-        margin-bottom: 20px;
-        letter-spacing: -0.025em;
+        margin-bottom: 16px;
       }
-      
+
       .message {
-        font-size: 16px;
-        line-height: 1.7;
+        font-size: 15px;
+        line-height: 1.6;
         color: #4b5563;
-        margin-bottom: 24px;
+        margin-bottom: 20px;
       }
-      
+
       .highlight-box {
-        background: linear-gradient(135deg, rgba(248, 250, 252, 0.8) 0%, rgba(239, 246, 255, 0.6) 100%);
+        background: #f8fafc;
         border: 2px solid #083A85;
-        border-radius: 16px;
-        padding: 24px;
-        margin: 24px 0;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 20px 0;
         text-align: center;
-        backdrop-filter: blur(4px);
       }
-      
+
       .verification-code {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        font-size: 32px;
-        font-weight: 700;
+        font-size: 28px;
+        font-weight: 600;
         color: #083A85;
-        letter-spacing: 6px;
-        margin: 12px 0;
+        letter-spacing: 4px;
+        margin: 10px 0;
       }
       
       .code-label {
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 500;
         color: #6b7280;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
       }
-      
+
       .code-expiry {
-        font-size: 14px;
+        font-size: 13px;
         color: #9ca3af;
-        margin-top: 8px;
+        margin-top: 6px;
       }
-      
+
       .button {
         display: inline-block;
-        background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
+        background: #083A85;
         color: #ffffff;
         text-decoration: none;
-        padding: 14px 28px;
-        border-radius: 12px;
+        padding: 12px 24px;
+        border-radius: 8px;
         font-weight: 600;
-        font-size: 16px;
+        font-size: 15px;
         text-align: center;
-        box-shadow: 0 4px 14px rgba(8, 58, 133, 0.3);
-        transition: all 0.3s ease;
       }
-      
+
       .button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 6px 20px rgba(8, 58, 133, 0.4);
-        background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);
+        background: #0a4499;
         color: white !important;
       }
-      
+
       .button-center {
         text-align: center;
-        margin: 32px 0;
+        margin: 24px 0;
       }
-      
+
       /* Info card */
       .info-card {
-        background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 12px;
-        padding: 20px;
-        margin: 24px 0;
-        backdrop-filter: blur(4px);
-        box-shadow: 0 4px 12px rgba(8, 58, 133, 0.2);
+        background: #083A85;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 18px;
+        margin: 20px 0;
       }
       
       .info-card-header {
@@ -715,204 +687,180 @@ export class BrevoMailingService {
         align-items: center;
         font-weight: 600;
         color: white;
-        margin-bottom: 16px;
-        font-size: 15px;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        margin-bottom: 12px;
+        font-size: 14px;
       }
-      
+
       .info-card-icon {
-        margin-right: 8px;
-        font-size: 18px;
+        margin-right: 6px;
+        font-size: 16px;
       }
-      
+
       .info-row {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        padding: 12px 0;
-        border-bottom: 1px solid rgba(241, 245, 249, 0.7);
-        gap: 16px;
-        min-height: 24px;
+        padding: 10px 0;
+        border-bottom: 1px solid rgba(241, 245, 249, 0.3);
+        gap: 12px;
       }
-      
+
       .info-row:last-child {
         border-bottom: none;
       }
-      
+
       .info-label {
         font-weight: 600;
         color: white;
-        font-size: 14px;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px;
         flex-shrink: 0;
-        min-width: 80px;
+        min-width: 70px;
       }
-      
+
       .info-value {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         color: #e2e8f0;
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 400;
         text-align: right;
         flex: 1;
         word-break: break-word;
         line-height: 1.4;
       }
-      
+
       .alert-box {
-        border-radius: 12px;
-        padding: 20px;
-        margin: 24px 0;
-        border-left: 4px solid;
-        backdrop-filter: blur(4px);
+        border-radius: 8px;
+        padding: 16px;
+        margin: 20px 0;
+        border-left: 3px solid;
       }
       
       .alert-success {
-        background: rgba(240, 253, 244, 0.9);
+        background: #f0fdf4;
         border-left-color: #22c55e;
         color: #15803d;
       }
-      
+
       .alert-warning {
-        background: rgba(255, 251, 235, 0.9);
+        background: #fffbeb;
         border-left-color: #f59e0b;
         color: #d97706;
       }
-      
+
       .alert-error {
-        background: rgba(254, 242, 242, 0.9);
+        background: #fef2f2;
         border-left-color: #ef4444;
         color: #dc2626;
       }
-      
+
       .alert-title {
         font-weight: 600;
-        margin-bottom: 8px;
-        font-size: 15px;
-      }
-      
-      .alert-text {
+        margin-bottom: 6px;
         font-size: 14px;
+      }
+
+      .alert-text {
+        font-size: 13px;
         line-height: 1.5;
       }
-      
+
       .divider {
         height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(229, 231, 235, 0.8), transparent);
-        margin: 32px 0;
+        background: #e5e7eb;
+        margin: 24px 0;
       }
-      
+
       /* Footer */
       .footer {
-        background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
+        background: #083A85;
         color: white;
-        padding: 32px 30px;
+        padding: 24px 20px;
         text-align: center;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
-        position: relative;
       }
-      
-      .footer::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 50%);
-        pointer-events: none;
-      }
-      
+
       .footer-links {
-        margin-bottom: 20px;
-        position: relative;
-        z-index: 1;
+        margin-bottom: 16px;
       }
-      
+
       .footer-links a {
         color: rgba(255, 255, 255, 0.9);
         text-decoration: none;
-        margin: 0 12px;
+        margin: 0 10px;
         font-weight: 500;
-        font-size: 14px;
-        transition: color 0.3s ease;
-      }
-      
-      .footer-links a:hover {
-        color: #52e000;
-      }
-      
-      .footer-text {
         font-size: 13px;
-        color: #ffffff;
-        line-height: 1.5;
-        position: relative;
-        z-index: 1;
       }
-      
+
+      .footer-links a:hover {
+        color: #ffffff;
+      }
+
+      .footer-text {
+        font-size: 12px;
+        color: #e5e7eb;
+        line-height: 1.5;
+      }
+
       .footer-email {
-        color: #23f8ed;
+        color: #93c5fd;
         font-weight: 500;
         text-decoration: none;
       }
-      
+
       .feature-list {
         list-style: none;
         padding: 0;
-        margin: 16px 0;
+        margin: 14px 0;
       }
-      
+
       .feature-list li {
-        padding: 8px 0;
+        padding: 6px 0;
         color: #4b5563;
-        font-size: 15px;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 14px;
       }
-      
+
       .feature-list li:before {
         content: "✓";
         color: #22c55e;
         font-weight: bold;
-        margin-right: 8px;
+        margin-right: 6px;
       }
-      
+
       @media (max-width: 600px) {
         .email-wrapper {
-          padding: 10px;
+          width: 100%;
         }
-        
+
         .content {
-          padding: 30px 20px;
+          padding: 20px 16px;
         }
-        
+
         .header {
-          padding: 30px 20px;
+          padding: 24px 16px;
         }
-        
+
         .footer {
-          padding: 24px 20px;
+          padding: 20px 16px;
         }
-        
+
         .verification-code {
-          font-size: 28px;
-          letter-spacing: 4px;
+          font-size: 24px;
+          letter-spacing: 3px;
         }
-        
+
         .greeting {
-          font-size: 20px;
+          font-size: 18px;
         }
-        
+
         .info-row {
           flex-direction: column;
           align-items: flex-start;
-          gap: 6px;
-          padding: 10px 0;
+          gap: 4px;
+          padding: 8px 0;
         }
-        
+
         .info-label {
           min-width: auto;
         }
-        
+
         .info-value {
           text-align: left;
           word-break: break-all;

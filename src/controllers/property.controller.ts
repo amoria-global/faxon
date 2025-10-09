@@ -2267,7 +2267,7 @@ export class PropertyController {
 
       const agentId = parseInt(req.user.userId);
       const dashboard = await this.propertyService.getEnhancedAgentDashboard(agentId);
-      
+
       res.json({
         success: true,
         message: 'Enhanced agent dashboard retrieved successfully',
@@ -2278,6 +2278,240 @@ export class PropertyController {
       res.status(500).json({
         success: false,
         message: error.message || 'Failed to fetch enhanced dashboard data'
+      });
+    }
+  };
+
+  // --- TRANSACTION MONITORING ENDPOINTS (from enhanced-property) ---
+  getAgentDashboardWithTransactions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const dashboard = await this.propertyService.getAgentDashboardWithTransactions(agentId);
+
+      res.json({
+        success: true,
+        message: 'Agent dashboard with transactions retrieved successfully',
+        data: dashboard
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch agent dashboard with transactions', 'PropertyController', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve dashboard'
+      });
+    }
+  };
+
+  getAgentEarningsWithTransactions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const timeRange = (req.query.timeRange as 'week' | 'month' | 'quarter' | 'year') || 'month';
+
+      const earnings = await this.propertyService.getAgentEarningsWithTransactions(agentId, timeRange);
+
+      res.json({
+        success: true,
+        message: 'Agent earnings with transactions retrieved successfully',
+        data: earnings
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch agent earnings with transactions', 'PropertyController', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve earnings'
+      });
+    }
+  };
+
+  getTransactionMonitoringDashboard = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const monitoringData = await this.propertyService.getTransactionMonitoringDashboard(agentId);
+
+      res.json({
+        success: true,
+        message: 'Transaction monitoring dashboard retrieved successfully',
+        data: monitoringData
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch transaction monitoring dashboard', 'PropertyController', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve monitoring data'
+      });
+    }
+  };
+
+  getAgentEscrowTransactions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const status = req.query.status as string;
+
+      const escrowTransactions = await this.propertyService.getAgentEscrowTransactions(agentId);
+
+      let filteredTransactions = escrowTransactions;
+      if (status) {
+        filteredTransactions = escrowTransactions.filter(t => t.status === status);
+      }
+
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedTransactions = filteredTransactions.slice(startIndex, endIndex);
+
+      res.json({
+        success: true,
+        message: 'Escrow transactions retrieved successfully',
+        data: {
+          transactions: paginatedTransactions,
+          total: filteredTransactions.length,
+          page,
+          limit,
+          totalPages: Math.ceil(filteredTransactions.length / limit),
+          hasNext: endIndex < filteredTransactions.length,
+          hasPrevious: page > 1
+        }
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch escrow transactions', 'PropertyController', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve escrow transactions'
+      });
+    }
+  };
+
+  getAgentPaymentTransactions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const status = req.query.status as string;
+
+      const paymentTransactions = await this.propertyService.getAgentPaymentTransactions(agentId);
+
+      let filteredTransactions = paymentTransactions;
+      if (status) {
+        filteredTransactions = paymentTransactions.filter(t => t.status === status);
+      }
+
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedTransactions = filteredTransactions.slice(startIndex, endIndex);
+
+      res.json({
+        success: true,
+        message: 'Payment transactions retrieved successfully',
+        data: {
+          transactions: paginatedTransactions,
+          total: filteredTransactions.length,
+          page,
+          limit,
+          totalPages: Math.ceil(filteredTransactions.length / limit),
+          hasNext: endIndex < filteredTransactions.length,
+          hasPrevious: page > 1
+        }
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch payment transactions', 'PropertyController', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve payment transactions'
+      });
+    }
+  };
+
+  getAgentTransactionSummary = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const summary = await this.propertyService.getAgentTransactionSummary(agentId);
+
+      res.json({
+        success: true,
+        message: 'Transaction summary retrieved successfully',
+        data: summary
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch transaction summary', 'PropertyController', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve transaction summary'
+      });
+    }
+  };
+
+  getMonthlyCommissionsWithTransactions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const monthlyData = await this.propertyService.getAgentMonthlyCommissionsWithTransactions(agentId);
+
+      res.json({
+        success: true,
+        message: 'Monthly commissions with transactions retrieved successfully',
+        data: monthlyData
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch monthly commissions with transactions', 'PropertyController', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve monthly commission data'
       });
     }
   };

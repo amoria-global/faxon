@@ -1,6 +1,7 @@
 //src/services/booking.service.ts
 import { PrismaClient } from '@prisma/client';
 import { BrevoBookingMailingService } from '../utils/brevo.booking';
+import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
 import {
   CreatePropertyBookingDto,
   UpdatePropertyBookingDto,
@@ -31,6 +32,7 @@ const prisma = new PrismaClient();
 
 export class BookingService {
   private emailService = new BrevoBookingMailingService();
+  private paymentStatusEmailService = new BrevoPaymentStatusMailingService();
 
   // --- BLOCKED DATES HELPER METHODS ---
   private async createBlockedDatesForBooking(
@@ -62,6 +64,16 @@ export class BookingService {
 
   // --- PROPERTY BOOKING METHODS ---
   async createPropertyBooking(userId: number, data: CreatePropertyBookingDto): Promise<PropertyBookingInfo> {
+    // Validate user exists
+    const guestId = data.clientId || userId;
+    const guest = await prisma.user.findUnique({
+      where: { id: guestId }
+    });
+
+    if (!guest) {
+      throw new Error('Guest user not found');
+    }
+
     // Validate property exists and is available
     const property = await prisma.property.findUnique({
       where: { id: data.propertyId },
@@ -190,41 +202,45 @@ export class BookingService {
     });
 
     try {
-      // Send confirmation email to guest
-      await this.emailService.sendBookingConfirmationEmail({
-        user: {
-          firstName: booking.guest.firstName,
-          lastName: booking.guest.lastName,
-          email: booking.guest.email,
-          id: booking.guestId
-        },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/favicon.ico'
-        },
-        booking: this.transformToPropertyBookingInfo(booking),
-        recipientType: 'guest'
-      });
+      // Send "booking received - please pay" email to guest
+      if (guest && booking.guest) {
+        await this.paymentStatusEmailService.sendBookingReceivedEmail({
+          user: {
+            firstName: guest.firstName,
+            lastName: guest.lastName,
+            email: guest.email,
+            id: guestId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/favicon.ico'
+          },
+          booking: this.transformToPropertyBookingInfo(booking),
+          recipientType: 'guest',
+          paymentStatus: 'pending'
+        });
+      }
 
-      // Send notification to host
+      // Send notification to host - payment pending
       if (booking.property.host && booking.property.hostId) {
-        await this.emailService.sendNewBookingNotification({
+        await this.paymentStatusEmailService.sendNewBookingAlertToHost({
           user: {
             firstName: booking.property.host.firstName,
             lastName: booking.property.host.lastName,
             email: booking.property.host.email,
             id: booking.property.hostId
           },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/favicon.ico'
-        },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/favicon.ico'
+          },
           booking: this.transformToPropertyBookingInfo(booking),
-          recipientType: 'host'
+          recipientType: 'host',
+          paymentStatus: 'pending'
         });
       }
     } catch (emailError) {
@@ -294,24 +310,26 @@ export class BookingService {
           // Remove blocked dates when booking is cancelled
           await this.removeBlockedDatesForBooking(bookingId);
 
-          // Send cancellation email
-          await this.emailService.sendBookingCancellationEmail({
-            user: {
-              firstName: updatedBooking.guest.firstName,
-              lastName: updatedBooking.guest.lastName,
-              email: updatedBooking.guest.email,
-              id: updatedBooking.guestId
-            },
-            company: {
-              name: 'Jambolush',
-              website: 'https://jambolush.com',
-              supportEmail: 'support@jambolush.com',
-              logo: 'https://jambolush.com/favicon.ico'
-            },
-            booking: this.transformToPropertyBookingInfo(updatedBooking),
-            recipientType: 'guest',
-            cancellationReason: data.message || 'Booking has been cancelled as requested.'
-          });
+          // Send cancellation email if guest data is available
+          if (updatedBooking.guest) {
+            await this.emailService.sendBookingCancellationEmail({
+              user: {
+                firstName: updatedBooking.guest.firstName,
+                lastName: updatedBooking.guest.lastName,
+                email: updatedBooking.guest.email,
+                id: updatedBooking.guestId
+              },
+              company: {
+                name: 'Jambolush',
+                website: 'https://jambolush.com',
+                supportEmail: 'support@jambolush.com',
+                logo: 'https://jambolush.com/favicon.ico'
+              },
+              booking: this.transformToPropertyBookingInfo(updatedBooking),
+              recipientType: 'guest',
+              cancellationReason: data.message || 'Booking has been cancelled as requested.'
+            });
+          }
         } else if (data.status === 'confirmed' && booking.status !== 'confirmed') {
           // Ensure blocked dates exist when booking is confirmed
           // (in case they weren't created initially or were removed)
@@ -590,6 +608,16 @@ export class BookingService {
 
   // --- TOUR BOOKING METHODS ---
   async createTourBooking(userId: number, data: CreateTourBookingDto): Promise<TourBookingInfo> {
+    // Validate user exists
+    const bookingUserId = data.clientId || userId;
+    const user = await prisma.user.findUnique({
+      where: { id: bookingUserId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
     // Validate tour and schedule
     const schedule = await prisma.tourSchedule.findUnique({
       where: { id: data.scheduleId },
@@ -664,41 +692,47 @@ export class BookingService {
     });
 
     try {
-      // Send confirmation email to guest
-      await this.emailService.sendBookingConfirmationEmail({
-        user: {
-          firstName: booking.user.firstName,
-          lastName: booking.user.lastName,
-          email: booking.user.email,
-          id: booking.userId
-        },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/favicon.ico'
-        },
-        booking: this.transformToTourBookingInfo(booking),
-        recipientType: 'guest'
-      });
+      // Send "booking received - please pay" email to guest
+      if (user && booking.user) {
+        await this.paymentStatusEmailService.sendBookingReceivedEmail({
+          user: {
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            id: bookingUserId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/favicon.ico'
+          },
+          booking: this.transformToTourBookingInfo(booking),
+          recipientType: 'guest',
+          paymentStatus: 'pending'
+        });
+      }
 
-      // Send notification to tour guide
-      await this.emailService.sendNewBookingNotification({
-        user: {
-          firstName: booking.tour.tourGuide.firstName,
-          lastName: booking.tour.tourGuide.lastName,
-          email: booking.tour.tourGuide.email,
-          id: booking.tourGuideId
-        },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/favicon.ico'
-        },
-        booking: this.transformToTourBookingInfo(booking),
-        recipientType: 'guide'
-      });
+      // Send notification to tour guide - payment pending
+      if (booking.tour && booking.tour.tourGuide) {
+        await this.paymentStatusEmailService.sendNewBookingAlertToHost({
+          user: {
+            firstName: booking.tour.tourGuide.firstName,
+            lastName: booking.tour.tourGuide.lastName,
+            email: booking.tour.tourGuide.email,
+            id: booking.tourGuideId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/favicon.ico'
+          },
+          booking: this.transformToTourBookingInfo(booking),
+          recipientType: 'guide',
+          paymentStatus: 'pending'
+        });
+      }
     } catch (emailError) {
       console.error('Failed to send tour booking emails:', emailError);
       // Don't fail the booking if email fails
@@ -774,23 +808,25 @@ export class BookingService {
 
     if (data.status === 'cancelled') {
       try {
-        await this.emailService.sendBookingCancellationEmail({
-          user: {
-            firstName: updatedBooking.user.firstName,
-            lastName: updatedBooking.user.lastName,
-            email: updatedBooking.user.email,
-            id: updatedBooking.userId
-          },
-          company: {
-            name: 'Jambolush',
-            website: 'https://jambolush.com',
-            supportEmail: 'support@jambolush.com',
-            logo: 'https://jambolush.com/favicon.ico'
-          },
-          booking: this.transformToTourBookingInfo(updatedBooking),
-          recipientType: 'guest',
-          cancellationReason: data.specialRequests || 'Tour booking has been cancelled as requested.'
-        });
+        if (updatedBooking.user) {
+          await this.emailService.sendBookingCancellationEmail({
+            user: {
+              firstName: updatedBooking.user.firstName,
+              lastName: updatedBooking.user.lastName,
+              email: updatedBooking.user.email,
+              id: updatedBooking.userId
+            },
+            company: {
+              name: 'Jambolush',
+              website: 'https://jambolush.com',
+              supportEmail: 'support@jambolush.com',
+              logo: 'https://jambolush.com/favicon.ico'
+            },
+            booking: this.transformToTourBookingInfo(updatedBooking),
+            recipientType: 'guest',
+            cancellationReason: data.specialRequests || 'Tour booking has been cancelled as requested.'
+          });
+        }
       } catch (emailError) {
         console.error('Failed to send tour cancellation email:', emailError);
       }
@@ -1353,6 +1389,14 @@ export class BookingService {
     const checkOut = new Date(booking.checkOut);
     const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
 
+    if (!booking.guest) {
+      throw new Error('Booking guest data is missing');
+    }
+
+    if (!booking.property || !booking.property.host) {
+      throw new Error('Booking property or host data is missing');
+    }
+
     return {
       id: booking.id,
       propertyId: booking.propertyId,
@@ -1391,6 +1435,18 @@ export class BookingService {
   }
 
   private transformToTourBookingInfo(booking: any): TourBookingInfo {
+    if (!booking.user) {
+      throw new Error('Booking user data is missing');
+    }
+
+    if (!booking.tour || !booking.tour.tourGuide) {
+      throw new Error('Booking tour or tour guide data is missing');
+    }
+
+    if (!booking.schedule) {
+      throw new Error('Booking schedule data is missing');
+    }
+
     return {
       id: booking.id,
       tourId: booking.tourId,

@@ -1,6 +1,7 @@
 // services/email.service.ts
 
-import nodemailer from 'nodemailer';
+import * as Brevo from '@getbrevo/brevo';
+import { config } from '../config/config';
 import {
   EscrowTransaction,
   EscrowParticipant,
@@ -22,20 +23,31 @@ interface CompanyInfo {
 }
 
 export class EmailService {
-  private transporter: nodemailer.Transporter;
+  private transactionalEmailsApi: Brevo.TransactionalEmailsApi;
   private companyInfo: CompanyInfo;
+  private defaultSender: { name: string; email: string };
 
   constructor() {
-    // Initialize email transporter
-    this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
-    });
+    // Initialize Brevo API
+    this.transactionalEmailsApi = new Brevo.TransactionalEmailsApi();
+
+    if (!config.brevoApiKey) {
+      throw new Error('Brevo API key is required but not configured');
+    }
+
+    if (!config.brevoSenderEmail) {
+      throw new Error('Brevo sender email is required but not configured');
+    }
+
+    this.transactionalEmailsApi.setApiKey(
+      Brevo.TransactionalEmailsApiApiKeys.apiKey,
+      config.brevoApiKey
+    );
+
+    this.defaultSender = {
+      name: 'Jambolush Escrow',
+      email: config.brevoSenderEmail
+    };
 
     // Company information
     this.companyInfo = {
@@ -164,6 +176,56 @@ export class EmailService {
     }
   }
 
+  // === BASE TEMPLATE ===
+
+  private getBaseTemplate(): string {
+    return `
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #374151; background: #f9fafb; padding: 10px; }
+        .email-wrapper { width: 98%; max-width: 600px; margin: 0 auto; }
+        .email-container { background: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); border: 1px solid #e5e7eb; overflow: hidden; }
+        .header { background: linear-gradient(135deg, #083A85 0%, #0a4499 100%); padding: 32px 24px; text-align: center; color: white; }
+        .logo { max-width: 120px; margin-bottom: 8px; }
+        .header-title { font-size: 24px; font-weight: 600; margin-bottom: 6px; }
+        .header-subtitle { font-size: 14px; font-weight: 400; opacity: 0.9; }
+        .content { padding: 28px 20px; background: #ffffff; }
+        .greeting { font-size: 20px; font-weight: 600; color: #111827; margin-bottom: 16px; }
+        .message { font-size: 15px; line-height: 1.6; color: #4b5563; margin-bottom: 20px; }
+        .button { display: inline-block; background: #083A85; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 15px; text-align: center; }
+        .button:hover { background: #0a4499; }
+        .button-center { text-align: center; margin: 24px 0; }
+        .info-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px; margin: 20px 0; }
+        .info-card-header { font-weight: 600; color: #374151; margin-bottom: 12px; font-size: 14px; }
+        .info-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { font-weight: 500; color: #374151; font-size: 13px; }
+        .info-value { color: #6b7280; font-size: 13px; text-align: right; }
+        .alert-box { border-radius: 8px; padding: 16px; margin: 20px 0; border-left: 3px solid; }
+        .alert-success { background: #f0fdf4; border-left-color: #22c55e; color: #15803d; }
+        .alert-warning { background: #fffbeb; border-left-color: #f59e0b; color: #d97706; }
+        .alert-error { background: #fef2f2; border-left-color: #ef4444; color: #dc2626; }
+        .alert-info { background: #eff6ff; border-left-color: #3b82f6; color: #1e40af; }
+        .alert-title { font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+        .alert-text { font-size: 13px; line-height: 1.5; }
+        .footer { background: #083A85; color: white; padding: 24px 20px; text-align: center; }
+        .footer-text { font-size: 12px; color: #e5e7eb; line-height: 1.5; }
+        ul { margin: 12px 0; padding-left: 24px; }
+        li { font-size: 13px; color: #4b5563; margin-bottom: 6px; }
+        @media (max-width: 600px) {
+          .email-wrapper { width: 100%; }
+          .content { padding: 20px 16px; }
+          .header { padding: 24px 16px; }
+          .footer { padding: 20px 16px; }
+          .info-row { flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 0; }
+          .info-label { min-width: auto; }
+          .info-value { text-align: left; }
+        }
+      </style>
+    `;
+  }
+
   // === TEMPLATE GENERATORS ===
 
   private generateDepositCreatedTemplate(data: {
@@ -178,55 +240,52 @@ export class EmailService {
       <html>
       <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>${subject}</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { text-align: center; margin-bottom: 30px; }
-          .logo { max-width: 150px; }
-          .content { background: #f9f9f9; padding: 30px; border-radius: 8px; }
-          .button { 
-            display: inline-block; 
-            padding: 12px 30px; 
-            background: #007bff; 
-            color: white; 
-            text-decoration: none; 
-            border-radius: 5px; 
-            margin: 20px 0;
-          }
-          .details { background: white; padding: 20px; border-radius: 5px; margin: 20px 0; }
-          .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
-        </style>
+        ${this.getBaseTemplate()}
       </head>
       <body>
-        <div class="container">
-          <div class="header">
-            <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
-          </div>
-          
-          <div class="content">
-            <h2>Hi ${data.user.firstName || 'there'},</h2>
-            
-            <p>Your payment has been initialized and is being held securely in escrow. Please complete your payment to proceed with your booking.</p>
-            
-            <div class="details">
-              <h3>Payment Details</h3>
-              <p><strong>Reference:</strong> ${data.transaction.reference}</p>
-              <p><strong>Amount:</strong> ${data.transaction.amount.toLocaleString()} ${data.transaction.currency}</p>
-              <p><strong>Description:</strong> ${data.transaction.description || 'Escrow payment'}</p>
-              <p><strong>Status:</strong> Pending Payment</p>
+        <div class="email-wrapper">
+          <div class="email-container">
+            <div class="header">
+              <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
+              <div class="header-title">${this.companyInfo.name}</div>
+              <div class="header-subtitle">Secure Escrow Payment</div>
             </div>
-            
-            <p style="text-align: center;">
-              <a href="${data.checkoutUrl}" class="button">Complete Payment</a>
-            </p>
-            
-            <p><strong>Important:</strong> Your funds will be securely held in escrow until the service is confirmed as delivered. This protects both you and the service provider.</p>
-          </div>
-          
-          <div class="footer">
-            <p>Questions? Contact us at <a href="mailto:${this.companyInfo.supportEmail}">${this.companyInfo.supportEmail}</a></p>
-            <p>&copy; ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.</p>
+
+            <div class="content">
+              <div class="greeting">Hi ${data.user.firstName || 'there'},</div>
+
+              <div class="message">
+                Your payment has been initialized and is being held securely in escrow. Please complete your payment to proceed with your booking.
+              </div>
+
+              <div class="info-card">
+                <div class="info-card-header">Payment Details</div>
+                <div class="info-row"><span class="info-label">Reference</span><span class="info-value">${data.transaction.reference}</span></div>
+                <div class="info-row"><span class="info-label">Amount</span><span class="info-value">${data.transaction.amount.toLocaleString()} ${data.transaction.currency}</span></div>
+                <div class="info-row"><span class="info-label">Description</span><span class="info-value">${data.transaction.description || 'Escrow payment'}</span></div>
+                <div class="info-row"><span class="info-label">Status</span><span class="info-value">Pending Payment</span></div>
+              </div>
+
+              <div class="button-center">
+                <a href="${data.checkoutUrl}" class="button">Complete Payment</a>
+              </div>
+
+              <div class="alert-box alert-info">
+                <div class="alert-title">Secure Escrow Protection</div>
+                <div class="alert-text">
+                  Your funds will be securely held in escrow until the service is confirmed as delivered. This protects both you and the service provider.
+                </div>
+              </div>
+            </div>
+
+            <div class="footer">
+              <div class="footer-text">
+                Questions? Contact us at ${this.companyInfo.supportEmail}<br>
+                © ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.
+              </div>
+            </div>
           </div>
         </div>
       </body>
@@ -275,47 +334,43 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
       <html>
       <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>${subject}</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { text-align: center; margin-bottom: 30px; }
-          .logo { max-width: 150px; }
-          .content { background: #f9f9f9; padding: 30px; border-radius: 8px; }
-          .status-success { color: #28a745; }
-          .status-warning { color: #ffc107; }
-          .status-danger { color: #dc3545; }
-          .details { background: white; padding: 20px; border-radius: 5px; margin: 20px 0; }
-          .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
-        </style>
+        ${this.getBaseTemplate()}
       </head>
       <body>
-        <div class="container">
-          <div class="header">
-            <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
-          </div>
-          
-          <div class="content">
-            <h2>Hi ${data.user.firstName || 'there'},</h2>
-            
-            <p class="${this.getStatusClass(data.status)}">
-              <strong>${statusMessage}</strong>
-            </p>
-            
-            <div class="details">
-              <h3>Payment Details</h3>
-              <p><strong>Reference:</strong> ${data.transaction.reference}</p>
-              <p><strong>Amount:</strong> ${data.transaction.amount.toLocaleString()} ${data.transaction.currency}</p>
-              <p><strong>Current Status:</strong> ${data.status}</p>
-              <p><strong>Updated:</strong> ${new Date().toLocaleString()}</p>
+        <div class="email-wrapper">
+          <div class="email-container">
+            <div class="header">
+              <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
+              <div class="header-title">${this.companyInfo.name}</div>
+              <div class="header-subtitle">Payment Status Update</div>
             </div>
-            
-            ${this.getStatusSpecificContent(data.status, data.transaction)}
-          </div>
-          
-          <div class="footer">
-            <p>Questions? Contact us at <a href="mailto:${this.companyInfo.supportEmail}">${this.companyInfo.supportEmail}</a></p>
-            <p>&copy; ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.</p>
+
+            <div class="content">
+              <div class="greeting">Hi ${data.user.firstName || 'there'},</div>
+
+              <div class="message">
+                <strong>${statusMessage}</strong>
+              </div>
+
+              <div class="info-card">
+                <div class="info-card-header">Payment Details</div>
+                <div class="info-row"><span class="info-label">Reference</span><span class="info-value">${data.transaction.reference}</span></div>
+                <div class="info-row"><span class="info-label">Amount</span><span class="info-value">${data.transaction.amount.toLocaleString()} ${data.transaction.currency}</span></div>
+                <div class="info-row"><span class="info-label">Current Status</span><span class="info-value">${data.status}</span></div>
+                <div class="info-row"><span class="info-label">Updated</span><span class="info-value">${new Date().toLocaleString()}</span></div>
+              </div>
+
+              ${this.getStatusSpecificContent(data.status, data.transaction)}
+            </div>
+
+            <div class="footer">
+              <div class="footer-text">
+                Questions? Contact us at ${this.companyInfo.supportEmail}<br>
+                © ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.
+              </div>
+            </div>
           </div>
         </div>
       </body>
@@ -350,42 +405,45 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
       <html>
       <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>${subject}</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { text-align: center; margin-bottom: 30px; }
-          .logo { max-width: 150px; }
-          .content { background: #f9f9f9; padding: 30px; border-radius: 8px; }
-          .success { color: #28a745; }
-          .details { background: white; padding: 20px; border-radius: 5px; margin: 20px 0; }
-          .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
-        </style>
+        ${this.getBaseTemplate()}
       </head>
       <body>
-        <div class="container">
-          <div class="header">
-            <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
-          </div>
-          
-          <div class="content">
-            <h2>Hi ${data.user.firstName || 'there'},</h2>
-            
-            <p class="success"><strong>Great news! Your funds have been released and are now available in your wallet.</strong></p>
-            
-            <div class="details">
-              <h3>Release Details</h3>
-              <p><strong>Transaction:</strong> ${data.transaction.reference}</p>
-              <p><strong>Amount Released:</strong> ${data.transaction.splitAmounts?.host?.toLocaleString() || data.transaction.amount.toLocaleString()} ${data.transaction.currency}</p>
-              <p><strong>Released At:</strong> ${data.transaction.releasedAt ? new Date(data.transaction.releasedAt).toLocaleString() : new Date().toLocaleString()}</p>
+        <div class="email-wrapper">
+          <div class="email-container">
+            <div class="header">
+              <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
+              <div class="header-title">${this.companyInfo.name}</div>
+              <div class="header-subtitle">Funds Released</div>
             </div>
-            
-            <p>You can now withdraw these funds to your mobile money account or bank account through your wallet.</p>
-          </div>
-          
-          <div class="footer">
-            <p>Questions? Contact us at <a href="mailto:${this.companyInfo.supportEmail}">${this.companyInfo.supportEmail}</a></p>
-            <p>&copy; ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.</p>
+
+            <div class="content">
+              <div class="greeting">Hi ${data.user.firstName || 'there'},</div>
+
+              <div class="alert-box alert-success">
+                <div class="alert-title">Great News!</div>
+                <div class="alert-text">Your funds have been released and are now available in your wallet.</div>
+              </div>
+
+              <div class="info-card">
+                <div class="info-card-header">Release Details</div>
+                <div class="info-row"><span class="info-label">Transaction</span><span class="info-value">${data.transaction.reference}</span></div>
+                <div class="info-row"><span class="info-label">Amount Released</span><span class="info-value">${data.transaction.splitAmounts?.host?.toLocaleString() || data.transaction.amount.toLocaleString()} ${data.transaction.currency}</span></div>
+                <div class="info-row"><span class="info-label">Released At</span><span class="info-value">${data.transaction.releasedAt ? new Date(data.transaction.releasedAt).toLocaleString() : new Date().toLocaleString()}</span></div>
+              </div>
+
+              <div class="message">
+                You can now withdraw these funds to your mobile money account or bank account through your wallet.
+              </div>
+            </div>
+
+            <div class="footer">
+              <div class="footer-text">
+                Questions? Contact us at ${this.companyInfo.supportEmail}<br>
+                © ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.
+              </div>
+            </div>
           </div>
         </div>
       </body>
@@ -421,49 +479,56 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
       <html>
       <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>${subject}</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { text-align: center; margin-bottom: 30px; }
-          .logo { max-width: 150px; }
-          .content { background: #f9f9f9; padding: 30px; border-radius: 8px; }
-          .details { background: white; padding: 20px; border-radius: 5px; margin: 20px 0; }
-          .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
-        </style>
+        ${this.getBaseTemplate()}
       </head>
       <body>
-        <div class="container">
-          <div class="header">
-            <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
-          </div>
-          
-          <div class="content">
-            <h2>Hi ${data.user.firstName || 'there'},</h2>
-            
-            <p>Your withdrawal request has been submitted and is being processed.</p>
-            
-            <div class="details">
-              <h3>Withdrawal Details</h3>
-              <p><strong>Reference:</strong> ${data.withdrawal.reference}</p>
-              <p><strong>Amount:</strong> ${data.withdrawal.amount.toLocaleString()} ${data.withdrawal.currency}</p>
-              <p><strong>Method:</strong> ${data.withdrawal.method === 'MOBILE' ? 'Mobile Money' : 'Bank Transfer'}</p>
-              <p><strong>Status:</strong> ${data.withdrawal.status}</p>
-              <p><strong>Submitted:</strong> ${data.withdrawal.createdAt.toLocaleString()}</p>
+        <div class="email-wrapper">
+          <div class="email-container">
+            <div class="header">
+              <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
+              <div class="header-title">${this.companyInfo.name}</div>
+              <div class="header-subtitle">Withdrawal Request</div>
             </div>
-            
-            <p><strong>Processing Time:</strong></p>
-            <ul>
-              <li>Mobile Money: 5-15 minutes</li>
-              <li>Bank Transfer: 1-3 business days</li>
-            </ul>
-            
-            <p>You'll receive another email once the withdrawal is completed.</p>
-          </div>
-          
-          <div class="footer">
-            <p>Questions? Contact us at <a href="mailto:${this.companyInfo.supportEmail}">${this.companyInfo.supportEmail}</a></p>
-            <p>&copy; ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.</p>
+
+            <div class="content">
+              <div class="greeting">Hi ${data.user.firstName || 'there'},</div>
+
+              <div class="message">
+                Your withdrawal request has been submitted and is being processed.
+              </div>
+
+              <div class="info-card">
+                <div class="info-card-header">Withdrawal Details</div>
+                <div class="info-row"><span class="info-label">Reference</span><span class="info-value">${data.withdrawal.reference}</span></div>
+                <div class="info-row"><span class="info-label">Amount</span><span class="info-value">${data.withdrawal.amount.toLocaleString()} ${data.withdrawal.currency}</span></div>
+                <div class="info-row"><span class="info-label">Method</span><span class="info-value">${data.withdrawal.method === 'MOBILE' ? 'Mobile Money' : 'Bank Transfer'}</span></div>
+                <div class="info-row"><span class="info-label">Status</span><span class="info-value">${data.withdrawal.status}</span></div>
+                <div class="info-row"><span class="info-label">Submitted</span><span class="info-value">${data.withdrawal.createdAt.toLocaleString()}</span></div>
+              </div>
+
+              <div class="alert-box alert-info">
+                <div class="alert-title">Processing Time</div>
+                <div class="alert-text">
+                  <ul>
+                    <li>Mobile Money: 5-15 minutes</li>
+                    <li>Bank Transfer: 1-3 business days</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div class="message">
+                You'll receive another email once the withdrawal is completed.
+              </div>
+            </div>
+
+            <div class="footer">
+              <div class="footer-text">
+                Questions? Contact us at ${this.companyInfo.supportEmail}<br>
+                © ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.
+              </div>
+            </div>
           </div>
         </div>
       </body>
@@ -506,49 +571,56 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
       <html>
       <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>${subject}</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { text-align: center; margin-bottom: 30px; }
-          .logo { max-width: 150px; }
-          .content { background: #f9f9f9; padding: 30px; border-radius: 8px; }
-          .info { color: #17a2b8; }
-          .details { background: white; padding: 20px; border-radius: 5px; margin: 20px 0; }
-          .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
-        </style>
+        ${this.getBaseTemplate()}
       </head>
       <body>
-        <div class="container">
-          <div class="header">
-            <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
-          </div>
-          
-          <div class="content">
-            <h2>Hi ${data.user.firstName || 'there'},</h2>
-            
-            <p class="info"><strong>Your refund has been processed and will be credited back to your original payment method.</strong></p>
-            
-            <div class="details">
-              <h3>Refund Details</h3>
-              <p><strong>Original Transaction:</strong> ${data.transaction.reference}</p>
-              <p><strong>Refund Amount:</strong> ${data.refundAmount.toLocaleString()} ${data.transaction.currency}</p>
-              <p><strong>Reason:</strong> ${data.transaction.failureReason || 'Service cancellation'}</p>
-              <p><strong>Processed:</strong> ${new Date().toLocaleString()}</p>
+        <div class="email-wrapper">
+          <div class="email-container">
+            <div class="header">
+              <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
+              <div class="header-title">${this.companyInfo.name}</div>
+              <div class="header-subtitle">Refund Processed</div>
             </div>
-            
-            <p><strong>Refund Timeline:</strong></p>
-            <ul>
-              <li>Mobile Money: 5-15 minutes</li>
-              <li>Bank/Card: 3-5 business days</li>
-            </ul>
-            
-            <p>If you don't see the refund within the expected timeframe, please contact our support team.</p>
-          </div>
-          
-          <div class="footer">
-            <p>Questions? Contact us at <a href="mailto:${this.companyInfo.supportEmail}">${this.companyInfo.supportEmail}</a></p>
-            <p>&copy; ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.</p>
+
+            <div class="content">
+              <div class="greeting">Hi ${data.user.firstName || 'there'},</div>
+
+              <div class="alert-box alert-info">
+                <div class="alert-title">Refund Processed</div>
+                <div class="alert-text">Your refund has been processed and will be credited back to your original payment method.</div>
+              </div>
+
+              <div class="info-card">
+                <div class="info-card-header">Refund Details</div>
+                <div class="info-row"><span class="info-label">Original Transaction</span><span class="info-value">${data.transaction.reference}</span></div>
+                <div class="info-row"><span class="info-label">Refund Amount</span><span class="info-value">${data.refundAmount.toLocaleString()} ${data.transaction.currency}</span></div>
+                <div class="info-row"><span class="info-label">Reason</span><span class="info-value">${data.transaction.failureReason || 'Service cancellation'}</span></div>
+                <div class="info-row"><span class="info-label">Processed</span><span class="info-value">${new Date().toLocaleString()}</span></div>
+              </div>
+
+              <div class="alert-box alert-warning">
+                <div class="alert-title">Refund Timeline</div>
+                <div class="alert-text">
+                  <ul>
+                    <li>Mobile Money: 5-15 minutes</li>
+                    <li>Bank/Card: 3-5 business days</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div class="message">
+                If you don't see the refund within the expected timeframe, please contact our support team.
+              </div>
+            </div>
+
+            <div class="footer">
+              <div class="footer-text">
+                Questions? Contact us at ${this.companyInfo.supportEmail}<br>
+                © ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.
+              </div>
+            </div>
           </div>
         </div>
       </body>
@@ -583,45 +655,28 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
     subject: string;
     html: string;
     text: string;
-    from?: string;
   }): Promise<void> {
-    const mailOptions = {
-      from: options.from || `"${this.companyInfo.name}" <${process.env.SMTP_FROM || 'noreply@jambolush.com'}>`,
-      to: options.to,
+    const sendEmailRequest: any = {
+      sender: this.defaultSender,
+      to: [{ email: options.to }],
       subject: options.subject,
-      html: options.html,
-      text: options.text
+      htmlContent: options.html,
+      textContent: options.text
     };
 
-    await this.transporter.sendMail(mailOptions);
-  }
-
-  private getStatusClass(status: EscrowTransactionStatus): string {
-    switch (status) {
-      case 'HELD':
-      case 'READY':
-      case 'RELEASED':
-        return 'status-success';
-      case 'PENDING':
-        return 'status-warning';
-      case 'FAILED':
-      case 'CANCELLED':
-        return 'status-danger';
-      default:
-        return '';
-    }
+    await this.transactionalEmailsApi.sendTransacEmail(sendEmailRequest);
   }
 
   private getStatusSpecificContent(status: EscrowTransactionStatus, transaction: EscrowTransaction): string {
     switch (status) {
       case 'HELD':
-        return '<p>Your funds are now securely held in escrow and will be released once the service is confirmed as delivered.</p>';
+        return '<div class="message">Your funds are now securely held in escrow and will be released once the service is confirmed as delivered.</div>';
       case 'RELEASED':
-        return '<p>The funds have been released to the service provider. Thank you for using our platform!</p>';
+        return '<div class="message">The funds have been released to the service provider. Thank you for using our platform!</div>';
       case 'REFUNDED':
-        return '<p>Your refund has been processed and should appear in your account within 3-5 business days.</p>';
+        return '<div class="message">Your refund has been processed and should appear in your account within 3-5 business days.</div>';
       case 'FAILED':
-        return `<p>Unfortunately, your payment could not be processed. ${transaction.failureReason ? `Reason: ${transaction.failureReason}` : 'Please try again or contact support.'}</p>`;
+        return `<div class="alert-box alert-error"><div class="alert-title">Payment Failed</div><div class="alert-text">Unfortunately, your payment could not be processed. ${transaction.failureReason ? `Reason: ${transaction.failureReason}` : 'Please try again or contact support.'}</div></div>`;
       default:
         return '';
     }
@@ -631,7 +686,13 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      await this.transporter.verify();
+      // Test by checking if the API key is configured
+      if (!config.brevoApiKey) {
+        return {
+          success: false,
+          message: 'Brevo API key not configured'
+        };
+      }
       return {
         success: true,
         message: 'Email service is healthy'

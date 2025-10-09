@@ -153,321 +153,55 @@ export class BrevoBookingMailingService {
   }
 
   // --- MODERNIZED EMAIL TEMPLATES ---
-  
-  // Base template (styles) remains the same as in brevo.auth.ts
+
   private getBaseTemplate(): string {
-    // This function would contain the exact same CSS content as brevo.auth.ts
-    // For brevity, it is omitted here but should be copied directly.
     return `
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        
-        * { 
-          margin: 0; 
-          padding: 0; 
-          box-sizing: border-box; 
-        }
-        
-        body {
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          line-height: 1.6;
-          color: #374151;
-          background-color: #f9fafb;
-        }
-        
-        .email-wrapper {
-          max-width: 600px;
-          margin: 0 auto;
-          background-color: #f9fafb;
-          padding: 20px;
-        }
-        
-        .email-container {
-          background: white;
-          border-radius: 20px;
-          overflow: hidden;
-          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-          border: 1px solid #e5e7eb;
-        }
-        
-        .header {
-          background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
-          padding: 40px 30px;
-          text-align: center;
-          color: white;
-        }
-        
-        .logo {
-          font-size: 28px;
-          font-weight: 700;
-          margin-bottom: 8px;
-          letter-spacing: -0.025em;
-        }
-        
-        .header-subtitle {
-          font-size: 16px;
-          font-weight: 400;
-          opacity: 0.9;
-        }
-        
-        .content {
-          padding: 40px 30px;
-        }
-        
-        .greeting {
-          font-size: 24px;
-          font-weight: 600;
-          color: #111827;
-          margin-bottom: 20px;
-          letter-spacing: -0.025em;
-        }
-        
-        .message {
-          font-size: 16px;
-          line-height: 1.7;
-          color: #4b5563;
-          margin-bottom: 24px;
-        }
-        
-        .highlight-box {
-          background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-          border: 2px solid #083A85;
-          border-radius: 16px;
-          padding: 24px;
-          margin: 24px 0;
-          text-align: center;
-        }
-        
-        .verification-code {
-          font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-          font-size: 32px;
-          font-weight: 700;
-          color: #083A85;
-          letter-spacing: 6px;
-          margin: 12px 0;
-        }
-        
-        .code-label {
-          font-size: 14px;
-          font-weight: 500;
-          color: #6b7280;
-          margin-bottom: 8px;
-        }
-        
-        .code-expiry {
-          font-size: 14px;
-          color: #9ca3af;
-          margin-top: 8px;
-        }
-        
-        .button {
-          display: inline-block;
-          background: linear-gradient(135deg, #083A85 0%, #0a4499 100%);
-          color: white;
-          text-decoration: none;
-          padding: 14px 28px;
-          border-radius: 12px;
-          font-weight: 600;
-          font-size: 16px;
-          text-align: center;
-          box-shadow: 0 4px 14px rgba(8, 58, 133, 0.3);
-          transition: all 0.3s ease;
-        }
-        
-        .button:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 6px 20px rgba(8, 58, 133, 0.4);
-        }
-        
-        .button-center {
-          text-align: center;
-          margin: 32px 0;
-        }
-        
-        .info-card {
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 20px;
-          margin: 24px 0;
-        }
-        
-        .info-card-header {
-          display: flex;
-          align-items: center;
-          font-weight: 600;
-          color: #374151;
-          margin-bottom: 16px;
-          font-size: 15px;
-        }
-        
-        .info-card-icon {
-          margin-right: 8px;
-          font-size: 18px;
-        }
-        
-        .info-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 8px 0;
-          border-bottom: 1px solid #f1f5f9;
-        }
-        
-        .info-row:last-child {
-          border-bottom: none;
-        }
-        
-        .info-label {
-          font-weight: 500;
-          color: #374151;
-          font-size: 14px;
-        }
-        
-        .info-value {
-          font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-          color: #6b7280;
-          font-size: 14px;
-          text-align: right;
-        }
-        
-        .alert-box {
-          border-radius: 12px;
-          padding: 20px;
-          margin: 24px 0;
-          border-left: 4px solid;
-        }
-        
-        .alert-success {
-          background: #f0fdf4;
-          border-left-color: #22c55e;
-          color: #15803d;
-        }
-        
-        .alert-warning {
-          background: #fffbeb;
-          border-left-color: #f59e0b;
-          color: #d97706;
-        }
-        
-        .alert-error {
-          background: #fef2f2;
-          border-left-color: #ef4444;
-          color: #dc2626;
-        }
-        
-        .alert-title {
-          font-weight: 600;
-          margin-bottom: 8px;
-          font-size: 15px;
-        }
-        
-        .alert-text {
-          font-size: 14px;
-          line-height: 1.5;
-        }
-        
-        .divider {
-          height: 1px;
-          background: linear-gradient(90deg, transparent, #e5e7eb, transparent);
-          margin: 32px 0;
-        }
-        
-        .footer {
-          background: #083A85;
-          color: white;
-          padding: 32px 30px;
-          text-align: center;
-        }
-        
-        .footer-links {
-          margin-bottom: 20px;
-        }
-        
-        .footer-links a {
-          color: #93c5fd;
-          text-decoration: none;
-          margin: 0 12px;
-          font-weight: 500;
-          font-size: 14px;
-        }
-        
-        .footer-links a:hover {
-          color: white;
-        }
-        
-        .footer-text {
-          font-size: 13px;
-          color: #cbd5e1;
-          line-height: 1.5;
-        }
-        
-        .security-badge {
-          display: inline-flex;
-          align-items: center;
-          background: #dbeafe;
-          color: #1e40af;
-          padding: 6px 12px;
-          border-radius: 20px;
-          font-size: 13px;
-          font-weight: 500;
-          margin-top: 16px;
-        }
-        
-        .feature-list {
-          list-style: none;
-          padding: 0;
-          margin: 16px 0;
-        }
-        
-        .feature-list li {
-          padding: 8px 0;
-          color: #4b5563;
-          font-size: 15px;
-        }
-        
-        .feature-list li:before {
-          content: "✓";
-          color: #22c55e;
-          font-weight: bold;
-          margin-right: 8px;
-        }
-        
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #374151; background: #f9fafb; padding: 10px; }
+        .email-wrapper { width: 98%; max-width: 600px; margin: 0 auto; }
+        .email-container { background: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); border: 1px solid #e5e7eb; overflow: hidden; }
+        .header { background: linear-gradient(135deg, #083A85 0%, #0a4499 100%); padding: 32px 24px; text-align: center; color: white; }
+        .logo { font-size: 24px; font-weight: 600; margin-bottom: 6px; }
+        .header-subtitle { font-size: 14px; font-weight: 400; opacity: 0.9; }
+        .content { padding: 28px 20px; background: #ffffff; }
+        .greeting { font-size: 20px; font-weight: 600; color: #111827; margin-bottom: 16px; }
+        .message { font-size: 15px; line-height: 1.6; color: #4b5563; margin-bottom: 20px; }
+        .button { display: inline-block; background: #083A85; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 15px; text-align: center; }
+        .button:hover { background: #0a4499; }
+        .button-center { text-align: center; margin: 24px 0; }
+        .info-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px; margin: 20px 0; }
+        .info-card-header { display: flex; align-items: center; font-weight: 600; color: #374151; margin-bottom: 12px; font-size: 14px; }
+        .info-card-icon { margin-right: 6px; font-size: 16px; }
+        .info-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { font-weight: 500; color: #374151; font-size: 13px; }
+        .info-value { color: #6b7280; font-size: 13px; text-align: right; }
+        .alert-box { border-radius: 8px; padding: 16px; margin: 20px 0; border-left: 3px solid; }
+        .alert-success { background: #f0fdf4; border-left-color: #22c55e; color: #15803d; }
+        .alert-warning { background: #fffbeb; border-left-color: #f59e0b; color: #d97706; }
+        .alert-error { background: #fef2f2; border-left-color: #ef4444; color: #dc2626; }
+        .alert-title { font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+        .alert-text { font-size: 13px; line-height: 1.5; }
+        .divider { height: 1px; background: #e5e7eb; margin: 24px 0; }
+        .footer { background: #083A85; color: white; padding: 24px 20px; text-align: center; }
+        .footer-links { margin-bottom: 16px; }
+        .footer-links a { color: rgba(255, 255, 255, 0.9); text-decoration: none; margin: 0 10px; font-weight: 500; font-size: 13px; }
+        .footer-links a:hover { color: #ffffff; }
+        .footer-text { font-size: 12px; color: #e5e7eb; line-height: 1.5; }
+        .feature-list { list-style: none; padding: 0; margin: 14px 0; }
+        .feature-list li { padding: 6px 0; color: #4b5563; font-size: 14px; }
+        .feature-list li:before { content: "✓"; color: #22c55e; font-weight: bold; margin-right: 6px; }
         @media (max-width: 600px) {
-          .email-wrapper {
-            padding: 10px;
-          }
-          
-          .content {
-            padding: 30px 20px;
-          }
-          
-          .header {
-            padding: 30px 20px;
-          }
-          
-          .footer {
-            padding: 24px 20px;
-          }
-          
-          .verification-code {
-            font-size: 28px;
-            letter-spacing: 4px;
-          }
-          
-          .greeting {
-            font-size: 20px;
-          }
-          
-          .info-row {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 4px;
-          }
-          
-          .info-value {
-            text-align: left;
-          }
+          .email-wrapper { width: 100%; }
+          .content { padding: 20px 16px; }
+          .header { padding: 24px 16px; }
+          .footer { padding: 20px 16px; }
+          .greeting { font-size: 18px; }
+          .info-row { flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 0; }
+          .info-label { min-width: auto; }
+          .info-value { text-align: left; }
         }
       </style>
     `;
@@ -728,6 +462,163 @@ export class BrevoBookingMailingService {
       We look forward to seeing you!
 
       The ${context.company.name} Team
+    `.trim();
+  }
+
+  // --- ADMIN NOTIFICATION: EXPIRED BOOKINGS ---
+  async sendExpiredBookingsNotification(data: {
+    adminEmail: string;
+    adminName: string;
+    propertyBookingsArchived: number;
+    tourBookingsArchived: number;
+    totalArchived: number;
+    totalRemoved: number;
+    timestamp: string;
+  }): Promise<void> {
+    const emailData: BrevoEmailData = {
+      sender: this.defaultSender,
+      to: [
+        {
+          email: data.adminEmail,
+          name: data.adminName
+        }
+      ],
+      subject: `🔔 ${data.totalArchived} Expired Bookings Archived - Admin Alert`,
+      htmlContent: this.buildExpiredBookingsHtmlContent(data),
+      textContent: this.buildExpiredBookingsTextContent(data)
+    };
+
+    await this.makeRequest('/smtp/email', emailData);
+    console.log(`Expired bookings notification sent to ${data.adminEmail}`);
+  }
+
+  private buildExpiredBookingsHtmlContent(data: {
+    adminName: string;
+    propertyBookingsArchived: number;
+    tourBookingsArchived: number;
+    totalArchived: number;
+    totalRemoved: number;
+    timestamp: string;
+  }): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #ff6b35; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }
+          .content { background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; }
+          .stats-box { background-color: white; padding: 15px; margin: 15px 0; border-left: 4px solid #ff6b35; }
+          .stat-item { display: flex; justify-content: space-between; margin: 10px 0; }
+          .stat-label { font-weight: bold; color: #555; }
+          .stat-value { color: #ff6b35; font-weight: bold; font-size: 18px; }
+          .button { display: inline-block; padding: 12px 24px; background-color: #ff6b35; color: white; text-decoration: none; border-radius: 5px; margin: 15px 0; }
+          .footer { text-align: center; padding: 20px; color: #777; font-size: 12px; }
+          .alert { background-color: #fff3cd; border: 1px solid #ffc107; padding: 12px; margin: 15px 0; border-radius: 4px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🔔 Expired Bookings Alert</h1>
+          </div>
+          <div class="content">
+            <p>Hi ${data.adminName},</p>
+
+            <div class="alert">
+              <strong>⚠️ Automatic Cleanup Report</strong><br>
+              The system has automatically cleaned up expired bookings that were created more than 24 hours ago with pending payments.
+            </div>
+
+            <div class="stats-box">
+              <h3>Cleanup Summary</h3>
+              <div class="stat-item">
+                <span class="stat-label">Property Bookings Archived:</span>
+                <span class="stat-value">${data.propertyBookingsArchived}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Tour Bookings Archived:</span>
+                <span class="stat-value">${data.tourBookingsArchived}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label"><strong>Total Archived:</strong></span>
+                <span class="stat-value">${data.totalArchived}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Bookings Removed:</span>
+                <span class="stat-value">${data.totalRemoved}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Timestamp:</span>
+                <span style="color: #666;">${new Date(data.timestamp).toLocaleString()}</span>
+              </div>
+            </div>
+
+            <h3>📊 What This Means</h3>
+            <ul>
+              <li><strong>Archived Bookings:</strong> All booking data has been saved to the archive for lead tracking</li>
+              <li><strong>Lead Opportunities:</strong> These are potential customers who showed interest but didn't complete payment</li>
+              <li><strong>Next Steps:</strong> Review the archived bookings to identify follow-up opportunities</li>
+            </ul>
+
+            <div style="text-align: center;">
+              <a href="${process.env.ADMIN_PANEL_URL || 'http://localhost:3000'}/admin/booking-leads" class="button">
+                View Booking Leads
+              </a>
+            </div>
+
+            <p style="margin-top: 20px; color: #666; font-size: 14px;">
+              <strong>Note:</strong> The original bookings have been deleted to free up inventory, but all customer contact information and booking details are preserved in the archive for lead generation purposes.
+            </p>
+          </div>
+          <div class="footer">
+            <p>This is an automated notification from the Jambolush Booking System</p>
+            <p>&copy; ${new Date().getFullYear()} Jambolush. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private buildExpiredBookingsTextContent(data: {
+    adminName: string;
+    propertyBookingsArchived: number;
+    tourBookingsArchived: number;
+    totalArchived: number;
+    totalRemoved: number;
+    timestamp: string;
+  }): string {
+    return `
+      EXPIRED BOOKINGS ALERT
+
+      Hi ${data.adminName},
+
+      The system has automatically cleaned up expired bookings that were created more than 24 hours ago with pending payments.
+
+      CLEANUP SUMMARY
+      ================
+      Property Bookings Archived: ${data.propertyBookingsArchived}
+      Tour Bookings Archived: ${data.tourBookingsArchived}
+      Total Archived: ${data.totalArchived}
+      Bookings Removed: ${data.totalRemoved}
+      Timestamp: ${new Date(data.timestamp).toLocaleString()}
+
+      WHAT THIS MEANS
+      ===============
+      - Archived Bookings: All booking data has been saved to the archive for lead tracking
+      - Lead Opportunities: These are potential customers who showed interest but didn't complete payment
+      - Next Steps: Review the archived bookings to identify follow-up opportunities
+
+      View booking leads at: ${process.env.ADMIN_PANEL_URL || 'http://localhost:3000'}/admin/booking-leads
+
+      NOTE: The original bookings have been deleted to free up inventory, but all customer contact information
+      and booking details are preserved in the archive for lead generation purposes.
+
+      ---
+      This is an automated notification from the Jambolush Booking System
+      © ${new Date().getFullYear()} Jambolush. All rights reserved.
     `.trim();
   }
 }

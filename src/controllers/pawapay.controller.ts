@@ -3,7 +3,6 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { pawaPayService } from '../services/pawapay.service';
-import { logger } from '../utils/logger';
 import {
   DepositRequest,
   PayoutRequest,
@@ -15,6 +14,50 @@ import {
 const prisma = new PrismaClient();
 
 export class PawaPayController {
+  // ==================== HELPER METHOD ====================
+
+  /**
+   * Builds the metadata array in the format required by PawaPay.
+   * This centralizes logic to ensure consistency and prevent duplicate keys.
+   * @param baseMetadata - The metadata object from the request body.
+   * @param priorityMetadata - Higher-priority key-value pairs (like userId) that will overwrite base values.
+   * @returns A formatted array for the PawaPay API request.
+   */
+  private _buildMetadataArray(
+    baseMetadata?: { [key: string]: any },
+    priorityMetadata?: { [key: string]: any }
+  ): { [key: string]: any }[] {
+    const metadataMap: { [key: string]: string } = {};
+
+    // 1. Add base metadata from the request body's nested object first
+    if (baseMetadata) {
+      for (const [key, value] of Object.entries(baseMetadata)) {
+        metadataMap[key] = String(value);
+      }
+    }
+
+    // 2. Add/overwrite with priority metadata to give them precedence
+    if (priorityMetadata) {
+      for (const [key, value] of Object.entries(priorityMetadata)) {
+        // Ensure we don't add null or undefined values
+        if (value !== undefined && value !== null) {
+          metadataMap[key] = String(value);
+        }
+      }
+    }
+
+    // 3. Convert the unique map into the PawaPay-required array format
+    return Object.entries(metadataMap).map(([key, value]) => {
+      const isPII = key.toLowerCase() === 'userid' || key.toLowerCase().includes('customer');
+      const entry: { [key: string]: any } = { [key]: value };
+
+      if (isPII) {
+        entry.isPII = true;
+      }
+      return entry;
+    });
+  }
+
   // ==================== DEPOSIT OPERATIONS ====================
 
   /**
@@ -23,16 +66,7 @@ export class PawaPayController {
   async initiateDeposit(req: Request, res: Response): Promise<void> {
     try {
       const userId = (req as any).user?.id;
-      const {
-        amount,
-        currency,
-        phoneNumber,
-        provider,
-        country,
-        description, // Kept for internal DB logging
-        internalReference,
-        metadata
-      } = req.body;
+      const { amount, currency, phoneNumber, provider, country, description, internalReference, metadata } = req.body;
 
       if (!amount || !currency || !phoneNumber || !provider) {
         res.status(400).json({
@@ -46,29 +80,13 @@ export class PawaPayController {
       const formattedPhone = pawaPayService.formatPhoneNumber(phoneNumber, country === 'RW' ? '250' : undefined);
       const providerCode = pawaPayService.getProviderCode(provider, countryISO3);
       const amountInSmallestUnit = pawaPayService.convertToSmallestUnit(amount, currency);
-      
-      // Generate a compliant UUID for the transaction ID
       const depositId = pawaPayService.generateTransactionId();
 
-      // Convert metadata object to PawaPay array format
-      const metadataArray = [];
-      if (userId) {
-        metadataArray.push({ fieldName: 'userId', fieldValue: userId.toString(), isPII: true });
-      }
-      if (internalReference) {
-        metadataArray.push({ fieldName: 'internalReference', fieldValue: internalReference });
-      }
-      if (metadata) {
-        Object.entries(metadata).forEach(([key, value]) => {
-          metadataArray.push({
-            fieldName: key,
-            fieldValue: String(value),
-            isPII: key.toLowerCase().includes('user') || key.toLowerCase().includes('customer')
-          });
-        });
-      }
+      const metadataArray: any = this._buildMetadataArray(metadata, {
+        clientReferenceId: internalReference,
+        userId: userId
+      });
 
-      // Create a compliant deposit request for PawaPay v2 API
       const depositRequest: DepositRequest = {
         depositId,
         amount: amountInSmallestUnit,
@@ -81,12 +99,10 @@ export class PawaPayController {
           }
         },
         metadata: metadataArray
-        // REMOVED: statementDescription and customerTimestamp are not supported for deposits
       };
 
       const response = await pawaPayService.initiateDeposit(depositRequest);
 
-      // Save transaction to database (we can still save the description for our records)
       await prisma.pawaPayTransaction.create({
         data: {
           userId,
@@ -99,7 +115,7 @@ export class PawaPayController {
           correspondent: providerCode,
           payerPhone: formattedPhone,
           customerTimestamp: response.customerTimestamp ? new Date(response.customerTimestamp) : new Date(),
-          statementDescription: description, // Saving original description internally
+          statementDescription: description,
           requestedAmount: amountInSmallestUnit,
           providerTransactionId: response.correspondentIds?.PROVIDER_TRANSACTION_ID,
           financialTransactionId: response.correspondentIds?.FINANCIAL_TRANSACTION_ID,
@@ -121,14 +137,14 @@ export class PawaPayController {
           currency,
           country: countryISO3,
           provider: providerCode,
+          failureReason: response.failureReason,
           created: response.created
         }
       });
     } catch (error) {
-      logger.error('Error initiating deposit', 'PawaPayController', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to initiate deposit: ' + (error instanceof Error ? error.message : 'Unknown error'),
+        message: 'Failed to initiate deposit',
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
@@ -149,10 +165,8 @@ export class PawaPayController {
         return;
       }
 
-      // Get status from PawaPay
       const response = await pawaPayService.getDepositStatus(depositId);
 
-      // Update database
       await prisma.pawaPayTransaction.update({
         where: { transactionId: depositId },
         data: {
@@ -171,7 +185,6 @@ export class PawaPayController {
         data: response
       });
     } catch (error) {
-      logger.error('Error getting deposit status', 'PawaPayController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to get deposit status',
@@ -211,36 +224,23 @@ export class PawaPayController {
       const formattedPhone = pawaPayService.formatPhoneNumber(phoneNumber, country === 'RW' ? '250' : undefined);
       const providerCode = pawaPayService.getProviderCode(provider, countryISO3);
       const amountInSmallestUnit = pawaPayService.convertToSmallestUnit(amount, currency);
-      
-      // Generate a compliant UUID for the transaction ID
       const payoutId = pawaPayService.generateTransactionId();
 
-      const statementDesc = (description || `Payout from ${process.env.APP_NAME || 'Jambolush'}`)
+      const statementDesc = (description || `Payout from ${process.env.APP_NAME || 'YourApp'}`)
         .substring(0, 22)
         .padEnd(4, ' ');
 
-      const metadataArray = [];
-      if (userId) {
-        metadataArray.push({ fieldName: 'userId', fieldValue: userId.toString(), isPII: true });
-      }
-      if (internalReference) {
-        metadataArray.push({ fieldName: 'internalReference', fieldValue: internalReference });
-      }
-      if (metadata) {
-        Object.entries(metadata).forEach(([key, value]) => {
-          metadataArray.push({
-            fieldName: key,
-            fieldValue: String(value),
-            isPII: key.toLowerCase().includes('user') || key.toLowerCase().includes('customer')
-          });
-        });
-      }
+      // Use the centralized helper for consistent metadata handling
+      const metadataArray: any = this._buildMetadataArray(metadata, {
+        clientReferenceId: internalReference,
+        userId: userId
+      });
 
-      // Create a compliant payout request
       const payoutRequest: PayoutRequest = {
         payoutId,
         amount: amountInSmallestUnit,
         currency: currency.toUpperCase(),
+        statementDescription: statementDesc, // Payouts support statementDescription
         recipient: {
           type: 'MMO',
           accountDetails: {
@@ -249,7 +249,6 @@ export class PawaPayController {
           }
         },
         metadata: metadataArray
-        // REMOVED: customerTimestamp is a legacy field
       };
 
       const response = await pawaPayService.initiatePayout(payoutRequest);
@@ -293,10 +292,9 @@ export class PawaPayController {
         }
       });
     } catch (error) {
-      logger.error('Error initiating payout', 'PawaPayController', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to initiate payout: ' + (error instanceof Error ? error.message : 'Unknown error'),
+        message: 'Failed to initiate payout: '+error,
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
@@ -317,10 +315,8 @@ export class PawaPayController {
         return;
       }
 
-      // Get status from PawaPay
       const response = await pawaPayService.getPayoutStatus(payoutId);
 
-      // Update database
       await prisma.pawaPayTransaction.update({
         where: { transactionId: payoutId },
         data: {
@@ -339,7 +335,6 @@ export class PawaPayController {
         data: response
       });
     } catch (error) {
-      logger.error('Error getting payout status', 'PawaPayController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to get payout status',
@@ -366,34 +361,25 @@ export class PawaPayController {
         return;
       }
       
-      // Generate a compliant UUID for the bulk transaction ID
       const bulkPayoutId = pawaPayService.generateTransactionId();
 
-      // Prepare payout requests
       const payoutRequests: PayoutRequest[] = payouts.map((payout: any) => {
+        const countryISO3 = pawaPayService.convertToISO3CountryCode(payout.country || 'RW');
         const formattedPhone = pawaPayService.formatPhoneNumber(payout.phoneNumber, payout.country === 'RW' ? '250' : undefined);
-        const providerCode = pawaPayService.getProviderCode(payout.provider, payout.country || 'RW');
+        const providerCode = pawaPayService.getProviderCode(payout.provider, countryISO3);
         const amountInSmallestUnit = pawaPayService.convertToSmallestUnit(payout.amount, payout.currency);
         const payoutId = pawaPayService.generateTransactionId();
 
-        // --- METADATA CORRECTION: Must be an array of objects ---
-        const metadataArray = [];
-        if (userId) {
-          metadataArray.push({ fieldName: 'userId', fieldValue: String(userId), isPII: true });
-        }
-        if (bulkPayoutId) {
-          metadataArray.push({ fieldName: 'bulkPayoutId', fieldValue: bulkPayoutId });
-        }
-        if (payout.metadata) {
-          Object.entries(payout.metadata).forEach(([key, value]) => {
-            metadataArray.push({
-              fieldName: key,
-              fieldValue: String(value),
-              isPII: key.toLowerCase().includes('user') || key.toLowerCase().includes('customer')
-            });
-          });
-        }
-        // --- END CORRECTION ---
+        // Use the centralized helper for each payout in the bulk request
+        const metadataArray: any = this._buildMetadataArray(payout.metadata, {
+          clientReferenceId: payout.internalReference,
+          userId: userId, // The user who initiated the bulk job
+          bulkPayoutId: bulkPayoutId, // Link to the parent bulk operation
+        });
+        
+        const statementDesc = (payout.description || description || `Bulk payout`)
+          .substring(0, 22)
+          .padEnd(4, ' ');
 
         return {
           payoutId,
@@ -406,9 +392,8 @@ export class PawaPayController {
               provider: providerCode
             }
           },
-          statementDescription: payout.description || `Bulk payout from ${process.env.APP_NAME || 'Jambolush'}`,
+          statementDescription: statementDesc,
           metadata: metadataArray,
-          // REMOVED: customerTimestamp
         };
       });
       
@@ -475,10 +460,9 @@ export class PawaPayController {
         }
       });
     } catch (error) {
-      logger.error('Error initiating bulk payout', 'PawaPayController', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to initiate bulk payout: ' + (error instanceof Error ? error.message : 'Unknown error'),
+        message: 'Failed to initiate bulk payout',
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
@@ -502,7 +486,6 @@ export class PawaPayController {
         return;
       }
 
-      // Get original deposit
       const deposit = await prisma.pawaPayTransaction.findUnique({
         where: { transactionId: depositId }
       });
@@ -515,23 +498,17 @@ export class PawaPayController {
         return;
       }
 
-      // Use deposit amount if not specified
       const refundAmount = amount ? pawaPayService.convertToSmallestUnit(amount, deposit.currency) : deposit.amount;
-
-      // Generate unique refund ID
       const refundId = pawaPayService.generateTransactionId();
 
-      // Create refund request
       const refundRequest: RefundRequest = {
         refundId,
         depositId,
         amount: refundAmount
       };
 
-      // Initiate refund with PawaPay
       const response = await pawaPayService.initiateRefund(refundRequest);
 
-      // Save transaction to database
       await prisma.pawaPayTransaction.create({
         data: {
           userId,
@@ -567,7 +544,6 @@ export class PawaPayController {
         }
       });
     } catch (error) {
-      logger.error('Error initiating refund', 'PawaPayController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to initiate refund',
@@ -591,10 +567,8 @@ export class PawaPayController {
         return;
       }
 
-      // Get status from PawaPay
       const response = await pawaPayService.getRefundStatus(refundId);
 
-      // Update database
       await prisma.pawaPayTransaction.update({
         where: { transactionId: refundId },
         data: {
@@ -613,7 +587,6 @@ export class PawaPayController {
         data: response
       });
     } catch (error) {
-      logger.error('Error getting refund status', 'PawaPayController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to get refund status',
@@ -630,7 +603,6 @@ export class PawaPayController {
   async getActiveConfiguration(req: Request, res: Response): Promise<void> {
     try {
       const forceRefresh = req.query.refresh === 'true';
-
       const config = await pawaPayService.getActiveConfiguration(forceRefresh);
 
       res.status(200).json({
@@ -638,10 +610,9 @@ export class PawaPayController {
         data: config
       });
     } catch (error) {
-      logger.error('Error getting active configuration', 'PawaPayController', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to get active configuration' + error,
+        message: 'Failed to get active configuration',
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
@@ -669,10 +640,9 @@ export class PawaPayController {
         data: providers
       });
     } catch (error) {
-      logger.error('Error getting available providers', 'PawaPayController', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to get available providers' + error,
+        message: 'Failed to get available providers',
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
@@ -725,7 +695,6 @@ export class PawaPayController {
         }
       });
     } catch (error) {
-      logger.error('Error getting transaction history', 'PawaPayController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to get transaction history',
@@ -757,7 +726,6 @@ export class PawaPayController {
         message: success ? 'Callback resent successfully' : 'Failed to resend callback'
       });
     } catch (error) {
-      logger.error('Error resending callback', 'PawaPayController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to resend callback',
@@ -815,7 +783,6 @@ export class PawaPayController {
         }
       });
     } catch (error) {
-      logger.error('Error getting transaction stats', 'PawaPayController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to get transaction statistics',
