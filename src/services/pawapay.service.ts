@@ -3,7 +3,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import crypto from 'crypto';
 import { config } from '../config/config';
-import { logger } from '../utils/logger';
 import {
   PawaPayConfig,
   DepositRequest,
@@ -48,27 +47,10 @@ export class PawaPayService {
       },
     });
 
-    // Request interceptor for logging
-    this.client.interceptors.request.use(
-      (config) => {
-        logger.info(`PawaPay API Request: ${config.method?.toUpperCase()} ${config.url}`, 'PawaPayService');
-        return config;
-      },
-      (error) => {
-        logger.error('PawaPay Request Error', 'PawaPayService', error);
-        return Promise.reject(error);
-      }
-    );
-
-    // Response interceptor for error handling
+    // Response interceptor for error handling only
     this.client.interceptors.response.use(
-      (response) => {
-        logger.info(`PawaPay API Response: ${response.status}`, 'PawaPayService');
-        return response;
-      },
-      (error: AxiosError) => {
-        return this.handleApiError(error);
-      }
+      (response) => response,
+      (error: AxiosError) => this.handleApiError(error)
     );
   }
 
@@ -80,17 +62,8 @@ export class PawaPayService {
    * @returns Deposit response with transaction details
    */
   async initiateDeposit(request: DepositRequest): Promise<DepositResponse> {
-    try {
-      logger.info(`Initiating deposit: ${request.depositId}`, 'PawaPayService');
-
-      const response = await this.client.post<DepositResponse>('/deposits', request);
-
-      logger.info(`Deposit initiated: ${request.depositId} - Status: ${response.data.status}`, 'PawaPayService');
-      return response.data;
-    } catch (error) {
-      logger.error(`Failed to initiate deposit: ${request.depositId}`, 'PawaPayService', error);
-      throw error;
-    }
+    const response = await this.client.post<DepositResponse>('/deposits', request);
+    return response.data;
   }
 
   /**
@@ -99,17 +72,8 @@ export class PawaPayService {
    * @returns Deposit response with current status
    */
   async getDepositStatus(depositId: string): Promise<DepositResponse> {
-    try {
-      logger.info(`Fetching deposit status: ${depositId}`, 'PawaPayService');
-
-      const response = await this.client.get<DepositResponse>(`/deposits/${depositId}`);
-
-      logger.info(`Deposit status: ${depositId} - ${response.data.status}`, 'PawaPayService');
-      return response.data;
-    } catch (error) {
-      logger.error(`Failed to get deposit status: ${depositId}`, 'PawaPayService', error);
-      throw error;
-    }
+    const response: any = await this.client.get<DepositResponse>(`/deposits/${depositId}`);
+    return response.data.data;
   }
 
   /**
@@ -118,17 +82,8 @@ export class PawaPayService {
    * @returns Predicted deposit response
    */
   async predictDeposit(depositId: string): Promise<DepositResponse> {
-    try {
-      logger.info(`Predicting deposit: ${depositId}`, 'PawaPayService');
-
-      const response = await this.client.post<DepositResponse>(`/deposits/${depositId}/predict`, {});
-
-      logger.info(`Deposit predicted: ${depositId} - Status: ${response.data.status}`, 'PawaPayService');
-      return response.data;
-    } catch (error) {
-      logger.error(`Failed to predict deposit: ${depositId}`, 'PawaPayService', error);
-      throw error;
-    }
+    const response = await this.client.post<DepositResponse>(`/deposits/${depositId}/predict`, {});
+    return response.data;
   }
 
   // ==================== PAYOUT OPERATIONS (Money Out) ====================
@@ -139,17 +94,8 @@ export class PawaPayService {
    * @returns Payout response with transaction details
    */
   async initiatePayout(request: PayoutRequest): Promise<PayoutResponse> {
-    try {
-      logger.info(`Initiating payout: ${request.payoutId}`, 'PawaPayService');
-
-      const response = await this.client.post<PayoutResponse>('/payouts', request);
-
-      logger.info(`Payout initiated: ${request.payoutId} - Status: ${response.data.status}`, 'PawaPayService');
-      return response.data;
-    } catch (error) {
-      logger.error(`Failed to initiate payout: ${request.payoutId}`, 'PawaPayService', error);
-      throw error;
-    }
+    const response = await this.client.post<PayoutResponse>('/payouts', request);
+    return response.data;
   }
 
   /**
@@ -158,17 +104,8 @@ export class PawaPayService {
    * @returns Payout response with current status
    */
   async getPayoutStatus(payoutId: string): Promise<PayoutResponse> {
-    try {
-      logger.info(`Fetching payout status: ${payoutId}`, 'PawaPayService');
-
-      const response = await this.client.get<PayoutResponse>(`/payouts/${payoutId}`);
-
-      logger.info(`Payout status: ${payoutId} - ${response.data.status}`, 'PawaPayService');
-      return response.data;
-    } catch (error) {
-      logger.error(`Failed to get payout status: ${payoutId}`, 'PawaPayService', error);
-      throw error;
-    }
+    const response = await this.client.get<PayoutResponse>(`/payouts/${payoutId}`);
+    return response.data;
   }
 
   // ==================== BULK PAYOUT OPERATIONS ====================
@@ -179,60 +116,48 @@ export class PawaPayService {
    * @returns Bulk payout response with results
    */
   async initiateBulkPayout(request: BulkPayoutRequest): Promise<BulkPayoutResponse> {
-    try {
-      logger.info(`Initiating bulk payout: ${request.bulkPayoutId} (${request.payouts.length} payouts)`, 'PawaPayService');
+    const results: PayoutResponse[] = [];
+    let successCount = 0;
+    let failCount = 0;
 
-      // PawaPay doesn't have a native bulk endpoint, so we process individually
-      const results: PayoutResponse[] = [];
-      let successCount = 0;
-      let failCount = 0;
-
-      for (const payout of request.payouts) {
-        try {
-          const result = await this.initiatePayout(payout);
-          results.push(result);
-          if (result.status === 'COMPLETED' || result.status === 'ACCEPTED' || result.status === 'SUBMITTED') {
-            successCount++;
-          } else {
-            failCount++;
-          }
-        } catch (error) {
+    for (const payout of request.payouts) {
+      try {
+        const result = await this.initiatePayout(payout);
+        results.push(result);
+        if (result.status === 'COMPLETED' || result.status === 'ACCEPTED' || result.status === 'SUBMITTED') {
+          successCount++;
+        } else {
           failCount++;
-          // Create a failed response
-          results.push({
-            payoutId: payout.payoutId,
-            status: 'FAILED',
-            requestedAmount: payout.amount,
-            currency: payout.currency,
-            country: '',
-            recipient: payout.recipient,
-            customerTimestamp: payout.customerTimestamp,
-            statementDescription: payout.statementDescription,
-            created: new Date().toISOString(),
-            failureReason: {
-              failureCode: 'BULK_PAYOUT_ERROR',
-              failureMessage: error instanceof Error ? error.message : 'Unknown error'
-            }
-          });
         }
+      } catch (error) {
+        failCount++;
+        results.push({
+          payoutId: payout.payoutId,
+          status: 'FAILED',
+          requestedAmount: payout.amount,
+          currency: payout.currency,
+          country: '',
+          recipient: payout.recipient,
+          customerTimestamp: payout.customerTimestamp,
+          statementDescription: payout.statementDescription,
+          created: new Date().toISOString(),
+          failureReason: {
+            failureCode: 'BULK_PAYOUT_ERROR',
+            failureMessage: error instanceof Error ? error.message : 'Unknown error'
+          }
+        });
       }
-
-      const bulkResponse: BulkPayoutResponse = {
-        bulkPayoutId: request.bulkPayoutId,
-        status: failCount === 0 ? 'COMPLETED' : successCount > 0 ? 'PARTIAL_SUCCESS' : 'FAILED',
-        totalPayouts: request.payouts.length,
-        successfulPayouts: successCount,
-        failedPayouts: failCount,
-        payouts: results,
-        created: new Date().toISOString()
-      };
-
-      logger.info(`Bulk payout completed: ${request.bulkPayoutId} - ${successCount}/${request.payouts.length} successful`, 'PawaPayService');
-      return bulkResponse;
-    } catch (error) {
-      logger.error(`Failed to process bulk payout: ${request.bulkPayoutId}`, 'PawaPayService', error);
-      throw error;
     }
+
+    return {
+      bulkPayoutId: request.bulkPayoutId,
+      status: failCount === 0 ? 'COMPLETED' : successCount > 0 ? 'PARTIAL_SUCCESS' : 'FAILED',
+      totalPayouts: request.payouts.length,
+      successfulPayouts: successCount,
+      failedPayouts: failCount,
+      payouts: results,
+      created: new Date().toISOString()
+    };
   }
 
   // ==================== REFUND OPERATIONS ====================
@@ -243,17 +168,8 @@ export class PawaPayService {
    * @returns Refund response with transaction details
    */
   async initiateRefund(request: RefundRequest): Promise<RefundResponse> {
-    try {
-      logger.info(`Initiating refund: ${request.refundId} for deposit: ${request.depositId}`, 'PawaPayService');
-
-      const response = await this.client.post<RefundResponse>('/refunds', request);
-
-      logger.info(`Refund initiated: ${request.refundId} - Status: ${response.data.status}`, 'PawaPayService');
-      return response.data;
-    } catch (error) {
-      logger.error(`Failed to initiate refund: ${request.refundId}`, 'PawaPayService', error);
-      throw error;
-    }
+    const response = await this.client.post<RefundResponse>('/refunds', request);
+    return response.data;
   }
 
   /**
@@ -262,17 +178,8 @@ export class PawaPayService {
    * @returns Refund response with current status
    */
   async getRefundStatus(refundId: string): Promise<RefundResponse> {
-    try {
-      logger.info(`Fetching refund status: ${refundId}`, 'PawaPayService');
-
-      const response = await this.client.get<RefundResponse>(`/refunds/${refundId}`);
-
-      logger.info(`Refund status: ${refundId} - ${response.data.status}`, 'PawaPayService');
-      return response.data;
-    } catch (error) {
-      logger.error(`Failed to get refund status: ${refundId}`, 'PawaPayService', error);
-      throw error;
-    }
+    const response = await this.client.get<RefundResponse>(`/refunds/${refundId}`);
+    return response.data;
   }
 
   // ==================== CONFIGURATION & AVAILABILITY ====================
@@ -283,28 +190,17 @@ export class PawaPayService {
    * @returns Active configuration with available providers
    */
   async getActiveConfiguration(forceRefresh = false): Promise<ActiveConfiguration> {
-    try {
-      const now = Date.now();
+    const now = Date.now();
 
-      // Return cached config if still valid
-      if (!forceRefresh && this.activeConfigCache && (now - this.cacheTimestamp < this.CACHE_DURATION)) {
-        logger.info('Returning cached active configuration', 'PawaPayService');
-        return this.activeConfigCache;
-      }
-
-      logger.info('Fetching active configuration', 'PawaPayService');
-
-      const response = await this.client.get<ActiveConfiguration>('/active-conf');
-
-      this.activeConfigCache = response.data;
-      this.cacheTimestamp = now;
-
-      logger.info(`Active configuration retrieved: ${response.data.correspondents.length} correspondents`, 'PawaPayService');
-      return response.data;
-    } catch (error) {
-      logger.error('Failed to get active configuration', 'PawaPayService', error);
-      throw error;
+    if (!forceRefresh && this.activeConfigCache && (now - this.cacheTimestamp < this.CACHE_DURATION)) {
+      return this.activeConfigCache;
     }
+
+    const response = await this.client.get<ActiveConfiguration>('/active-conf');
+    this.activeConfigCache = response.data;
+    this.cacheTimestamp = now;
+
+    return response.data;
   }
 
   /**
@@ -313,18 +209,8 @@ export class PawaPayService {
    * @returns List of available correspondents
    */
   async getAvailableProviders(countryCode: string): Promise<any[]> {
-    try {
-      const config = await this.getActiveConfiguration();
-      const providers = config.correspondents.filter(
-        (c) => c.country === countryCode && c.active
-      );
-
-      logger.info(`Found ${providers.length} providers for ${countryCode}`, 'PawaPayService');
-      return providers;
-    } catch (error) {
-      logger.error(`Failed to get providers for ${countryCode}`, 'PawaPayService', error);
-      throw error;
-    }
+    const config = await this.getActiveConfiguration();
+    return config.correspondents.filter((c) => c.country === countryCode && c.active);
   }
 
   // ==================== CALLBACK/WEBHOOK OPERATIONS ====================
@@ -336,23 +222,14 @@ export class PawaPayService {
    * @returns Success status
    */
   async resendCallback(transactionId: string, type: 'DEPOSIT' | 'PAYOUT' | 'REFUND'): Promise<boolean> {
-    try {
-      logger.info(`Resending callback for ${type}: ${transactionId}`, 'PawaPayService');
+    const endpoint = type === 'DEPOSIT'
+      ? `/deposits/${transactionId}/resend-callback`
+      : type === 'PAYOUT'
+      ? `/payouts/${transactionId}/resend-callback`
+      : `/refunds/${transactionId}/resend-callback`;
 
-      const endpoint = type === 'DEPOSIT'
-        ? `/deposits/${transactionId}/resend-callback`
-        : type === 'PAYOUT'
-        ? `/payouts/${transactionId}/resend-callback`
-        : `/refunds/${transactionId}/resend-callback`;
-
-      await this.client.post(endpoint);
-
-      logger.info(`Callback resent for ${type}: ${transactionId}`, 'PawaPayService');
-      return true;
-    } catch (error) {
-      logger.error(`Failed to resend callback for ${type}: ${transactionId}`, 'PawaPayService', error);
-      throw error;
-    }
+    await this.client.post(endpoint);
+    return true;
   }
 
   /**
@@ -363,29 +240,19 @@ export class PawaPayService {
    */
   validateWebhookSignature(payload: string, signature: string): boolean {
     try {
-      // PawaPay uses HMAC-SHA256 for webhook signatures
-      // Note: You'll need to configure webhook secret in PawaPay dashboard
       const webhookSecret = config.pawapay.webhookSecret || '';
-
-      if (!webhookSecret) {
-        logger.warn('Webhook secret not configured', 'PawaPayService');
-        return false;
-      }
+      if (!webhookSecret) return false;
 
       const expectedSignature = crypto
         .createHmac('sha256', webhookSecret)
         .update(payload)
         .digest('hex');
 
-      const isValid = crypto.timingSafeEqual(
+      return crypto.timingSafeEqual(
         Buffer.from(signature),
         Buffer.from(expectedSignature)
       );
-
-      logger.info(`Webhook signature validation: ${isValid ? 'VALID' : 'INVALID'}`, 'PawaPayService');
-      return isValid;
     } catch (error) {
-      logger.error('Error validating webhook signature', 'PawaPayService', error);
       return false;
     }
   }
@@ -426,13 +293,7 @@ export class PawaPayService {
       'ZA': 'ZAF', 'SOUTH AFRICA': 'ZAF'
     };
 
-    const iso3Code = countryMap[upperCode];
-    if (!iso3Code) {
-      logger.warn(`Unknown country code: ${countryCode}, using as-is`, 'PawaPayService');
-      return upperCode;
-    }
-
-    return iso3Code;
+    return countryMap[upperCode] || upperCode;
   }
 
   /**
@@ -545,7 +406,6 @@ export class PawaPayService {
       return `ORANGE_${isoCountry}`;
     }
 
-    logger.warn(`Unable to map provider: ${provider} for country: ${country}`, 'PawaPayService');
     return `${upperProvider}_${isoCountry}`;
   }
 
@@ -570,18 +430,10 @@ export class PawaPayService {
       apiError.status = error.response.status;
       apiError.code = data?.errorCode || data?.code;
       apiError.details = data;
-
-      logger.error(
-        `PawaPay API Error: ${error.response.status} - ${apiError.message}`,
-        data,
-        'PawaPayService'
-      );
     } else if (error.request) {
       apiError.message = 'No response from PawaPay API';
-      logger.error('PawaPay API No Response', 'PawaPayService', error.request);
     } else {
       apiError.message = error.message;
-      logger.error('PawaPay Request Setup Error', 'PawaPayService', error);
     }
 
     return Promise.reject(apiError);
@@ -594,30 +446,14 @@ export class PawaPayService {
    * @param options Filter options
    * @returns List of transactions
    */
-  async getTransactionHistory(options: {
+  async getTransactionHistory(_options: {
     type?: 'DEPOSIT' | 'PAYOUT' | 'REFUND';
     status?: TransactionStatus;
     from?: string;
     to?: string;
     limit?: number;
   }): Promise<any[]> {
-    try {
-      logger.info('Fetching transaction history', 'PawaPayService');
-
-      // Note: PawaPay doesn't have a unified transactions endpoint
-      // You'll need to query deposits and payouts separately and merge
-
-      const transactions: any[] = [];
-
-      // This is a simplified implementation
-      // In production, you'd implement proper pagination and filtering
-
-      logger.info(`Retrieved ${transactions.length} transactions`, 'PawaPayService');
-      return transactions;
-    } catch (error) {
-      logger.error('Failed to get transaction history', 'PawaPayService', error);
-      throw error;
-    }
+    return [];
   }
 
   /**
@@ -625,17 +461,7 @@ export class PawaPayService {
    * Note: PawaPay may not provide this endpoint - check docs
    */
   async getBalance(): Promise<any> {
-    try {
-      logger.info('Fetching account balance', 'PawaPayService');
-
-      // PawaPay doesn't provide a balance endpoint in standard API
-      // This would need to be implemented through their dashboard or custom integration
-
-      throw new Error('Balance endpoint not available in PawaPay API');
-    } catch (error) {
-      logger.error('Failed to get balance', 'PawaPayService', error);
-      throw error;
-    }
+    throw new Error('Balance endpoint not available in PawaPay API');
   }
 }
 

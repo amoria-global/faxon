@@ -1519,3 +1519,83 @@ model PawaPayWebhookLog {
   @@index([createdAt])
   @@map("pawapay_webhook_logs")
 }
+
+// --- BOOKING ARCHIVE MODELS ---
+// Store deleted booking data for admin tracking and lead generation
+model BookingArchive {
+  id                  String    @id @default(cuid())
+  originalBookingId   String
+  propertyId          Int
+  propertyName        String
+  propertyLocation    String
+  guestId             Int
+  guestName           String
+  guestEmail          String
+  guestPhone          String?
+  checkIn             DateTime
+  checkOut            DateTime
+  guests              Int
+  totalPrice          Float
+  message             String?
+  specialRequests     String?
+  status              String
+  paymentStatus       String
+  bookingCreatedAt    DateTime
+  archivedAt          DateTime  @default(now())
+  archiveReason       String
+  adminNotified       Boolean   @default(false)
+  adminNotifiedAt     DateTime?
+  adminNotes          String?
+  leadStatus          String    @default("new")  // new, contacted, qualified, converted, lost
+  contactedAt         DateTime?
+  convertedToBooking  Boolean   @default(false)
+  metadata            Json?
+
+  @@index([propertyId])
+  @@index([guestId])
+  @@index([archivedAt])
+  @@index([adminNotified])
+  @@index([leadStatus])
+  @@index([originalBookingId])
+  @@map("booking_archive")
+}
+
+model TourBookingArchive {
+  id                   String    @id @default(cuid())
+  originalBookingId    String
+  tourId               String
+  tourTitle            String
+  tourLocation         String
+  userId               Int
+  userName             String
+  userEmail            String
+  userPhone            String?
+  tourGuideId          Int
+  scheduleId           String
+  scheduleStartDate    DateTime
+  numberOfParticipants Int
+  participants         Json
+  totalAmount          Float
+  currency             String
+  specialRequests      String?
+  status               String
+  paymentStatus        String
+  bookingCreatedAt     DateTime
+  archivedAt           DateTime  @default(now())
+  archiveReason        String
+  adminNotified        Boolean   @default(false)
+  adminNotifiedAt      DateTime?
+  adminNotes           String?
+  leadStatus           String    @default("new")  // new, contacted, qualified, converted, lost
+  contactedAt          DateTime?
+  convertedToBooking   Boolean   @default(false)
+  metadata             Json?
+
+  @@index([tourId])
+  @@index([userId])
+  @@index([archivedAt])
+  @@index([adminNotified])
+  @@index([leadStatus])
+  @@index([originalBookingId])
+  @@map("tour_booking_archive")
+}

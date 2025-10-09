@@ -19,12 +19,16 @@ import pawaPayCallbackRoutes from './routes/pawapay.callback'; // PawaPay callba
 import kycReminderRoutes from './routes/kyc-reminder.routes'; // NEW
 import bookingCleanupRoutes from './routes/booking-cleanup.routes'; // NEW
 import agentCommissionRoutes from './routes/agent-commission.routes'; // NEW
+import bookingLeadsRoutes from './routes/booking-leads.routes'; // NEW - Booking leads/archive management
 import { ReminderSchedulerService } from './services/reminder-scheduler.service'; // NEW
 import { BookingCleanupSchedulerService } from './services/booking-cleanup-scheduler.service'; // NEW
 import { PesapalService } from './services/pesapal.service';
 import { EmailService } from './services/email.service';
 import { EscrowService } from './services/escrow.service';
 import { StatusPollerService } from './services/status-poller.service';
+import { PawaPayService } from './services/pawapay.service';
+import { XentriPayService } from './services/xentripay.service';
+import unifiedTransactionRoutes from './routes/unified-transaction.routes';
 
 const app = express();
 
@@ -42,40 +46,30 @@ app.use(cors({
     'https://admin.amoriaglobal.com',
     'https://www.admin.amoriaglobal.com',
     'https://amoriaglobal.com',
-    'https://www.amoriaglobal.com'
+    'https://www.amoriaglobal.com',
+    'https://api.pawapay.io',
+    'https://api.sandbox.pawapay.io',
+    'https://pawapay.io',
+    'https://dashboard.pawapay.io'
   ],
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Request logger middleware
-app.use((req, res, next) => {
-  const start = Date.now();
-  console.log(`➡️  [${req.method}] ${req.originalUrl}`);
-  console.log('Headers:', req.headers);
-  if (Object.keys(req.body || {}).length) {
-    console.log('Body:', req.body);
-  }
+// Lightweight request logger (only in development)
+if (process.env.NODE_ENV === 'development') {
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      console.log(`[${req.method}] ${req.originalUrl} - ${res.statusCode} (${duration}ms)`);
+    });
+    next();
+  });
+}
 
-  const oldSend = res.send;
-  res.send = function (data) {
-    const duration = Date.now() - start;
-    console.log(`⬅️  Response to [${req.method}] ${req.originalUrl} (${duration}ms)`);
-    try {
-      console.log('Status:', res.statusCode);
-      console.log('Response:', JSON.parse(data as any));
-    } catch {
-      console.log('Response:', data);
-    }
-    // @ts-ignore
-    return oldSend.apply(res, arguments);
-  };
-
-  next();
-});
-
-// Initialize services BEFORE using them
+// Initialize services
 const pesapalService = new PesapalService({
   consumerKey: config.pesapal.consumerKey,
   consumerSecret: config.pesapal.consumerSecret,
@@ -92,35 +86,35 @@ const pesapalService = new PesapalService({
 const emailService = new EmailService();
 const escrowService = new EscrowService(pesapalService, emailService);
 
-// Initialize status poller
-const statusPoller = new StatusPollerService(pesapalService, escrowService);
+// Initialize PawaPay service
+const pawaPayService = new PawaPayService({
+  apiKey: config.pawapay.apiKey,
+  baseUrl: config.pawapay.baseUrl,
+  environment: config.pawapay.environment
+});
 
-// NEW: Initialize KYC Reminder Scheduler
-const reminderScheduler = new ReminderSchedulerService(2); // Check every 2 minutes
+// Initialize XentriPay service
+const xentriPayService = new XentriPayService({
+  apiKey: config.xentripay.apiKey,
+  baseUrl: config.xentripay.baseUrl,
+  environment: config.xentripay.environment
+});
 
-// NEW: Initialize Booking Cleanup Scheduler
-const bookingCleanupScheduler = new BookingCleanupSchedulerService(6); // Check every 6 hours
+// Initialize status poller with all payment services
+const statusPoller = new StatusPollerService(
+  pesapalService,
+  escrowService,
+  pawaPayService,
+  xentriPayService
+);
 
-// Start polling if enabled
-if (process.env.ENABLE_STATUS_POLLING !== 'false') {
-  statusPoller.startPolling();
-}
+const reminderScheduler = new ReminderSchedulerService(2);
+const bookingCleanupScheduler = new BookingCleanupSchedulerService(6);
 
-// NEW: Start KYC reminder scheduler if enabled
-if (process.env.ENABLE_KYC_REMINDERS !== 'false') {
-  reminderScheduler.start();
-  console.log('✅ KYC Reminder Scheduler initialized and running');
-} else {
-  console.log('⏸️  KYC Reminder Scheduler disabled by configuration');
-}
-
-// NEW: Start Booking Cleanup scheduler if enabled
-if (process.env.ENABLE_BOOKING_CLEANUP !== 'false') {
-  bookingCleanupScheduler.start();
-  console.log('✅ Booking Cleanup Scheduler initialized and running');
-} else {
-  console.log('⏸️  Booking Cleanup Scheduler disabled by configuration');
-}
+// Start schedulers if enabled
+if (process.env.ENABLE_STATUS_POLLING !== 'false') statusPoller.startPolling();
+if (process.env.ENABLE_KYC_REMINDERS !== 'false') reminderScheduler.start();
+if (process.env.ENABLE_BOOKING_CLEANUP !== 'false') bookingCleanupScheduler.start();
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -144,6 +138,8 @@ app.use("/api/payments/xentripay", XentriPayRoutes);
 app.use('/api/kyc-reminders', kycReminderRoutes); // NEW: KYC reminder routes
 app.use('/api/booking-cleanup', bookingCleanupRoutes); // NEW: Booking cleanup routes
 app.use('/api', agentCommissionRoutes); // NEW: Agent commission and owner management routes
+app.use('/api/admin/booking-leads', bookingLeadsRoutes); // NEW: Booking leads/archive management (admin only)
+app.use('/api/transactions', unifiedTransactionRoutes); // NEW: Unified transaction routes (all providers)
 
 // Health check
 app.get('/health', (req, res) => {
@@ -179,21 +175,9 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 // Graceful shutdown
 const gracefulShutdown = () => {
-  console.log('\n🛑 Received shutdown signal, cleaning up...');
-
-  // Stop schedulers
-  if (process.env.ENABLE_STATUS_POLLING !== 'false') {
-    // statusPoller.stop(); // If StatusPollerService has a stop method
-  }
-
-  if (process.env.ENABLE_KYC_REMINDERS !== 'false') {
-    reminderScheduler.stop();
-  }
-
-  if (process.env.ENABLE_BOOKING_CLEANUP !== 'false') {
-    bookingCleanupScheduler.stop();
-  }
-
+  console.log('Shutting down gracefully...');
+  if (process.env.ENABLE_KYC_REMINDERS !== 'false') reminderScheduler.stop();
+  if (process.env.ENABLE_BOOKING_CLEANUP !== 'false') bookingCleanupScheduler.stop();
   process.exit(0);
 };
 
@@ -202,13 +186,7 @@ process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 app.listen(config.port, () => {
-  console.log(`🚀 Server running on port ${config.port}`);
-  console.log(`🌍 Environment: ${config.pesapal.environment}`);
-  console.log(`💰 Default currency: ${config.escrow.defaultCurrency}`);
-  console.log(`🔒 Escrow enabled: ${config.features.enableEscrowPayments}`);
-  console.log(`📧 KYC Reminders: ${process.env.ENABLE_KYC_REMINDERS !== 'false' ? 'ENABLED' : 'DISABLED'}`);
-  console.log(`⏰ Status Poller: ${process.env.ENABLE_STATUS_POLLING !== 'false' ? 'ENABLED' : 'DISABLED'}`);
-  console.log(`🧹 Booking Cleanup: ${process.env.ENABLE_BOOKING_CLEANUP !== 'false' ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`Server running on port ${config.port} [${config.pesapal.environment}]`);
 });
 
 export default app;

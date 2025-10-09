@@ -65,7 +65,7 @@ export const config = {
 
   // PawaPay API Configuration (Mobile Money - Pan-African)
   pawapay: {
-    apiKey: process.env.PAWAPAY_API_KEY! || "eyJraWQiOiIxIiwiYWxnIjoiRVMyNTYifQ.eyJ0dCI6IkFBVCIsInN1YiI6IjEwNjU1IiwibWF2IjoiMSIsImV4cCI6MjA3NTMyMzA4MSwiaWF0IjoxNzU5NzkwMjgxLCJwbSI6IkRBRixQQUYiLCJqdGkiOiJlYzk3MjRiZC03ZTBiLTQ3ODMtYjJlYS02NDkzNDI5Y2ZlZmQifQ.XPOiMKncSbCzfPlXAqrrRcLJkDko6Y87eAllWTDX2U55VPwj28p3V4jET-zJ76AJmHs-XIzlHtroVGB8tGH2NQ",
+    apiKey: process.env.PAWAPAY_API_KEY!,
     baseUrl: process.env.PAWAPAY_BASE_URL || (process.env.PAWAPAY_ENVIRONMENT === 'production' ? 'https://api.pawapay.io/v2' : 'https://api.sandbox.pawapay.io/v2'),
     environment: (process.env.PAWAPAY_ENVIRONMENT || 'sandbox') as 'production' | 'sandbox',
     webhookSecret: process.env.PAWAPAY_WEBHOOK_SECRET || '',
