@@ -3,14 +3,14 @@ import { Router } from 'express';
 import { PropertyController } from '../controllers/property.controller';
 import { EnhancedPropertyController } from '../controllers/enhanced-property.controller';
 import { authenticate } from '../middleware/auth.middleware';
-import { 
-  validateProperty, 
-  validateBookingUpdate, 
+import {
+  validateProperty,
+  validateBookingUpdate,
   validateHost,
   validateAgent,
   validateAgentPropertyAccess,
-  validateAgentPropertyEdit, 
-  validateAgentAsHost
+  validateAgentPropertyEdit
+  // validateAgentAsHost - REMOVED: Agents can no longer own properties
 } from '../middleware/property.middleware';
 
 const router = Router();
@@ -160,19 +160,19 @@ router.get('/agent/properties/:id/reviews', validateAgent, validateAgentProperty
 router.get('/agent/reviews/summary', validateAgent, propertyController.getAgentReviewsSummary);
 
 // --- AGENT AS HOST ROUTES ---
-// Agent's own property management
-router.post('/agent/own/properties', validateAgent, validateAgentAsHost, validateProperty, propertyController.createAgentOwnProperty);
-router.get('/agent/own/properties', validateAgent, propertyController.getAgentOwnProperties);
-router.get('/agent/own/properties/:id/bookings', validateAgent, propertyController.getAgentOwnPropertyBookings);
-router.get('/agent/own/guests', validateAgent, propertyController.getAgentOwnPropertyGuests);
+// DISABLED: Agents cannot own properties, they can only manage client properties
+// router.post('/agent/own/properties', validateAgent, validateAgentAsHost, validateProperty, propertyController.createAgentOwnProperty);
+// router.get('/agent/own/properties', validateAgent, propertyController.getAgentOwnProperties);
+// router.get('/agent/own/properties/:id/bookings', validateAgent, propertyController.getAgentOwnPropertyBookings);
+// router.get('/agent/own/guests', validateAgent, propertyController.getAgentOwnPropertyGuests);
 
-// Unified agent property management
+// Unified agent property management (now only returns managed properties)
 router.get('/agent/all-properties', validateAgent, propertyController.getAllAgentProperties);
 
-// Agent's own property editing (full access like a host)
-router.put('/agent/own/properties/:id', validateAgent, propertyController.updateProperty);
-router.delete('/agent/own/properties/:id', validateAgent, propertyController.deleteProperty);
-router.post('/agent/own/properties/:id/images', validateAgent, propertyController.uploadPropertyImages);
+// DISABLED: Agent's own property editing (agents cannot own properties)
+// router.put('/agent/own/properties/:id', validateAgent, propertyController.updateProperty);
+// router.delete('/agent/own/properties/:id', validateAgent, propertyController.deleteProperty);
+// router.post('/agent/own/properties/:id/images', validateAgent, propertyController.uploadPropertyImages);
 
 // --- ENHANCED AGENT KPI ROUTES ---
 router.get('/agent/dashboard/enhanced', validateAgent, propertyController.getEnhancedAgentDashboard);

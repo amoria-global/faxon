@@ -5663,4 +5663,102 @@ export class AdminService {
       withdrawals
     };
   }
+
+  // ===================================================================
+  //                      PUBLIC METHODS
+  // ===================================================================
+
+  /**
+   * Track visitor analytics
+   */
+  async trackVisitor(visitorData: any) {
+    try {
+      const visitor = await prisma.visitorTracking.create({
+        data: {
+          ipAddress: visitorData.ipAddress,
+          userAgent: visitorData.userAgent,
+          pageUrl: visitorData.pageUrl,
+          referrer: visitorData.referrer,
+          sessionId: visitorData.sessionId,
+          location: visitorData.location || null,
+          country: visitorData.country,
+          city: visitorData.city,
+          region: visitorData.region,
+          timezone: visitorData.timezone
+        }
+      });
+
+      return visitor;
+    } catch (error: any) {
+      console.error('Error tracking visitor:', error);
+      throw new Error(`Failed to track visitor: ${error.message}`);
+    }
+  }
+
+  /**
+   * Subscribe email to newsletter
+   */
+  async subscribeNewsletter(email: string) {
+    try {
+      // Check if email already exists
+      const existing = await prisma.newsletterSubscription.findUnique({
+        where: { email }
+      });
+
+      if (existing) {
+        // If unsubscribed, resubscribe
+        if (!existing.isSubscribed) {
+          const updated = await prisma.newsletterSubscription.update({
+            where: { email },
+            data: {
+              isSubscribed: true,
+              subscribedAt: new Date(),
+              unsubscribedAt: null
+            }
+          });
+          return updated;
+        }
+
+        // Already subscribed
+        return existing;
+      }
+
+      // Create new subscription
+      const subscription = await prisma.newsletterSubscription.create({
+        data: {
+          email,
+          isSubscribed: true
+        }
+      });
+
+      return subscription;
+    } catch (error: any) {
+      console.error('Error subscribing to newsletter:', error);
+      throw new Error(`Failed to subscribe to newsletter: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create contact message
+   */
+  async createContactMessage(contactData: any) {
+    try {
+      const contact = await prisma.contactMessage.create({
+        data: {
+          userId: contactData.userId,
+          name: contactData.name,
+          email: contactData.email,
+          phoneNumber: contactData.phoneNumber,
+          subject: contactData.subject,
+          message: contactData.message,
+          isResolved: false
+        }
+      });
+
+      return contact;
+    } catch (error: any) {
+      console.error('Error creating contact message:', error);
+      throw new Error(`Failed to create contact message: ${error.message}`);
+    }
+  }
 }

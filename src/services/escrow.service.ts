@@ -997,14 +997,14 @@ export class EscrowService {
           transactionReference
         });
 
-        // Send booking confirmation email
+        // Send booking confirmation email (show USD amount as that's what bookings are stored in)
         this.emailService.sendBookingPaymentConfirmationEmail({
           userEmail: fullBooking.guest.email,
           userName: fullBooking.guest.firstName || 'Guest',
           bookingId: booking.id,
           propertyName: fullBooking.property.name,
           amount: booking.totalPrice,
-          currency: 'RWF',
+          currency: 'USD', // Bookings are stored in USD
           checkIn: fullBooking.checkIn,
           checkOut: fullBooking.checkOut,
           reference: transactionReference

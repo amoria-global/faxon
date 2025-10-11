@@ -2598,4 +2598,130 @@ export class AdminController {
       next(error);
     }
   }
+
+  // ===================================================================
+  //                      PUBLIC METHODS
+  // ===================================================================
+
+  // Track visitor analytics (public endpoint)
+  async trackVisitor(req: Request, res: Response, next: NextFunction) {
+    try {
+      const visitorData = {
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string || req.connection.remoteAddress,
+        userAgent: req.headers['user-agent'],
+        pageUrl: req.body.pageUrl,
+        referrer: req.body.referrer || req.headers['referer'],
+        sessionId: req.body.sessionId,
+        location: req.body.location,
+        country: req.body.country,
+        city: req.body.city,
+        region: req.body.region,
+        timezone: req.body.timezone
+      };
+
+      const result = await adminService.trackVisitor(visitorData);
+
+      res.status(201).json({
+        success: true,
+        data: result,
+        message: 'Visitor tracked successfully',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  // Subscribe to newsletter (public endpoint)
+  async subscribeNewsletter(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'MISSING_EMAIL',
+            message: 'Email is required'
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_EMAIL',
+            message: 'Invalid email format'
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const result = await adminService.subscribeNewsletter(email);
+
+      res.status(201).json({
+        success: true,
+        data: result,
+        message: 'Successfully subscribed to newsletter',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  // Submit contact message (public endpoint)
+  async submitContactMessage(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { name, email, phoneNumber, subject, message, userId } = req.body;
+
+      if (!name || !email || !message) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'MISSING_REQUIRED_FIELDS',
+            message: 'Name, email, and message are required'
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_EMAIL',
+            message: 'Invalid email format'
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const contactData = {
+        userId: userId || null,
+        name,
+        email,
+        phoneNumber,
+        subject,
+        message
+      };
+
+      const result = await adminService.createContactMessage(contactData);
+
+      res.status(201).json({
+        success: true,
+        data: result,
+        message: 'Contact message submitted successfully',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
 }

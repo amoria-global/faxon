@@ -450,15 +450,12 @@ export const validateAgentPropertyAccess = async (req: AuthenticatedRequest, res
       return;
     }
 
-    // Check 1: Direct ownership (agent owns the property)
-    const directOwnership = await prisma.property.findFirst({
-      where: {
-        id: propertyId,
-        hostId: agentId
-      }
-    });
+    // DISABLED: Check 1 - Direct ownership removed (agents can no longer own properties)
+    // const directOwnership = await prisma.property.findFirst({
+    //   where: { id: propertyId, hostId: agentId }
+    // });
 
-    // Check 2: Client relationship (agent manages for client)
+    // Check: Client relationship only (agent manages for client)
     const property = await prisma.property.findUnique({
       where: { id: propertyId },
       select: { hostId: true }
@@ -479,17 +476,17 @@ export const validateAgentPropertyAccess = async (req: AuthenticatedRequest, res
       }
     }
 
-    if (!directOwnership && !clientProperty) {
+    if (!clientProperty) {
       res.status(403).json({
         success: false,
-        message: 'Access denied. Property not owned by you or associated with your clients.'
+        message: 'Access denied. Property not associated with your clients.'
       });
       return;
     }
 
     // Add property ownership info to request for downstream use
     (req as any).propertyOwnership = {
-      isDirectOwner: !!directOwnership,
+      isDirectOwner: false, // Always false now - agents cannot own properties
       isClientProperty: !!clientProperty,
       propertyId
     };
@@ -504,7 +501,8 @@ export const validateAgentPropertyAccess = async (req: AuthenticatedRequest, res
   }
 };
 
-// NEW: Validate agent can create properties directly
+// DISABLED: Agents can no longer own properties directly
+// They can only manage properties on behalf of clients
 export const validateAgentAsHost = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
   if (!req.user) {
     res.status(401).json({
@@ -514,11 +512,12 @@ export const validateAgentAsHost = (req: AuthenticatedRequest, res: Response, ne
     return;
   }
 
-  // Check if user type is agent (and allow them to act as host)
-  if (req.user.userType && !['agent', 'host'].includes(req.user.userType)) {
+  // DISABLED: Agents cannot act as hosts anymore
+  // Only hosts can create/own properties
+  if (req.user.userType && req.user.userType !== 'host') {
     res.status(403).json({
       success: false,
-      message: 'Host or Agent access required'
+      message: 'Host access required. Agents cannot own properties directly.'
     });
     return;
   }

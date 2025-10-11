@@ -76,20 +76,6 @@ router.post('/admin/users/:id/reset-password', adminOnly, authController.adminRe
 router.post('/kyc/submit', authenticate, authController.submitKYC);
 router.get('/kyc/status', authenticate, authController.getKYCStatus);
 
-// --- ROLE-BASED ROUTES (for future use) ---
-// Example: Host-specific endpoints
-router.get('/host/properties', authorize('host', 'admin'), (req, res) => {
-  res.json({ message: 'Host properties endpoint - implement in property controller' });
-});
-
-router.get('/tourguide/tours', authorize('tourguide', 'admin'), (req, res) => {
-  res.json({ message: 'Tour guide tours endpoint - implement in tour controller' });
-});
-
-router.get('/agent/clients', authorize('agent', 'admin'), (req, res) => {
-  res.json({ message: 'Agent clients endpoint - implement in agent controller' });
-});
-
 router.get('/agent/referrals', authorize('agent', 'admin'), authController.getAgentReferrals);
 router.get('/agent/referral-code', authorize('agent', 'admin'), authController.getAgentReferralCode);
 

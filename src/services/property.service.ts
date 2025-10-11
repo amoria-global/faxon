@@ -3395,138 +3395,31 @@ export class PropertyService {
     };
   }
 
+  // DISABLED: Agents can no longer own properties
   async createAgentOwnProperty(agentId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
-    const property = await this.createProperty(agentId, data);
-    
-    await prisma.agentBooking.create({
-      data: {
-        agentId,
-        clientId: agentId,
-        bookingType: 'property',
-        bookingId: `own-property-${property.id}`,
-        commission: 0,
-        commissionRate: 0,
-        status: 'active',
-        notes: `Agent-owned property: ${property.name}`
-      }
-    });
-
-    return property;
+    throw new Error('Agents cannot own properties. Use createClientProperty to create properties for your clients.');
   }
 
+  // DISABLED: Agents can no longer own properties
   async getAgentOwnProperties(agentId: number, filters?: Partial<PropertySearchFilters>) {
-    const whereClause: any = { 
-      hostId: agentId
-    };
-    
-    if (filters?.status) {
-      whereClause.status = filters.status;
-    }
-
-    const properties = await prisma.property.findMany({
-      where: whereClause,
-      include: {
-        host: true,
-        reviews: { select: { rating: true } },
-        bookings: {
-          where: { status: 'confirmed' },
-          select: { id: true }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    return Promise.all(
-      properties.map((p: any) => this.transformToPropertyInfo(p))
-    );
+    // Return empty array - agents cannot own properties
+    return [];
   }
 
+  // DISABLED: Agents can no longer own properties
   async getAgentOwnPropertyBookings(agentId: number, propertyId: number) {
-    const property = await prisma.property.findFirst({
-      where: { id: propertyId, hostId: agentId }
-    });
-
-    if (!property) {
-      throw new Error('Property not found or not owned by agent');
-    }
-
-    const bookings = await prisma.booking.findMany({
-      where: { propertyId },
-      include: {
-        guest: true,
-        property: { select: { name: true } }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    return bookings.map((b: any) => this.transformToBookingInfo(b));
+    throw new Error('Agents cannot own properties. Access client property bookings through agent property management routes.');
   }
 
+  // DISABLED: Agents can no longer own properties
   async getAgentOwnPropertyGuests(agentId: number, propertyId?: number) {
-    let whereClause: any = {};
-
-    if (propertyId) {
-      const property = await prisma.property.findFirst({
-        where: { id: propertyId, hostId: agentId }
-      });
-
-      if (!property) {
-        throw new Error('Property not found or not owned by agent');
-      }
-
-      whereClause = {
-        bookingsAsGuest: {
-          some: { propertyId }
-        }
-      };
-    } else {
-      const agentProperties = await prisma.property.findMany({
-        where: { hostId: agentId },
-        select: { id: true }
-      });
-
-      const propertyIds = agentProperties.map(p => p.id);
-
-      whereClause = {
-        bookingsAsGuest: {
-          some: {
-            propertyId: { in: propertyIds }
-          }
-        }
-      };
-    }
-
-    const guests = await prisma.user.findMany({
-      where: whereClause,
-      include: {
-        bookingsAsGuest: {
-          where: propertyId ? { propertyId } : {
-            propertyId: { in: await this.getAgentOwnPropertyIds(agentId) }
-          },
-          include: {
-            property: { select: { name: true } }
-          },
-          orderBy: { createdAt: 'desc' }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    return guests.map((guest: any) => this.transformToGuestProfile(guest));
+    throw new Error('Agents cannot own properties. Access client guests through agent property management routes.');
   }
 
   async getAllAgentProperties(agentId: number, filters?: any) {
-    const [ownProperties, clientProperties] = await Promise.all([
-      this.getAgentOwnProperties(agentId, filters),
-      this.getAgentProperties(agentId, filters)
-    ]);
-
-    const enrichedOwnProperties = ownProperties.map(p => ({
-      ...p,
-      relationshipType: 'owned' as const,
-      commissionRate: 0,
-      fullRevenue: true
-    }));
+    // DISABLED: Agents can no longer own properties
+    // Only return managed client properties
+    const clientProperties = await this.getAgentProperties(agentId, filters);
 
     const enrichedClientProperties = clientProperties.properties?.map(p => ({
       ...p,
@@ -3535,11 +3428,11 @@ export class PropertyService {
     })) || [];
 
     return {
-      ownProperties: enrichedOwnProperties,
+      ownProperties: [], // Always empty - agents cannot own properties
       managedProperties: enrichedClientProperties,
-      totalOwned: ownProperties.length,
+      totalOwned: 0, // Always 0
       totalManaged: enrichedClientProperties.length,
-      totalProperties: ownProperties.length + enrichedClientProperties.length
+      totalProperties: enrichedClientProperties.length // Only managed properties
     };
   }
 
@@ -3579,12 +3472,10 @@ export class PropertyService {
     return !!relation;
   }
 
+  // DISABLED: Agents can no longer own properties
   private async getAgentOwnPropertyIds(agentId: number): Promise<number[]> {
-    const properties = await prisma.property.findMany({
-      where: { hostId: agentId },
-      select: { id: true }
-    });
-    return properties.map(p => p.id);
+    // Return empty array - agents cannot own properties
+    return [];
   }
 
   private async getAgentPropertyCommission(agentId: number, hostId: number): Promise<number> {

@@ -13,6 +13,7 @@ import settingsRoutes from './routes/settings.routes';
 import smsTestRoutes from './routes/sms.test.routes';
 import emailTestRoutes from './routes/email.test.routes';
 import adminRoutes from './routes/admin.routes';
+import publicRoutes from './routes/public.routes';
 import XentriPayRoutes from './routes/xentripay.routes';
 import pawaPayRoutes from './routes/pawapay.routes'; // PawaPay routes
 import pawaPayCallbackRoutes from './routes/pawapay.callback'; // PawaPay callback
@@ -117,6 +118,7 @@ if (process.env.ENABLE_KYC_REMINDERS !== 'false') reminderScheduler.start();
 if (process.env.ENABLE_BOOKING_CLEANUP !== 'false') bookingCleanupScheduler.start();
 
 // Routes
+app.use('/api/public', publicRoutes); // Public routes (no auth required)
 app.use('/api/auth', authRoutes);
 app.use('/api/payments', require('./routes/escrow.routes').default);
 app.use('/api/payments/withdrawal', withdrawalRoutes);
@@ -132,8 +134,6 @@ app.use('/api/xentripay', require('./routes/xentripay.callback').default);
 app.use('/api/pawapay', pawaPayRoutes); // PawaPay API routes
 app.use('/api/pawapay/callback', pawaPayCallbackRoutes); // PawaPay callback/webhook
 app.use('/api/admin', adminRoutes);
-app.use('/api/sms/test', smsTestRoutes);
-app.use('/api/email/test', emailTestRoutes);
 app.use("/api/payments/xentripay", XentriPayRoutes);
 app.use('/api/kyc-reminders', kycReminderRoutes); // NEW: KYC reminder routes
 app.use('/api/booking-cleanup', bookingCleanupRoutes); // NEW: Booking cleanup routes
