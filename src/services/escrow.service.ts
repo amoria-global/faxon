@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { PesapalService } from './pesapal.service';
 import { PhoneUtils } from '../utils/phone.utils';
 import { logger } from '../utils/logger';
+import { currencyExchangeService } from './currency-exchange.service';
 import {
   CreateDepositDto,
   ReleaseEscrowDto,
@@ -129,17 +130,28 @@ export class EscrowService {
         throw new Error('Booking has already been paid');
       }
 
-      // 6. Calculate split rules (server-controlled, based on agent existence)
+      // 6. Convert USD amount to RWF (booking prices are in USD)
+      const usdAmount = booking.totalPrice;
+      const { rwfAmount, rate: depositRate } = await currencyExchangeService.convertUSDToRWF_Deposit(usdAmount);
+
+      logger.info('Currency conversion for booking payment', 'EscrowService', {
+        bookingId,
+        usdAmount,
+        rwfAmount,
+        exchangeRate: depositRate
+      });
+
+      // 7. Calculate split rules (server-controlled, based on agent existence)
       const hasAgent = booking.property.agent !== null;
       const splitRules = this.calculateBookingSplitRules(hasAgent);
 
-      // 7. Validate platform commission is exactly 14%
+      // 8. Validate platform commission is exactly 14%
       this.validatePlatformCommission(splitRules);
 
-      // 8. Calculate split amounts in actual currency
-      const splitAmounts = this.calculateSplitAmounts(booking.totalPrice, splitRules);
+      // 9. Calculate split amounts in RWF (not USD)
+      const splitAmounts = this.calculateSplitAmounts(rwfAmount, splitRules);
 
-      // 9. Build billing info from authenticated user session (not from client)
+      // 10. Build billing info from authenticated user session (not from client)
       const billingInfo = {
         email: booking.guest.email,
         phone: booking.guest.phone || '+250788000000',
@@ -148,12 +160,12 @@ export class EscrowService {
         countryCode: booking.guest.country || 'RW'
       };
 
-      // 10. Create deposit payload (all values are server-controlled)
+      // 11. Create deposit payload (all values are server-controlled, amount in RWF)
       const depositData: CreateDepositDto = {
-        amount: booking.totalPrice,
+        amount: rwfAmount, // Use converted RWF amount
         currency: 'RWF',
         reference: `BOOKING-${booking.id}-${Date.now()}`,
-        description: `Payment for ${booking.property.name} (${new Date(booking.checkIn).toLocaleDateString()} - ${new Date(booking.checkOut).toLocaleDateString()})`,
+        description: `Payment for ${booking.property.name} (${new Date(booking.checkIn).toLocaleDateString()} - ${new Date(booking.checkOut).toLocaleDateString()}) - Original: $${usdAmount.toFixed(2)} USD @ ${depositRate.toFixed(2)} RWF/USD`,
         hostId: booking.property.host.id,
         agentId: booking.property.agent?.id,
         splitRules,
@@ -195,6 +207,9 @@ export class EscrowService {
           id: booking.id,
           propertyName: booking.property.name,
           totalPrice: booking.totalPrice,
+          totalPriceUSD: usdAmount,
+          totalPriceRWF: rwfAmount,
+          exchangeRate: depositRate,
           checkIn: booking.checkIn,
           checkOut: booking.checkOut
         },

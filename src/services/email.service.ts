@@ -45,7 +45,7 @@ export class EmailService {
     );
 
     this.defaultSender = {
-      name: 'Jambolush Escrow',
+      name: 'Jambolush Payments',
       email: config.brevoSenderEmail
     };
 
@@ -306,21 +306,21 @@ export class EmailService {
             <div class="header">
               <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
               <div class="header-title">${this.companyInfo.name}</div>
-              <div class="header-subtitle">Secure Escrow Payment</div>
+              <div class="header-subtitle">Secure Payment System</div>
             </div>
 
             <div class="content">
               <div class="greeting">Hi ${data.user.firstName || 'there'},</div>
 
               <div class="message">
-                Your payment has been initialized and is being held securely in escrow. Please complete your payment to proceed with your booking.
+                Your payment has been initialized and is being held securely. Please complete your payment to proceed with your booking.
               </div>
 
               <div class="info-card">
                 <div class="info-card-header">Payment Details</div>
                 <div class="info-row"><span class="info-label">Reference</span><span class="info-value">${data.transaction.reference}</span></div>
                 <div class="info-row"><span class="info-label">Amount</span><span class="info-value">${data.transaction.amount.toLocaleString()} ${data.transaction.currency}</span></div>
-                <div class="info-row"><span class="info-label">Description</span><span class="info-value">${data.transaction.description || 'Escrow payment'}</span></div>
+                <div class="info-row"><span class="info-label">Description</span><span class="info-value">${data.transaction.description || 'Payment'}</span></div>
                 <div class="info-row"><span class="info-label">Status</span><span class="info-value">Pending Payment</span></div>
               </div>
 
@@ -329,9 +329,9 @@ export class EmailService {
               </div>
 
               <div class="alert-box alert-info">
-                <div class="alert-title">Secure Escrow Protection</div>
+                <div class="alert-title">Secure Payment Protection</div>
                 <div class="alert-text">
-                  Your funds will be securely held in escrow until the service is confirmed as delivered. This protects both you and the service provider.
+                  Your funds will be securely held until the service is confirmed as delivered. This protects both you and the service provider.
                 </div>
               </div>
             </div>
@@ -351,12 +351,12 @@ export class EmailService {
     const text = `
 Hi ${data.user.firstName || 'there'},
 
-Your payment has been initialized and is being held securely in escrow.
+Your payment has been initialized and is being held securely.
 
 Payment Details:
 - Reference: ${data.transaction.reference}
 - Amount: ${data.transaction.amount.toLocaleString()} ${data.transaction.currency}
-- Description: ${data.transaction.description || 'Escrow payment'}
+- Description: ${data.transaction.description || 'Payment'}
 - Status: Pending Payment
 
 Complete your payment here: ${data.checkoutUrl}
@@ -782,7 +782,7 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
               <div class="alert-box alert-info">
                 <div class="alert-title">💡 Payment Protection</div>
                 <div class="alert-text">
-                  Your payment is protected by our escrow system. The host only receives funds after you check in successfully.
+                  Your payment is protected by our secure payment system. The host only receives funds after you check in successfully.
                 </div>
               </div>
 
@@ -826,11 +826,11 @@ Booking Details:
 
 What's Next?
 • You'll receive check-in instructions from your host closer to your arrival date
-• Your funds are held securely in escrow until check-in is validated
+• Your funds are held securely until check-in is validated
 • The host will receive their payment after successful check-in
 
 Payment Protection:
-Your payment is protected by our escrow system. The host only receives funds after you check in successfully.
+Your payment is protected by our secure payment system. The host only receives funds after you check in successfully.
 
 View your booking: ${this.companyInfo.website}/bookings/${data.bookingId}
 
@@ -967,7 +967,7 @@ Need help? Contact us at ${this.companyInfo.supportEmail}
   private getStatusSpecificContent(status: EscrowTransactionStatus, transaction: EscrowTransaction): string {
     switch (status) {
       case 'HELD':
-        return '<div class="message">Your funds are now securely held in escrow and will be released once the service is confirmed as delivered.</div>';
+        return '<div class="message">Your funds are now securely held and will be released once the service is confirmed as delivered.</div>';
       case 'RELEASED':
         return '<div class="message">The funds have been released to the service provider. Thank you for using our platform!</div>';
       case 'REFUNDED':

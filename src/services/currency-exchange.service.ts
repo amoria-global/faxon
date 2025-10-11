@@ -11,11 +11,13 @@ export interface ExchangeRate {
 }
 
 export interface HexarateResponse {
-  success: boolean;
-  timestamp: number;
-  base: string;
-  rates: {
-    [key: string]: number;
+  status_code: number;
+  data: {
+    base: string;
+    target: string;
+    mid: number;
+    unit: number;
+    timestamp: string;
   };
 }
 
@@ -41,15 +43,19 @@ export class CurrencyExchangeService {
     try {
       // Fetch latest rates from Hexarate API using the correct URL format
       const url = `${config.currencies.exchangeApiUrl}/${fromCurrency}?target=${toCurrency}`;
+      console.log(`[CurrencyExchange] Fetching rate from: ${url}`);
+
       const response = await axios.get<HexarateResponse>(url, {
         timeout: 10000
       });
 
-      if (!response.data.success || !response.data.rates[toCurrency]) {
+      console.log(`[CurrencyExchange] API Response:`, JSON.stringify(response.data));
+
+      if (response.data.status_code !== 200 || !response.data.data?.mid) {
         throw new Error(`Failed to fetch exchange rate for ${fromCurrency} to ${toCurrency}`);
       }
 
-      const baseRate = response.data.rates[toCurrency];
+      const baseRate = response.data.data.mid;
 
       // Calculate deposit rate (+0.5% markup)
       const depositRate = baseRate * 1.005;
@@ -84,8 +90,8 @@ export class CurrencyExchangeService {
       }
 
       // Fallback to default rate if no cache available
-      console.warn('Using default fallback rate: 1300 RWF/USD');
-      const fallbackBaseRate = 1300;
+      console.warn('Using default fallback rate: 1450 RWF/USD');
+      const fallbackBaseRate = 1450; // Updated to match current market rate
       return {
         base: fallbackBaseRate,
         depositRate: fallbackBaseRate * 1.005,
