@@ -25,13 +25,28 @@ export class EscrowController {
   // ==================== USER OPERATIONS ====================
 
   /**
-   * Create a new deposit (payment into escrow)
-   * POST /api/escrow/deposits
+   * Create a secure booking payment (server-side validation)
+   * POST /api/payments/bookings/:bookingId/checkout
+   *
+   * Client only sends bookingId, everything else is calculated server-side:
+   * - Amount from booking.totalPrice
+   * - Split rules (14% platform commission)
+   * - Host ID from property.owner
+   * - Agent ID from property.agent (if exists)
+   * - Billing info from authenticated user session
    */
-  createDeposit = async (req: Request, res: Response) => {
+  createBookingPayment = async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).user?.userId;
+      const user = (req as any).user;
+      const userId = user?.userId || user?.id;
+
+      console.log('[BOOKING-PAYMENT] req.user:', user);
+      console.log('[BOOKING-PAYMENT] Extracted userId:', userId);
+
       if (!userId) {
+        logger.error('No userId found in booking payment request', 'EscrowController', {
+          user: (req as any).user
+        });
         return res.status(401).json({
           success: false,
           error: {
@@ -41,8 +56,148 @@ export class EscrowController {
         });
       }
 
+      const { bookingId } = req.params;
+
+      if (!bookingId) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Booking ID is required'
+          }
+        });
+      }
+
+      // All validation and calculation happens server-side in escrowService
+      const result = await this.escrowService.createBookingPayment(bookingId, userId);
+
+      res.status(201).json({
+        success: true,
+        data: {
+          transaction: result.transaction,
+          checkoutUrl: result.checkoutUrl,
+          booking: result.bookingDetails,
+          splitBreakdown: result.splitBreakdown
+        },
+        message: 'Booking payment created successfully. Complete payment at the checkout URL.'
+      });
+
+    } catch (error: any) {
+      logger.error('Failed to create booking payment', 'EscrowController', error);
+
+      const statusCode =
+        error.message?.includes('not found') ? 404 :
+        error.message?.includes('Unauthorized') ? 403 :
+        error.message?.includes('already been paid') ? 400 :
+        error.message?.includes('cancelled') ? 400 :
+        error.message?.includes('commission') ? 500 : // Server configuration error
+        500;
+
+      res.status(statusCode).json({
+        success: false,
+        error: {
+          code: error.code || 'BOOKING_PAYMENT_FAILED',
+          message: error.message || 'Failed to create booking payment',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  };
+
+  /**
+   * Get booking payment status
+   * GET /api/payments/bookings/:bookingId/status
+   */
+  getBookingPaymentStatus = async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const userId = user?.userId || user?.id;
+
+      if (!userId) {
+        logger.error('No userId found in payment status request', 'EscrowController', {
+          user: (req as any).user
+        });
+        return res.status(401).json({
+          success: false,
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'User authentication required'
+          }
+        });
+      }
+
+      const { bookingId } = req.params;
+
+      if (!bookingId) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Booking ID is required'
+          }
+        });
+      }
+
+      // Get booking payment status from escrowService
+      const status = await this.escrowService.getBookingPaymentStatus(bookingId, userId);
+
+      res.status(200).json({
+        success: true,
+        data: status
+      });
+
+    } catch (error: any) {
+      logger.error('Failed to get booking payment status', 'EscrowController', error);
+
+      const statusCode =
+        error.message?.includes('not found') ? 404 :
+        error.message?.includes('Unauthorized') ? 403 :
+        500;
+
+      res.status(statusCode).json({
+        success: false,
+        error: {
+          code: 'FETCH_STATUS_FAILED',
+          message: error.message || 'Failed to get payment status',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  };
+
+  /**
+   * Create a new deposit (payment into escrow)
+   * POST /api/escrow/deposits
+   *
+   * ⚠️ DEPRECATED: Use createBookingPayment for booking payments
+   * This endpoint allows manual control of all payment parameters
+   */
+  createDeposit = async (req: Request, res: Response) => {
+    try {
+      // Debug: Log the user object to see what's available
+      console.log('[ESCROW] req.user:', (req as any).user);
+
+      const user = (req as any).user;
+      const userId = user?.userId || user?.id;
+
+      console.log('[ESCROW] Extracted userId:', userId);
+
+      if (!userId) {
+        logger.error('No userId found in request', 'EscrowController', {
+          user: (req as any).user,
+          headers: req.headers.authorization ? 'present' : 'missing'
+        });
+        return res.status(401).json({
+          success: false,
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'User authentication required - no userId in token'
+          }
+        });
+      }
+
       const depositData: CreateDepositDto = req.body;
-      
+
       const result = await this.escrowService.createDeposit(userId, depositData);
 
       res.status(201).json({

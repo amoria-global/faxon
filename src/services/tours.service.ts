@@ -2423,7 +2423,7 @@ export class TourService {
       userName: `${booking.user.firstName} ${booking.user.lastName}`,
       userEmail: booking.user.email,
       tourGuideId: booking.tourGuideId,
-      tourGuideName: `${booking.tourGuide}`,
+      tourGuideName: booking.tour.tourGuide ? `${booking.tour.tourGuide.firstName} ${booking.tour.tourGuide.lastName}` : '',
       numberOfParticipants: booking.numberOfParticipants,
       participants: booking.participants as any[],
       specialRequests: booking.specialRequests,

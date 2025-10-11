@@ -82,7 +82,21 @@ router.use(authenticate);
 router.use(logEscrowRequest);
 router.use(sanitizeEscrowData);
 
+// === BOOKING PAYMENT OPERATIONS (SECURE SERVER-SIDE) ===
+// These endpoints only require bookingId - everything else is calculated server-side
+router.post(
+  '/bookings/:bookingId/checkout',
+  rateLimitEscrowOperations,
+  escrowController.createBookingPayment
+);
+
+router.get(
+  '/bookings/:bookingId/payment-status',
+  escrowController.getBookingPaymentStatus
+);
+
 // === DEPOSIT OPERATIONS ===
+// ⚠️ For direct deposits (not booking-related)
 router.post(
   '/deposits',
   rateLimitEscrowOperations,

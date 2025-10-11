@@ -40,10 +40,282 @@ export class EscrowService {
     const idNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
     
     if (isNaN(idNum) || idNum <= 0) {
-      throw new Error('Invalid user ID format');
+      throw new Error('Invalid user ID format '+userId);
     }
     
     return idNum;
+  }
+
+  // ==================== BOOKING PAYMENT OPERATIONS (SECURE SERVER-SIDE) ====================
+
+  /**
+   * Create a secure Pesapal payment for a booking
+   * All sensitive data is calculated and validated server-side
+   * Client only provides bookingId
+   * @param bookingId - The booking ID
+   * @param userId - Authenticated user ID from session
+   * @returns Payment transaction, checkout URL, and booking details
+   */
+  async createBookingPayment(bookingId: string, userId: number | string): Promise<{
+    transaction: EscrowTransaction;
+    checkoutUrl: string;
+    bookingDetails: any;
+    splitBreakdown: any;
+  }> {
+    try {
+      const userIdNum = this.parseUserId(userId);
+
+      logger.info('Creating booking payment (server-side)', 'EscrowService', { bookingId, userId: userIdNum });
+
+      // 1. Fetch booking with all related data (server-side validation)
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        include: {
+          property: {
+            include: {
+              host: {
+                select: {
+                  id: true,
+                  email: true,
+                  firstName: true,
+                  lastName: true,
+                  phone: true
+                }
+              },
+              agent: {
+                select: {
+                  id: true,
+                  email: true,
+                  firstName: true,
+                  lastName: true
+                }
+              }
+            }
+          },
+          guest: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+              country: true
+            }
+          }
+        }
+      });
+
+      // 2. Validate booking exists
+      if (!booking) {
+        throw new Error(`Booking not found: ${bookingId}`);
+      }
+
+      // 3. Validate user is the booking guest (authorization check)
+      if (booking.guestId !== userIdNum) {
+        throw new Error('Unauthorized: You are not the guest for this booking');
+      }
+
+      // 4. Validate property has a host
+      if (!booking.property.host) {
+        throw new Error('Property does not have a host assigned');
+      }
+
+      // 5. Validate booking status
+      if (booking.status === 'cancelled') {
+        throw new Error('Cannot pay for a cancelled booking');
+      }
+
+      if (booking.paymentStatus === 'completed') {
+        throw new Error('Booking has already been paid');
+      }
+
+      // 6. Calculate split rules (server-controlled, based on agent existence)
+      const hasAgent = booking.property.agent !== null;
+      const splitRules = this.calculateBookingSplitRules(hasAgent);
+
+      // 7. Validate platform commission is exactly 14%
+      this.validatePlatformCommission(splitRules);
+
+      // 8. Calculate split amounts in actual currency
+      const splitAmounts = this.calculateSplitAmounts(booking.totalPrice, splitRules);
+
+      // 9. Build billing info from authenticated user session (not from client)
+      const billingInfo = {
+        email: booking.guest.email,
+        phone: booking.guest.phone || '+250788000000',
+        firstName: booking.guest.firstName || 'Guest',
+        lastName: booking.guest.lastName || 'User',
+        countryCode: booking.guest.country || 'RW'
+      };
+
+      // 10. Create deposit payload (all values are server-controlled)
+      const depositData: CreateDepositDto = {
+        amount: booking.totalPrice,
+        currency: 'RWF',
+        reference: `BOOKING-${booking.id}-${Date.now()}`,
+        description: `Payment for ${booking.property.name} (${new Date(booking.checkIn).toLocaleDateString()} - ${new Date(booking.checkOut).toLocaleDateString()})`,
+        hostId: booking.property.host.id,
+        agentId: booking.property.agent?.id,
+        splitRules,
+        billingInfo
+      };
+
+      logger.info('Booking payment payload prepared', 'EscrowService', {
+        bookingId,
+        amount: depositData.amount,
+        splitRules,
+        splitAmounts,
+        hostId: depositData.hostId,
+        agentId: depositData.agentId
+      });
+
+      // 11. Create escrow deposit using existing method
+      const result = await this.createDeposit(userIdNum, depositData);
+
+      // 12. Update booking with transaction reference
+      await prisma.booking.update({
+        where: { id: bookingId },
+        data: {
+          transactionId: result.transaction.reference,
+          paymentMethod: 'pesapal',
+          paymentStatus: 'pending'
+        }
+      });
+
+      logger.info('Booking payment created successfully', 'EscrowService', {
+        bookingId,
+        transactionId: result.transaction.id,
+        reference: result.transaction.reference
+      });
+
+      return {
+        transaction: result.transaction,
+        checkoutUrl: result.checkoutUrl,
+        bookingDetails: {
+          id: booking.id,
+          propertyName: booking.property.name,
+          totalPrice: booking.totalPrice,
+          checkIn: booking.checkIn,
+          checkOut: booking.checkOut
+        },
+        splitBreakdown: splitAmounts
+      };
+
+    } catch (error: any) {
+      logger.error('Booking payment creation failed', 'EscrowService', error);
+      throw this.handleError(error, 'BOOKING_PAYMENT_FAILED');
+    }
+  }
+
+  /**
+   * Calculate split rules for booking payments
+   * Platform always gets 14% commission
+   * @param hasAgent - Whether the property has an agent
+   * @returns Split rules object
+   */
+  private calculateBookingSplitRules(hasAgent: boolean): SplitRules {
+    const PLATFORM_COMMISSION = 14; // Fixed at 14%
+
+    if (hasAgent) {
+      // With agent: Platform 14%, Agent 7%, Host 79%
+      return {
+        platform: PLATFORM_COMMISSION,
+        agent: 7,
+        host: 79
+      };
+    } else {
+      // Without agent: Platform 14%, Agent 0%, Host 86%
+      return {
+        platform: PLATFORM_COMMISSION,
+        agent: 0,
+        host: 86
+      };
+    }
+  }
+
+  /**
+   * Validates that platform commission is exactly 14%
+   * Throws error if validation fails
+   * @param splitRules - The split rules to validate
+   */
+  private validatePlatformCommission(splitRules: SplitRules): void {
+    const REQUIRED_PLATFORM_COMMISSION = 14;
+
+    if (splitRules.platform !== REQUIRED_PLATFORM_COMMISSION) {
+      const errorMsg = `CRITICAL: Platform commission must be exactly ${REQUIRED_PLATFORM_COMMISSION}%. Current: ${splitRules.platform}%`;
+      logger.error('Platform commission validation failed', 'EscrowService', {
+        required: REQUIRED_PLATFORM_COMMISSION,
+        actual: splitRules.platform,
+        splitRules
+      });
+      throw new Error(errorMsg);
+    }
+
+    logger.info('Platform commission validated ✓', 'EscrowService', {
+      platformCommission: splitRules.platform,
+      splitRules
+    });
+  }
+
+  /**
+   * Get booking payment status
+   * @param bookingId - The booking ID
+   * @param userId - Authenticated user ID
+   * @returns Payment status information
+   */
+  async getBookingPaymentStatus(bookingId: string, userId: number | string) {
+    try {
+      const userIdNum = this.parseUserId(userId);
+
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        include: {
+          guest: {
+            select: { id: true }
+          }
+        }
+      });
+
+      if (!booking) {
+        throw new Error(`Booking not found: ${bookingId}`);
+      }
+
+      if (booking.guestId !== userIdNum) {
+        throw new Error('Unauthorized: You are not the guest for this booking');
+      }
+
+      if (!booking.transactionId) {
+        return {
+          bookingId,
+          paymentStatus: booking.paymentStatus,
+          hasTransaction: false
+        };
+      }
+
+      // Fetch escrow transaction
+      const transaction = await prisma.escrowTransaction.findFirst({
+        where: { reference: booking.transactionId }
+      });
+
+      return {
+        bookingId,
+        paymentStatus: booking.paymentStatus,
+        hasTransaction: true,
+        transaction: transaction ? {
+          id: transaction.id,
+          reference: transaction.reference,
+          status: transaction.status,
+          amount: transaction.amount,
+          currency: transaction.currency,
+          createdAt: transaction.createdAt,
+          fundedAt: transaction.fundedAt
+        } : null
+      };
+
+    } catch (error: any) {
+      logger.error('Failed to get booking payment status', 'EscrowService', error);
+      throw this.handleError(error, 'GET_BOOKING_STATUS_FAILED');
+    }
   }
 
   // ==================== DEPOSIT OPERATIONS ====================
@@ -71,7 +343,8 @@ export class EscrowService {
       this.validateSplitRules(depositData.splitRules);
 
       // Create escrow transaction in database
-      const merchantReference = this.pesapalService.generateMerchantReference('DEP');
+      // Use provided reference or generate a new one
+      const merchantReference = depositData.reference || this.pesapalService.generateMerchantReference('DEP');
       
       const escrowTransaction = await prisma.escrowTransaction.create({
         data: {
@@ -239,6 +512,9 @@ export class EscrowService {
       });
 
       // Transaction updated
+
+      // Update booking status if this is a booking payment
+      await this.updateBookingPaymentStatus(transaction.reference, newStatus);
 
       // Send status notification (non-blocking)
       this.sendStatusUpdateNotification(
@@ -654,6 +930,129 @@ export class EscrowService {
   }
 
   // ==================== HELPER METHODS ====================
+
+  /**
+   * Update booking payment status when escrow transaction status changes
+   * @param transactionReference - The transaction reference (links to booking.transactionId)
+   * @param escrowStatus - The new escrow transaction status
+   */
+  private async updateBookingPaymentStatus(
+    transactionReference: string,
+    escrowStatus: EscrowTransactionStatus
+  ): Promise<void> {
+    try {
+      // Check if this is a booking payment (reference starts with "BOOKING-")
+      if (!transactionReference.startsWith('BOOKING-')) {
+        return; // Not a booking payment, skip
+      }
+
+      // Find booking by transaction reference
+      const booking = await prisma.booking.findFirst({
+        where: { transactionId: transactionReference }
+      });
+
+      if (!booking) {
+        logger.warn('Booking not found for transaction', 'EscrowService', { transactionReference });
+        return;
+      }
+
+      // Fetch full booking details with property and guest info for notifications
+      const fullBooking = await prisma.booking.findUnique({
+        where: { id: booking.id },
+        include: {
+          property: { select: { name: true } },
+          guest: { select: { email: true, firstName: true, lastName: true } }
+        }
+      });
+
+      if (!fullBooking) return;
+
+      // Map escrow status to booking payment status
+      let bookingPaymentStatus = booking.paymentStatus;
+      let bookingStatus = booking.status;
+
+      if (escrowStatus === 'HELD') {
+        bookingPaymentStatus = 'completed';
+        // Also confirm booking if it was pending
+        if (bookingStatus === 'pending') {
+          bookingStatus = 'confirmed';
+        }
+        logger.info('Payment completed - booking confirmed', 'EscrowService', {
+          bookingId: booking.id,
+          transactionReference
+        });
+
+        // Send booking confirmation email
+        this.emailService.sendBookingPaymentConfirmationEmail({
+          userEmail: fullBooking.guest.email,
+          userName: fullBooking.guest.firstName || 'Guest',
+          bookingId: booking.id,
+          propertyName: fullBooking.property.name,
+          amount: booking.totalPrice,
+          currency: 'RWF',
+          checkIn: fullBooking.checkIn,
+          checkOut: fullBooking.checkOut,
+          reference: transactionReference
+        }).catch(err => logger.error('Failed to send booking confirmation email', 'EscrowService', err));
+
+      } else if (escrowStatus === 'FAILED') {
+        bookingPaymentStatus = 'failed';
+        logger.info('Payment failed - booking payment marked as failed', 'EscrowService', {
+          bookingId: booking.id
+        });
+
+        // Send payment failed email
+        this.emailService.sendBookingPaymentStatusEmail({
+          userEmail: fullBooking.guest.email,
+          userName: fullBooking.guest.firstName || 'Guest',
+          bookingId: booking.id,
+          propertyName: fullBooking.property.name,
+          amount: booking.totalPrice,
+          status: 'failed',
+          reference: transactionReference
+        }).catch(err => logger.error('Failed to send payment failed email', 'EscrowService', err));
+
+      } else if (escrowStatus === 'REFUNDED') {
+        bookingPaymentStatus = 'refunded';
+        logger.info('Payment refunded', 'EscrowService', {
+          bookingId: booking.id
+        });
+
+        // Send refund notification
+        this.emailService.sendBookingPaymentStatusEmail({
+          userEmail: fullBooking.guest.email,
+          userName: fullBooking.guest.firstName || 'Guest',
+          bookingId: booking.id,
+          propertyName: fullBooking.property.name,
+          amount: booking.totalPrice,
+          status: 'refunded',
+          reference: transactionReference
+        }).catch(err => logger.error('Failed to send refund email', 'EscrowService', err));
+
+      } else if (escrowStatus === 'PENDING') {
+        bookingPaymentStatus = 'pending';
+      }
+
+      // Update booking
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: {
+          paymentStatus: bookingPaymentStatus,
+          status: bookingStatus
+        }
+      });
+
+      logger.info('Booking status updated', 'EscrowService', {
+        bookingId: booking.id,
+        paymentStatus: bookingPaymentStatus,
+        bookingStatus
+      });
+
+    } catch (error: any) {
+      logger.error('Failed to update booking payment status', 'EscrowService', error);
+      // Don't throw - this is a non-critical operation
+    }
+  }
 
   private validateAmount(amount: number, currency: string): void {
     const min = config.escrow.minTransactionAmount;

@@ -3,6 +3,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { pawaPayService } from '../services/pawapay.service';
+import { currencyExchangeService } from '../services/currency-exchange.service';
 import {
   DepositRequest,
   PayoutRequest,
@@ -62,24 +63,33 @@ export class PawaPayController {
 
   /**
    * Initiate a deposit (money in) request
+   * NOTE: Frontend sends amount in USD, we convert to RWF using deposit rate
    */
   async initiateDeposit(req: Request, res: Response): Promise<void> {
     try {
       const userId = (req as any).user?.id;
       const { amount, currency, phoneNumber, provider, country, description, internalReference, metadata } = req.body;
 
-      if (!amount || !currency || !phoneNumber || !provider) {
+      if (!amount || !phoneNumber || !provider) {
         res.status(400).json({
           success: false,
-          message: 'Missing required fields: amount, currency, phoneNumber, provider'
+          message: 'Missing required fields: amount, phoneNumber, provider'
         });
         return;
       }
 
+      // Frontend sends amount in USD, we need to convert to RWF
+      const usdAmount = parseFloat(amount);
+
+      // Convert USD to RWF using deposit rate (+0.5%)
+      const { rwfAmount, rate: depositRate, exchangeRate } = await currencyExchangeService.convertUSDToRWF_Deposit(usdAmount);
+
       const countryISO3 = pawaPayService.convertToISO3CountryCode(country || 'RW');
       const formattedPhone = pawaPayService.formatPhoneNumber(phoneNumber, country === 'RW' ? '250' : undefined);
       const providerCode = pawaPayService.getProviderCode(provider, countryISO3);
-      const amountInSmallestUnit = pawaPayService.convertToSmallestUnit(amount, currency);
+
+      // PawaPay expects amount in RWF (no decimal places for RWF)
+      const amountInSmallestUnit = rwfAmount.toString();
       const depositId = pawaPayService.generateTransactionId();
 
       const metadataArray: any = this._buildMetadataArray(metadata, {
@@ -90,7 +100,7 @@ export class PawaPayController {
       const depositRequest: DepositRequest = {
         depositId,
         amount: amountInSmallestUnit,
-        currency: currency.toUpperCase(),
+        currency: 'RWF', // Always RWF for PawaPay
         payer: {
           type: 'MMO',
           accountDetails: {
@@ -103,14 +113,15 @@ export class PawaPayController {
 
       const response = await pawaPayService.initiateDeposit(depositRequest);
 
+      // Store in database with both USD and RWF amounts
       await prisma.pawaPayTransaction.create({
         data: {
           userId,
           transactionId: depositId,
           transactionType: 'DEPOSIT',
           status: response.status,
-          amount: amountInSmallestUnit,
-          currency: currency.toUpperCase(),
+          amount: amountInSmallestUnit, // RWF amount
+          currency: 'RWF',
           country: countryISO3,
           correspondent: providerCode,
           payerPhone: formattedPhone,
@@ -119,7 +130,16 @@ export class PawaPayController {
           requestedAmount: amountInSmallestUnit,
           providerTransactionId: response.correspondentIds?.PROVIDER_TRANSACTION_ID,
           financialTransactionId: response.correspondentIds?.FINANCIAL_TRANSACTION_ID,
-          metadata: metadata || {},
+          metadata: {
+            ...(metadata || {}),
+            originalAmountUSD: usdAmount,
+            exchangeRate: depositRate,
+            baseRate: exchangeRate.base,
+            depositRate: exchangeRate.depositRate,
+            payoutRate: exchangeRate.payoutRate,
+            spread: exchangeRate.spread,
+            amountRWF: rwfAmount
+          },
           internalReference,
           receivedByPawaPay: response.receivedByPawaPay ? new Date(response.receivedByPawaPay) : undefined,
           failureCode: response.failureReason?.failureCode,
@@ -133,8 +153,16 @@ export class PawaPayController {
         data: {
           depositId,
           status: response.status,
-          amount: pawaPayService.convertFromSmallestUnit(amountInSmallestUnit, currency),
-          currency,
+          amountUSD: usdAmount,
+          amountRWF: rwfAmount,
+          currency: 'RWF',
+          exchangeRate: {
+            rate: depositRate,
+            base: exchangeRate.base,
+            depositRate: exchangeRate.depositRate,
+            payoutRate: exchangeRate.payoutRate,
+            spread: exchangeRate.spread
+          },
           country: countryISO3,
           provider: providerCode,
           failureReason: response.failureReason,
@@ -197,6 +225,7 @@ export class PawaPayController {
 
   /**
    * Initiate a payout (money out) request
+   * NOTE: Frontend sends amount in USD, we convert to RWF using payout rate
    */
   async initiatePayout(req: Request, res: Response): Promise<void> {
     try {
@@ -212,18 +241,26 @@ export class PawaPayController {
         metadata
       } = req.body;
 
-      if (!amount || !currency || !phoneNumber || !provider) {
+      if (!amount || !phoneNumber || !provider) {
         res.status(400).json({
           success: false,
-          message: 'Missing required fields: amount, currency, phoneNumber, provider'
+          message: 'Missing required fields: amount, phoneNumber, provider'
         });
         return;
       }
 
+      // Frontend sends amount in USD, we need to convert to RWF
+      const usdAmount = parseFloat(amount);
+
+      // Convert USD to RWF using payout rate (-2.5%)
+      const { rwfAmount, rate: payoutRateValue, exchangeRate } = await currencyExchangeService.convertUSDToRWF_Payout(usdAmount);
+
       const countryISO3 = pawaPayService.convertToISO3CountryCode(country || 'RW');
       const formattedPhone = pawaPayService.formatPhoneNumber(phoneNumber, country === 'RW' ? '250' : undefined);
       const providerCode = pawaPayService.getProviderCode(provider, countryISO3);
-      const amountInSmallestUnit = pawaPayService.convertToSmallestUnit(amount, currency);
+
+      // PawaPay expects amount in RWF (no decimal places for RWF)
+      const amountInSmallestUnit = rwfAmount.toString();
       const payoutId = pawaPayService.generateTransactionId();
 
       const statementDesc = (description || `Payout from ${process.env.APP_NAME || 'YourApp'}`)
@@ -239,7 +276,7 @@ export class PawaPayController {
       const payoutRequest: PayoutRequest = {
         payoutId,
         amount: amountInSmallestUnit,
-        currency: currency.toUpperCase(),
+        currency: 'RWF', // Always RWF for PawaPay
         statementDescription: statementDesc, // Payouts support statementDescription
         recipient: {
           type: 'MMO',
@@ -253,14 +290,15 @@ export class PawaPayController {
 
       const response = await pawaPayService.initiatePayout(payoutRequest);
 
+      // Store in database with both USD and RWF amounts
       await prisma.pawaPayTransaction.create({
         data: {
           userId,
           transactionId: payoutId,
           transactionType: 'PAYOUT',
           status: response.status,
-          amount: amountInSmallestUnit,
-          currency: currency.toUpperCase(),
+          amount: amountInSmallestUnit, // RWF amount
+          currency: 'RWF',
           country: countryISO3,
           correspondent: providerCode,
           recipientPhone: formattedPhone,
@@ -270,7 +308,16 @@ export class PawaPayController {
           depositedAmount: response.depositedAmount,
           providerTransactionId: response.correspondentIds?.PROVIDER_TRANSACTION_ID,
           financialTransactionId: response.correspondentIds?.FINANCIAL_TRANSACTION_ID,
-          metadata: metadata || {},
+          metadata: {
+            ...(metadata || {}),
+            originalAmountUSD: usdAmount,
+            exchangeRate: payoutRateValue,
+            baseRate: exchangeRate.base,
+            depositRate: exchangeRate.depositRate,
+            payoutRate: exchangeRate.payoutRate,
+            spread: exchangeRate.spread,
+            amountRWF: rwfAmount
+          },
           internalReference,
           receivedByPawaPay: response.receivedByPawaPay ? new Date(response.receivedByPawaPay) : undefined,
           failureCode: response.failureReason?.failureCode,
@@ -284,8 +331,16 @@ export class PawaPayController {
         data: {
           payoutId,
           status: response.status,
-          amount: pawaPayService.convertFromSmallestUnit(amountInSmallestUnit, currency),
-          currency,
+          amountUSD: usdAmount,
+          amountRWF: rwfAmount,
+          currency: 'RWF',
+          exchangeRate: {
+            rate: payoutRateValue,
+            base: exchangeRate.base,
+            depositRate: exchangeRate.depositRate,
+            payoutRate: exchangeRate.payoutRate,
+            spread: exchangeRate.spread
+          },
           country: countryISO3,
           provider: providerCode,
           created: response.created
