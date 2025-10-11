@@ -1,6 +1,6 @@
 // ============================================================================
 // src/routes/booking-leads.routes.ts
-// Routes for managing archived bookings (leads) - Admin only
+// Routes for managing archived bookings (leads) - Admin access only
 // ============================================================================
 
 import { Router } from 'express';

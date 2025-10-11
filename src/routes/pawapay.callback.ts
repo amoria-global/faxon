@@ -200,7 +200,7 @@ async function handleDepositCompletion(
     }
 
     if (internalRef.startsWith('BOOK_') || internalRef.includes('booking')) {
-      // Update booking payment status
+      // Update booking payment status and confirm booking
       const updatedBookings = await prisma.booking.updateMany({
         where: {
           OR: [{ transactionId: internalRef }, { id: internalRef }],
@@ -208,6 +208,7 @@ async function handleDepositCompletion(
         },
         data: {
           paymentStatus: 'completed',
+          status: 'confirmed', // Also confirm the booking when payment is completed
           transactionId: transaction.transactionId
         }
       });

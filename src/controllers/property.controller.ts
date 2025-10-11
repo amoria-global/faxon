@@ -2091,133 +2091,37 @@ export class PropertyController {
   };
 
   // --- AGENT AS HOST ENDPOINTS ---
-  createAgentOwnProperty = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      if (!req.user) {
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required'
-        });
-        return;
-      }
-
-      const agentId = parseInt(req.user.userId);
-      const propertyData: CreatePropertyDto = req.body;
-
-      const property = await this.propertyService.createAgentOwnProperty(agentId, propertyData);
-      
-      res.status(201).json({
-        success: true,
-        message: 'Agent property created successfully',
-        data: property
-      });
-    } catch (error: any) {
-      logger.error('Failed to create agent own property', 'PropertyController', error);
-      res.status(400).json({
-        success: false,
-        message: error.message || 'Failed to create property'
-      });
-    }
+  // DISABLED: Agents can no longer own properties
+  createAgentOwnProperty = async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+    res.status(403).json({
+      success: false,
+      message: 'Agents cannot own properties. Please use the client property management endpoints to create properties for your clients.'
+    });
   };
 
-  getAgentOwnProperties = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      if (!req.user) {
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required'
-        });
-        return;
-      }
-
-      const agentId = parseInt(req.user.userId);
-      const status = req.query.status as string;
-      
-      const filters: Partial<PropertySearchFilters> = {};
-      if (status) {
-        filters.status = status as PropertyStatus;
-      }
-      
-      const properties = await this.propertyService.getAgentOwnProperties(agentId, filters);
-      
-      res.json({
-        success: true,
-        message: 'Agent owned properties retrieved successfully',
-        data: properties
-      });
-    } catch (error: any) {
-      logger.error('Failed to fetch agent own properties', 'PropertyController', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to retrieve properties'
-      });
-    }
+  // DISABLED: Agents can no longer own properties
+  getAgentOwnProperties = async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+    res.status(403).json({
+      success: false,
+      message: 'Agents cannot own properties. Use /agent/properties to view properties you manage for clients.',
+      data: []
+    });
   };
 
-  getAgentOwnPropertyBookings = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      if (!req.user) {
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required'
-        });
-        return;
-      }
-
-      const propertyId = parseInt(req.params.id);
-      const agentId = parseInt(req.user.userId);
-
-      if (isNaN(propertyId)) {
-        res.status(400).json({
-          success: false,
-          message: 'Invalid property ID'
-        });
-        return;
-      }
-
-      const bookings = await this.propertyService.getAgentOwnPropertyBookings(agentId, propertyId);
-      
-      res.json({
-        success: true,
-        message: 'Agent property bookings retrieved successfully',
-        data: bookings
-      });
-    } catch (error: any) {
-      logger.error('Failed to fetch agent own property bookings', 'PropertyController', error);
-      res.status(400).json({
-        success: false,
-        message: error.message || 'Failed to retrieve bookings'
-      });
-    }
+  // DISABLED: Agents can no longer own properties
+  getAgentOwnPropertyBookings = async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+    res.status(403).json({
+      success: false,
+      message: 'Agents cannot own properties. Use /agent/bookings to view bookings for client properties.'
+    });
   };
 
-  getAgentOwnPropertyGuests = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      if (!req.user) {
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required'
-        });
-        return;
-      }
-
-      const agentId = parseInt(req.user.userId);
-      const propertyId = req.query.propertyId ? parseInt(req.query.propertyId as string) : undefined;
-
-      const guests = await this.propertyService.getAgentOwnPropertyGuests(agentId, propertyId);
-      
-      res.json({
-        success: true,
-        message: 'Agent property guests retrieved successfully',
-        data: guests
-      });
-    } catch (error: any) {
-      logger.error('Failed to fetch agent property guests', 'PropertyController', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to retrieve guests'
-      });
-    }
+  // DISABLED: Agents can no longer own properties
+  getAgentOwnPropertyGuests = async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+    res.status(403).json({
+      success: false,
+      message: 'Agents cannot own properties. Use /agent/guests to view guests for client properties.'
+    });
   };
 
   getAllAgentProperties = async (req: AuthenticatedRequest, res: Response): Promise<void> => {

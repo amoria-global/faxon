@@ -45,7 +45,7 @@ export class EmailService {
     );
 
     this.defaultSender = {
-      name: 'Jambolush Escrow',
+      name: 'Jambolush Payments',
       email: config.brevoSenderEmail
     };
 
@@ -176,6 +176,62 @@ export class EmailService {
     }
   }
 
+  // === BOOKING PAYMENT NOTIFICATIONS ===
+
+  async sendBookingPaymentConfirmationEmail(data: {
+    userEmail: string;
+    userName: string;
+    bookingId: string;
+    propertyName: string;
+    amount: number;
+    currency: string;
+    checkIn: Date;
+    checkOut: Date;
+    reference: string;
+  }): Promise<void> {
+    try {
+      const template = this.generateBookingPaymentConfirmationTemplate(data);
+
+      await this.sendEmail({
+        to: data.userEmail,
+        subject: template.subject,
+        html: template.html,
+        text: template.text
+      });
+
+      console.log(`Booking payment confirmation sent to ${data.userEmail}`);
+    } catch (error: any) {
+      console.error('Failed to send booking payment confirmation:', error);
+      // Don't throw - non-critical
+    }
+  }
+
+  async sendBookingPaymentStatusEmail(data: {
+    userEmail: string;
+    userName: string;
+    bookingId: string;
+    propertyName: string;
+    amount: number;
+    status: string;
+    reference: string;
+  }): Promise<void> {
+    try {
+      const template = this.generateBookingPaymentStatusTemplate(data);
+
+      await this.sendEmail({
+        to: data.userEmail,
+        subject: template.subject,
+        html: template.html,
+        text: template.text
+      });
+
+      console.log(`Booking payment status email sent to ${data.userEmail}`);
+    } catch (error: any) {
+      console.error('Failed to send booking payment status email:', error);
+      // Don't throw - non-critical
+    }
+  }
+
   // === BASE TEMPLATE ===
 
   private getBaseTemplate(): string {
@@ -250,21 +306,21 @@ export class EmailService {
             <div class="header">
               <img src="${this.companyInfo.logo}" alt="${this.companyInfo.name}" class="logo">
               <div class="header-title">${this.companyInfo.name}</div>
-              <div class="header-subtitle">Secure Escrow Payment</div>
+              <div class="header-subtitle">Secure Payment System</div>
             </div>
 
             <div class="content">
               <div class="greeting">Hi ${data.user.firstName || 'there'},</div>
 
               <div class="message">
-                Your payment has been initialized and is being held securely in escrow. Please complete your payment to proceed with your booking.
+                Your payment has been initialized and is being held securely. Please complete your payment to proceed with your booking.
               </div>
 
               <div class="info-card">
                 <div class="info-card-header">Payment Details</div>
                 <div class="info-row"><span class="info-label">Reference</span><span class="info-value">${data.transaction.reference}</span></div>
                 <div class="info-row"><span class="info-label">Amount</span><span class="info-value">${data.transaction.amount.toLocaleString()} ${data.transaction.currency}</span></div>
-                <div class="info-row"><span class="info-label">Description</span><span class="info-value">${data.transaction.description || 'Escrow payment'}</span></div>
+                <div class="info-row"><span class="info-label">Description</span><span class="info-value">${data.transaction.description || 'Payment'}</span></div>
                 <div class="info-row"><span class="info-label">Status</span><span class="info-value">Pending Payment</span></div>
               </div>
 
@@ -273,9 +329,9 @@ export class EmailService {
               </div>
 
               <div class="alert-box alert-info">
-                <div class="alert-title">Secure Escrow Protection</div>
+                <div class="alert-title">Secure Payment Protection</div>
                 <div class="alert-text">
-                  Your funds will be securely held in escrow until the service is confirmed as delivered. This protects both you and the service provider.
+                  Your funds will be securely held until the service is confirmed as delivered. This protects both you and the service provider.
                 </div>
               </div>
             </div>
@@ -295,12 +351,12 @@ export class EmailService {
     const text = `
 Hi ${data.user.firstName || 'there'},
 
-Your payment has been initialized and is being held securely in escrow.
+Your payment has been initialized and is being held securely.
 
 Payment Details:
 - Reference: ${data.transaction.reference}
 - Amount: ${data.transaction.amount.toLocaleString()} ${data.transaction.currency}
-- Description: ${data.transaction.description || 'Escrow payment'}
+- Description: ${data.transaction.description || 'Payment'}
 - Status: Pending Payment
 
 Complete your payment here: ${data.checkoutUrl}
@@ -648,6 +704,247 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
     return { subject, html, text };
   }
 
+  // === BOOKING PAYMENT TEMPLATES ===
+
+  private generateBookingPaymentConfirmationTemplate(data: {
+    userName: string;
+    bookingId: string;
+    propertyName: string;
+    amount: number;
+    currency: string;
+    checkIn: Date;
+    checkOut: Date;
+    reference: string;
+  }): EmailTemplate {
+    const subject = `🎉 Payment Successful - Booking Confirmed for ${data.propertyName}`;
+
+    const html = `
+      ${this.getBaseTemplate()}
+      <body>
+        <div class="email-wrapper">
+          <div class="email-container">
+            <div class="header">
+              <div class="header-title">Payment Successful! 🎉</div>
+              <div class="header-subtitle">Your booking has been confirmed</div>
+            </div>
+
+            <div class="content">
+              <div class="greeting">Hi ${data.userName}!</div>
+
+              <div class="message">
+                Great news! Your payment has been successfully processed and your booking is now <strong>confirmed</strong>.
+              </div>
+
+              <div class="alert-box alert-success">
+                <div class="alert-title">✅ Booking Confirmed</div>
+                <div class="alert-text">
+                  Your reservation for ${data.propertyName} has been confirmed. The host has been notified.
+                </div>
+              </div>
+
+              <div class="info-card">
+                <div class="info-card-header">📋 Booking Details</div>
+                <div class="info-row">
+                  <span class="info-label">Booking ID</span>
+                  <span class="info-value">${data.bookingId}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Property</span>
+                  <span class="info-value">${data.propertyName}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Check-In</span>
+                  <span class="info-value">${new Date(data.checkIn).toLocaleDateString()}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Check-Out</span>
+                  <span class="info-value">${new Date(data.checkOut).toLocaleDateString()}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Amount Paid</span>
+                  <span class="info-value"><strong>${data.amount.toLocaleString()} ${data.currency}</strong></span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Reference</span>
+                  <span class="info-value">${data.reference}</span>
+                </div>
+              </div>
+
+              <div class="message">
+                <strong>What's Next?</strong>
+                <ul>
+                  <li>You'll receive check-in instructions from your host closer to your arrival date</li>
+                  <li>Your funds are held securely in escrow until check-in is validated</li>
+                  <li>The host will receive their payment after successful check-in</li>
+                </ul>
+              </div>
+
+              <div class="alert-box alert-info">
+                <div class="alert-title">💡 Payment Protection</div>
+                <div class="alert-text">
+                  Your payment is protected by our secure payment system. The host only receives funds after you check in successfully.
+                </div>
+              </div>
+
+              <div class="button-center">
+                <a href="${this.companyInfo.website}/bookings/${data.bookingId}" class="button">
+                  View Booking Details
+                </a>
+              </div>
+
+              <div class="message" style="margin-top: 24px; font-size: 13px; color: #6b7280;">
+                Need help? Contact us at <a href="mailto:${this.companyInfo.supportEmail}">${this.companyInfo.supportEmail}</a>
+              </div>
+            </div>
+
+            <div class="footer">
+              <div class="footer-text">
+                © ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.<br>
+                This is an automated message. Please do not reply to this email.
+              </div>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const text = `
+Hi ${data.userName}!
+
+🎉 PAYMENT SUCCESSFUL - BOOKING CONFIRMED
+
+Your payment has been successfully processed and your booking is now confirmed!
+
+Booking Details:
+- Booking ID: ${data.bookingId}
+- Property: ${data.propertyName}
+- Check-In: ${new Date(data.checkIn).toLocaleDateString()}
+- Check-Out: ${new Date(data.checkOut).toLocaleDateString()}
+- Amount Paid: ${data.amount.toLocaleString()} ${data.currency}
+- Reference: ${data.reference}
+
+What's Next?
+• You'll receive check-in instructions from your host closer to your arrival date
+• Your funds are held securely until check-in is validated
+• The host will receive their payment after successful check-in
+
+Payment Protection:
+Your payment is protected by our secure payment system. The host only receives funds after you check in successfully.
+
+View your booking: ${this.companyInfo.website}/bookings/${data.bookingId}
+
+Need help? Contact us at ${this.companyInfo.supportEmail}
+    `;
+
+    return { subject, html, text };
+  }
+
+  private generateBookingPaymentStatusTemplate(data: {
+    userName: string;
+    bookingId: string;
+    propertyName: string;
+    amount: number;
+    status: string;
+    reference: string;
+  }): EmailTemplate {
+    const statusEmoji = data.status === 'completed' ? '✅' :
+                       data.status === 'failed' ? '❌' :
+                       data.status === 'refunded' ? '💰' : '⏳';
+
+    const subject = `${statusEmoji} Payment ${data.status.toUpperCase()} - ${data.propertyName}`;
+
+    const alertClass = data.status === 'completed' ? 'alert-success' :
+                      data.status === 'failed' ? 'alert-error' :
+                      data.status === 'refunded' ? 'alert-warning' : 'alert-info';
+
+    const statusMessage = data.status === 'completed' ? 'Your payment was successful and your booking is confirmed!' :
+                         data.status === 'failed' ? 'Unfortunately, your payment could not be processed.' :
+                         data.status === 'refunded' ? 'Your payment has been refunded.' :
+                         'Your payment is being processed.';
+
+    const html = `
+      ${this.getBaseTemplate()}
+      <body>
+        <div class="email-wrapper">
+          <div class="email-container">
+            <div class="header">
+              <div class="header-title">Payment Update ${statusEmoji}</div>
+              <div class="header-subtitle">${data.propertyName}</div>
+            </div>
+
+            <div class="content">
+              <div class="greeting">Hi ${data.userName}!</div>
+
+              <div class="alert-box ${alertClass}">
+                <div class="alert-title">Payment Status: ${data.status.toUpperCase()}</div>
+                <div class="alert-text">${statusMessage}</div>
+              </div>
+
+              <div class="info-card">
+                <div class="info-card-header">Payment Details</div>
+                <div class="info-row">
+                  <span class="info-label">Booking ID</span>
+                  <span class="info-value">${data.bookingId}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Property</span>
+                  <span class="info-value">${data.propertyName}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Amount</span>
+                  <span class="info-value">${data.amount.toLocaleString()} RWF</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Status</span>
+                  <span class="info-value"><strong>${data.status.toUpperCase()}</strong></span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Reference</span>
+                  <span class="info-value">${data.reference}</span>
+                </div>
+              </div>
+
+              <div class="button-center">
+                <a href="${this.companyInfo.website}/bookings/${data.bookingId}" class="button">
+                  View Booking
+                </a>
+              </div>
+            </div>
+
+            <div class="footer">
+              <div class="footer-text">
+                © ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.
+              </div>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const text = `
+Hi ${data.userName}!
+
+${statusEmoji} PAYMENT UPDATE
+
+Status: ${data.status.toUpperCase()}
+${statusMessage}
+
+Payment Details:
+- Booking ID: ${data.bookingId}
+- Property: ${data.propertyName}
+- Amount: ${data.amount.toLocaleString()} RWF
+- Reference: ${data.reference}
+
+View your booking: ${this.companyInfo.website}/bookings/${data.bookingId}
+
+Need help? Contact us at ${this.companyInfo.supportEmail}
+    `;
+
+    return { subject, html, text };
+  }
+
   // === UTILITY METHODS ===
 
   private async sendEmail(options: {
@@ -670,7 +967,7 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
   private getStatusSpecificContent(status: EscrowTransactionStatus, transaction: EscrowTransaction): string {
     switch (status) {
       case 'HELD':
-        return '<div class="message">Your funds are now securely held in escrow and will be released once the service is confirmed as delivered.</div>';
+        return '<div class="message">Your funds are now securely held and will be released once the service is confirmed as delivered.</div>';
       case 'RELEASED':
         return '<div class="message">The funds have been released to the service provider. Thank you for using our platform!</div>';
       case 'REFUNDED':

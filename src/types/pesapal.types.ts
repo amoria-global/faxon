@@ -202,7 +202,7 @@ export interface WithdrawalDestination {
 export interface CreateDepositDto {
   amount: number;
   currency: string;
-  reference: string;
+  reference?: string; // Optional - will be auto-generated if not provided
   description?: string;
   hostId: number;
   agentId?: number;
