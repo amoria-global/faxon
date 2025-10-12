@@ -266,7 +266,7 @@ model Wallet {
   userId            Int                 @unique
   balance           Float               @default(0)
   pendingBalance    Float               @default(0)  // Balance pending approval/release
-  currency          String              @default("RWF")
+  currency          String              @default("USD")
   walletNumber      String?             @unique     // Unique wallet identifier for transfers
   accountNumber     String?
   isActive          Boolean             @default(true)

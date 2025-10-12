@@ -92,7 +92,7 @@ export const config = {
     primaryProvider: 'pesapal',
     
     // Escrow business logic settings
-    defaultCurrency: process.env.ESCROW_DEFAULT_CURRENCY || 'RWF',
+    defaultCurrency: process.env.ESCROW_DEFAULT_CURRENCY || 'USD',
     supportedCurrencies: (process.env.ESCROW_SUPPORTED_CURRENCIES || 'RWF,USD,UGX,TZS,KES').split(','),
     
     // Transaction limits

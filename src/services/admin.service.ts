@@ -3958,7 +3958,7 @@ export class AdminService {
             data: {
               userId: user.id,
               balance: 0,
-              currency: 'RWF'
+              currency: 'USD'
             }
           });
           fixed++;

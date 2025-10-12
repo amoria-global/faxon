@@ -838,53 +838,65 @@ export class BookingService {
   async searchTourBookings(userId: number, filters: TourBookingFilters, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
 
-    const whereClause: any = {
-      OR: [
-        { userId: userId },
-        { tourGuideId: userId }
-      ]
-    };
+    // ✅ FIXED: Build conditions in an array to combine them with AND.
+    const whereConditions: any[] = [
+      {
+        OR: [
+          { userId: userId },
+          { tourGuideId: userId }
+        ]
+      }
+    ];
 
     if (filters.status) {
-      whereClause.status = { in: filters.status };
+      whereConditions.push({ status: { in: filters.status } });
     }
 
     if (filters.tourId) {
-      whereClause.tourId = filters.tourId;
+      whereConditions.push({ tourId: filters.tourId });
     }
 
     if (filters.tourDate) {
       const date = new Date(filters.tourDate);
-      whereClause.schedule = {
-        startDate: {
-          gte: new Date(date.setHours(0, 0, 0, 0)),
-          lt: new Date(date.setHours(23, 59, 59, 999))
+      whereConditions.push({
+        schedule: {
+          startDate: {
+            gte: new Date(date.setHours(0, 0, 0, 0)),
+            lt: new Date(date.setHours(23, 59, 59, 999))
+          }
         }
-      };
+      });
     }
-
+    
     if (filters.category) {
-      whereClause.tour = { category: filters.category };
+      whereConditions.push({ tour: { category: filters.category } });
     }
 
     if (filters.difficulty) {
-      whereClause.tour = { ...whereClause.tour, difficulty: filters.difficulty };
+      whereConditions.push({ tour: { difficulty: filters.difficulty } });
     }
 
     if (filters.minAmount || filters.maxAmount) {
-      whereClause.totalAmount = {};
-      if (filters.minAmount) whereClause.totalAmount.gte = filters.minAmount;
-      if (filters.maxAmount) whereClause.totalAmount.lte = filters.maxAmount;
+      const amountFilter: any = {};
+      if (filters.minAmount) amountFilter.gte = filters.minAmount;
+      if (filters.maxAmount) amountFilter.lte = filters.maxAmount;
+      whereConditions.push({ totalAmount: amountFilter });
     }
 
     if (filters.search) {
-      whereClause.OR = [
-        { tour: { title: { contains: filters.search } } },
-        { tour: { locationCity: { contains: filters.search } } },
-        { user: { firstName: { contains: filters.search } } },
-        { user: { lastName: { contains: filters.search } } }
-      ];
+      // This now gets ADDED to the other conditions, not replacing them.
+      whereConditions.push({
+        OR: [
+          { tour: { title: { contains: filters.search, mode: 'insensitive' } } },
+          { tour: { locationCity: { contains: filters.search, mode: 'insensitive' } } },
+          { user: { firstName: { contains: filters.search, mode: 'insensitive' } } },
+          { user: { lastName: { contains: filters.search, mode: 'insensitive' } } }
+        ]
+      });
     }
+    
+    // Combine all conditions using AND
+    const whereClause = { AND: whereConditions };
 
     const orderBy: any = {};
     if (filters.sortBy) {
@@ -911,7 +923,7 @@ export class BookingService {
     ]);
 
     return {
-      bookings: bookings.map(b => this.transformToTourBookingInfo(b)),
+      bookings: bookings.map(b => this.transformToTourBookingInfo(b)), // Assuming this function exists
       total,
       page,
       limit,
@@ -1447,6 +1459,18 @@ export class BookingService {
       throw new Error('Booking schedule data is missing');
     }
 
+    // ✅ Helper function to safely handle data that might be a JSON string or an object
+    const safeParse = (data: any, fallback: any[] | {} = []) => {
+      if (typeof data === 'string') {
+        try {
+          return JSON.parse(data);
+        } catch (e) {
+          return fallback;
+        }
+      }
+      return data || fallback;
+    };
+
     return {
       id: booking.id,
       tourId: booking.tourId,
@@ -1458,12 +1482,13 @@ export class BookingService {
         duration: booking.tour.duration,
         difficulty: booking.tour.difficulty,
         location: `${booking.tour.locationCity}, ${booking.tour.locationCountry}`,
-        images: JSON.parse(booking.tour.images || '{}'),
+        // ✅ FIXED: Use the helper to safely handle the data
+        images: safeParse(booking.tour.images, {}),
         price: booking.tour.price,
         currency: booking.tour.currency,
-        inclusions: JSON.parse(booking.tour.inclusions || '[]'),
-        exclusions: JSON.parse(booking.tour.exclusions || '[]'),
-        requirements: JSON.parse(booking.tour.requirements || '[]'),
+        inclusions: safeParse(booking.tour.inclusions, []),
+        exclusions: safeParse(booking.tour.exclusions, []),
+        requirements: safeParse(booking.tour.requirements, []),
         meetingPoint: booking.tour.meetingPoint
       },
       scheduleId: booking.scheduleId,
@@ -1495,7 +1520,8 @@ export class BookingService {
         profileImage: booking.user.profileImage
       },
       numberOfParticipants: booking.numberOfParticipants,
-      participants: JSON.parse(booking.participants || '[]'),
+      // ✅ FIXED: Use the helper here as well
+      participants: safeParse(booking.participants, []),
       totalAmount: booking.totalAmount,
       currency: booking.currency,
       status: booking.status as TourBookingStatus,

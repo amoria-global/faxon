@@ -104,6 +104,13 @@ router.post('/agent/properties/:id/bookings', validateAgent, validateAgentProper
 router.get('/agent/properties/:id/analytics', validateAgent, validateAgentPropertyAccess, propertyController.getAgentPropertyAnalytics);
 router.get('/agent/properties/analytics/summary', validateAgent, propertyController.getAgentPropertiesAnalyticsSummary);
 
+// Agent client relationship management
+router.post('/agent/clients/:clientId/relationship', validateAgent, propertyController.establishClientRelationship);
+router.get('/agent/clients', validateAgent, propertyController.getAgentClients);
+
+// Agent property fix endpoint (for migration)
+router.post('/agent/properties/fix-agent-id', validateAgent, propertyController.fixAgentPropertiesAgentId);
+
 // Agent client property management
 router.get('/agent/clients/:clientId/properties', validateAgent, propertyController.getClientProperties);
 router.post('/agent/clients/:clientId/properties', validateAgent, validateProperty, propertyController.createClientProperty);

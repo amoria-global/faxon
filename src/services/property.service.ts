@@ -2,6 +2,7 @@
 import { PrismaClient } from '@prisma/client';
 import { BrevoPropertyMailingService } from '../utils/brevo.property';
 import { EnhancedPropertyService } from './enhanced-property.service';
+import { config } from '../config/config';
 import {
   CreatePropertyDto,
   UpdatePropertyDto,
@@ -519,10 +520,13 @@ export class PropertyService {
 
   // --- REVIEW MANAGEMENT ---
   async createReview(userId: number, data: CreateReviewDto): Promise<PropertyReview> {
+    // Ensure data.propertyId is treated as a number
+    const propertyIdAsNumber = Number(data.propertyId);
+
     // Check if user has completed booking for this property
     const completedBooking = await prisma.booking.findFirst({
       where: {
-        propertyId: data.propertyId,
+        propertyId: propertyIdAsNumber, // Use the converted number
         guestId: userId,
         status: 'completed',
         checkOut: { lt: new Date() }
@@ -2576,22 +2580,46 @@ export class PropertyService {
   // --- AGENT PROPERTY MANAGEMENT ---
   async getAgentProperties(agentId: number, filters: any, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
-    
+
+    // Get all clients this agent manages
+    const agentClients = await prisma.agentBooking.findMany({
+      where: { agentId, status: 'active' },
+      select: { clientId: true }
+    });
+
+    const clientIds = agentClients.map(ac => ac.clientId);
+
+    // Query properties where:
+    // 1. hostId is in the agent's client list, OR
+    // 2. agentId matches (for properties directly assigned to agent)
     const whereClause: any = {
-      hostId: agentId
+      OR: [
+        { hostId: { in: clientIds } },
+        { agentId: agentId }
+      ]
     };
 
     if (filters.clientId) {
-      whereClause.hostId = filters.clientId;
+      // Override to filter by specific client
+      whereClause.AND = [
+        { OR: whereClause.OR },
+        { hostId: filters.clientId }
+      ];
+      delete whereClause.OR;
     }
     if (filters.status) {
       whereClause.status = filters.status;
     }
     if (filters.search) {
-      whereClause.OR = [
-        { name: { contains: filters.search } },
-        { location: { contains: filters.search } }
-      ];
+      if (!whereClause.AND) {
+        whereClause.AND = [];
+      }
+      whereClause.AND.push({
+        OR: [
+          { name: { contains: filters.search } },
+          { location: { contains: filters.search } }
+        ]
+      });
     }
 
     const orderBy: any = {};
@@ -3155,14 +3183,204 @@ export class PropertyService {
     );
   }
 
-  async createClientProperty(agentId: number, clientId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
-    const hasAccess = await this.verifyAgentClientAccess(agentId, clientId);
-    if (!hasAccess) {
-      throw new Error('Access denied. Client not associated with your account.');
+  async establishClientRelationship(agentId: number, clientId: number, bookingType: string = 'general'): Promise<any> {
+    console.log('🔗 Establishing relationship - AgentID:', agentId, 'ClientID:', clientId);
+
+    // Prevent self-relationship
+    if (agentId === clientId) {
+      throw new Error('Agent cannot establish relationship with themselves. Please provide a different client ID.');
     }
 
+    // Verify client exists and is a host
+    const client = await prisma.user.findUnique({
+      where: { id: clientId },
+      select: { id: true, email: true, userType: true, firstName: true, lastName: true }
+    });
+
+    console.log('👤 Client found:', client);
+
+    if (!client) {
+      throw new Error('Client not found.');
+    }
+
+    // Verify client is a host (can own properties)
+    if (client.userType !== 'host' && client.userType !== 'admin') {
+      throw new Error(`User with ID ${clientId} is not a host. Only hosts can have properties managed by agents. User type: ${client.userType}`);
+    }
+
+    // Check if relationship already exists
+    const existingRelationship = await prisma.agentBooking.findFirst({
+      where: {
+        agentId,
+        clientId,
+        status: 'active'
+      }
+    });
+
+    console.log('🔍 Existing relationship:', existingRelationship);
+
+    if (existingRelationship) {
+      throw new Error('Relationship with this client already exists.');
+    }
+
+    // Get commission rate from config (default agent split)
+    const commissionRate = await this.getAgentCommissionRateFromConfig();
+    console.log('💰 Commission rate from config:', commissionRate);
+
+    // Create agent-client relationship
+    const relationship = await prisma.agentBooking.create({
+      data: {
+        agentId,
+        clientId,
+        bookingType: bookingType,
+        bookingId: `relationship-${Date.now()}`,
+        commission: 0,
+        commissionRate,
+        status: 'active',
+        notes: `Agent-client relationship established for ${bookingType} management`
+      }
+    });
+
+    console.log('✅ Relationship created:', relationship);
+
+    return {
+      id: relationship.id,
+      agentId: relationship.agentId,
+      clientId: relationship.clientId,
+      clientName: `${client.firstName} ${client.lastName}`,
+      clientEmail: client.email,
+      clientType: client.userType,
+      commissionRate: relationship.commissionRate,
+      status: relationship.status,
+      createdAt: relationship.createdAt
+    };
+  }
+
+  async fixAgentPropertiesAgentId(agentId: number): Promise<any> {
+    // Get all client relationships for this agent
+    const relationships = await prisma.agentBooking.findMany({
+      where: { agentId, status: 'active' },
+      select: { clientId: true }
+    });
+
+    const clientIds = [...new Set(relationships.map(r => r.clientId))];
+
+    // Find properties where hostId is in clientIds but agentId is null
+    const propertiesToFix = await prisma.property.findMany({
+      where: {
+        hostId: { in: clientIds },
+        agentId: null
+      },
+      select: { id: true, name: true, hostId: true }
+    });
+
+    // Update all these properties
+    const updated = await prisma.property.updateMany({
+      where: {
+        hostId: { in: clientIds },
+        agentId: null
+      },
+      data: { agentId }
+    });
+
+    return {
+      propertiesFixed: updated.count,
+      properties: propertiesToFix
+    };
+  }
+
+  async getAgentClients(agentId: number): Promise<any[]> {
+    const relationships = await prisma.agentBooking.findMany({
+      where: {
+        agentId,
+      },
+      include: {
+        client: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            userType: true,
+            phone: true,
+            profileImage: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return relationships.map(rel => ({
+      relationshipId: rel.id,
+      clientId: rel.clientId,
+      clientName: `${rel.client.firstName} ${rel.client.lastName}`,
+      clientEmail: rel.client.email,
+      clientPhone: rel.client.phone,
+      clientType: rel.client.userType,
+      profileImage: rel.client.profileImage,
+      commissionRate: rel.commissionRate,
+      bookingType: rel.bookingType,
+      establishedAt: rel.createdAt
+    }));
+  }
+
+  async createClientProperty(agentId: number, clientId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
+    console.log('🔍 Checking access - AgentID:', agentId, 'ClientID:', clientId);
+
+    // Verify client exists and is a host
+    const client = await prisma.user.findUnique({
+      where: { id: clientId },
+      select: { id: true, email: true, userType: true, firstName: true, lastName: true }
+    });
+
+    if (!client) {
+      throw new Error('Client not found.');
+    }
+
+    // Verify client is a host (can own properties)
+    if (client.userType !== 'host' && client.userType !== 'admin') {
+      throw new Error(`User with ID ${clientId} is not a host. Only hosts can have properties managed by agents. User type: ${client.userType}`);
+    }
+
+    // Check if relationship exists
+    let hasAccess = await this.verifyAgentClientAccess(agentId, clientId);
+    console.log('✅ Access result:', hasAccess);
+
+    // If no relationship exists, create it automatically
+    if (!hasAccess) {
+      console.log('🔗 No relationship found. Creating one automatically...');
+
+      const commissionRate = await this.getAgentCommissionRateFromConfig();
+
+      await prisma.agentBooking.create({
+        data: {
+          agentId,
+          clientId,
+          bookingType: 'property',
+          bookingId: `auto-relationship-${Date.now()}`,
+          commission: 0,
+          commissionRate,
+          status: 'active',
+          notes: `Agent-client relationship auto-created for property management`
+        }
+      });
+
+      console.log('✅ Relationship created automatically');
+      hasAccess = true;
+    }
+
+    // Create the property (hostId will be clientId)
     const property = await this.createProperty(clientId, data);
 
+    // Update property to set agentId
+    await prisma.property.update({
+      where: { id: property.id },
+      data: { agentId: agentId }
+    });
+
+    console.log(`✅ Property ${property.id} created with hostId=${clientId} and agentId=${agentId}`);
+
+    // Create property-specific booking record
     const commissionRate = await this.getAgentCommissionRate(agentId);
     await prisma.agentBooking.create({
       data: {
@@ -3177,6 +3395,7 @@ export class PropertyService {
       }
     });
 
+    // Return property info
     return property;
   }
 
@@ -3497,11 +3716,16 @@ export class PropertyService {
       select: { id: true }
     });
 
-    return 2.19; // Default commission rate
+    return 4.38; // Default commission rate
+  }
+
+  private async getAgentCommissionRateFromConfig(): Promise<number> {
+    // Get agent commission from config defaultSplitRules
+    return config.escrow.defaultSplitRules.agent || 4.38;
   }
 
   private calculateBookingCommission(bookingValue: number, agentId: number): number {
-    const commissionRate = 2.19;
+    const commissionRate = 4.38;
     return bookingValue * (commissionRate / 100);
   }
 

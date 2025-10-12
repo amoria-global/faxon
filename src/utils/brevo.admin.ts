@@ -2533,7 +2533,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/wallet" class="button">
+                <a href="${context.company.website}/earnings" class="button">
                   View Wallet History
                 </a>
               </div>
@@ -2546,7 +2546,7 @@ Weekly Admin Report - Jambolush Platform
             <div class="footer">
               <div class="footer-links">
                 <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/wallet">Wallet</a>
+                <a href="${context.company.website}/earnings">Wallet</a>
                 <a href="mailto:${context.company.supportEmail}">Support</a>
               </div>
               <div class="footer-text">
@@ -2705,7 +2705,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/wallet/transactions" class="button">
+                <a href="${context.company.website}/earnings/transactions" class="button">
                   View Transaction History
                 </a>
               </div>
@@ -2714,7 +2714,7 @@ Weekly Admin Report - Jambolush Platform
             <div class="footer">
               <div class="footer-links">
                 <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/wallet">Wallet</a>
+                <a href="${context.company.website}/earnings">Wallet</a>
                 <a href="mailto:${context.company.supportEmail}">Support</a>
               </div>
               <div class="footer-text">
@@ -2793,7 +2793,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/wallet" class="button">
+                <a href="${context.company.website}/earnings" class="button">
                   Go to Wallet
                 </a>
               </div>
@@ -2806,7 +2806,7 @@ Weekly Admin Report - Jambolush Platform
             <div class="footer">
               <div class="footer-links">
                 <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/wallet">Wallet</a>
+                <a href="${context.company.website}/earnings">Wallet</a>
                 <a href="mailto:${context.company.supportEmail}">Support</a>
               </div>
               <div class="footer-text">
@@ -2886,7 +2886,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/wallet" class="button">
+                <a href="${context.company.website}/earnings" class="button">
                   View Your Wallet
                 </a>
               </div>
@@ -2895,7 +2895,7 @@ Weekly Admin Report - Jambolush Platform
             <div class="footer">
               <div class="footer-links">
                 <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/wallet">Wallet</a>
+                <a href="${context.company.website}/earnings">Wallet</a>
                 <a href="mailto:${context.company.supportEmail}">Support</a>
               </div>
               <div class="footer-text">
@@ -3187,7 +3187,7 @@ TRANSACTION DETAILS:
 ${context.action.reason ? `- Reason: ${context.action.reason}` : ''}
 - Date: ${new Date(context.action.timestamp).toLocaleString()}
 
-View wallet: ${context.company.website}/wallet
+View wallet: ${context.company.website}/earnings
 
 Questions? Contact: ${context.company.supportEmail}
 
@@ -3239,7 +3239,7 @@ DETAILS:
 
 The funds should arrive in your account within 3-5 business days.
 
-View transactions: ${context.company.website}/wallet/transactions
+View transactions: ${context.company.website}/earnings/transactions
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
@@ -3269,7 +3269,7 @@ NEXT STEPS:
 - Submit a new withdrawal request
 - Contact support if needed
 
-Go to wallet: ${context.company.website}/wallet
+Go to wallet: ${context.company.website}/earnings
 
 Support: ${context.company.supportEmail}
 
@@ -3295,7 +3295,7 @@ ${context.action.reason ? `- Note: ${context.action.reason}` : ''}
 
 You can now withdraw these funds or use them on the platform.
 
-View wallet: ${context.company.website}/wallet
+View wallet: ${context.company.website}/earnings
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();

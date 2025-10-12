@@ -1812,6 +1812,103 @@ export class PropertyController {
     }
   };
 
+  // --- CLIENT RELATIONSHIP MANAGEMENT ---
+  establishClientRelationship = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const clientId = parseInt(req.params.clientId);
+      const { bookingType } = req.body;
+
+      if (isNaN(clientId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid client ID'
+        });
+        return;
+      }
+
+      const relationship = await this.propertyService.establishClientRelationship(
+        agentId,
+        clientId,
+        bookingType || 'general'
+      );
+
+      res.status(201).json({
+        success: true,
+        message: 'Client relationship established successfully',
+        data: relationship
+      });
+    } catch (error: any) {
+      logger.error('Failed to establish client relationship', 'PropertyController', error);
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to establish client relationship'
+      });
+    }
+  };
+
+  fixAgentPropertiesAgentId = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const result = await this.propertyService.fixAgentPropertiesAgentId(agentId);
+
+      res.json({
+        success: true,
+        message: `Fixed ${result.propertiesFixed} properties`,
+        data: result
+      });
+    } catch (error: any) {
+      logger.error('Failed to fix agent properties', 'PropertyController', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fix properties'
+      });
+    }
+  };
+
+  getAgentClients = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const clients = await this.propertyService.getAgentClients(agentId);
+
+      res.json({
+        success: true,
+        message: 'Agent clients retrieved successfully',
+        data: clients
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch agent clients', 'PropertyController', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve clients'
+      });
+    }
+  };
+
   // --- CLIENT PROPERTY MANAGEMENT ---
   getClientProperties = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {

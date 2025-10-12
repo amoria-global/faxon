@@ -426,7 +426,7 @@ export class BookingController {
         search: req.query.search as string
       };
 
-      // Remove undefined values
+      // This part for removing undefined keys is fine, no changes needed.
       Object.keys(filters).forEach(key => {
         if (filters[key as keyof TourBookingFilters] === undefined) {
           delete filters[key as keyof TourBookingFilters];
@@ -441,10 +441,11 @@ export class BookingController {
         data: result
       });
     } catch (error: any) {
+      // ✅ FIXED: Log the full error for debugging and return a clean message to the user.
       console.error('Error searching tour bookings:', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to search tour bookings'
+        message: error.message || 'An unexpected error occurred while searching tour bookings.'
       });
     }
   };

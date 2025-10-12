@@ -1032,7 +1032,21 @@ export class AuthService {
     if (!user) {
       throw new Error('User not found');
     }
+    
+    let wallet = await prisma.wallet.findUnique({
+      where: { userId: user.id }
+    });
 
+    if (!wallet) {
+      wallet = await prisma.wallet.create({
+        data: {
+          userId: user.id,
+          balance: 0,
+          currency: config.escrow.defaultCurrency,
+          isActive: true
+        }
+      });
+    }
     return this.transformToUserInfo(user);
   }
 
@@ -1909,7 +1923,7 @@ export class AuthService {
     const accessToken = jwt.sign(
       { userId: userId.toString(), email, userType } as JwtPayload,
       config.jwtSecret,
-      { expiresIn: '1h' }
+      { expiresIn: '15m' }
     );
 
     const refreshToken = jwt.sign(

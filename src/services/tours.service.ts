@@ -1052,7 +1052,7 @@ export class TourService {
         minGroupSize: tourData.minGroupSize || 1,
         price: tourData.price,
         currency: tourData.currency || 'USD',
-        images: JSON.stringify(tourData.images),
+        images: tourData.images,
         itinerary: JSON.stringify(tourData.itinerary),
         inclusions: tourData.inclusions,
         exclusions: tourData.exclusions,
@@ -1166,8 +1166,8 @@ export class TourService {
       where: { id: tourId },
       data: {
         ...updateData,
-        itinerary: updateData.itinerary ? JSON.stringify(updateData.itinerary) : undefined,
-      },
+        tourGuideId: tourGuideId,
+        itinerary: updateData.itinerary ? JSON.stringify(updateData.itinerary) : undefined},
       include: {
         tourGuide: {
           select: {
