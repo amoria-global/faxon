@@ -1,5 +1,8 @@
+//src/services/property.service.ts - Unified Property Service
 import { PrismaClient } from '@prisma/client';
 import { BrevoPropertyMailingService } from '../utils/brevo.property';
+import { EnhancedPropertyService } from './enhanced-property.service';
+import { config } from '../config/config';
 import {
   CreatePropertyDto,
   UpdatePropertyDto,
@@ -42,10 +45,56 @@ import {
   MonthlyCommissionData
 } from '../types/property.types';
 
+// Enhanced KPI interfaces
+interface AdditionalAgentKPIs {
+  conversionRate: number; // Lead to booking conversion %
+  averageResponseTime: number; // in hours
+  customerRetentionRate: number; // Repeat client %
+  revenuePerClient: number; // Average revenue per client
+  bookingSuccessRate: number; // Successful bookings vs attempted
+  portfolioGrowthRate: number; // Property portfolio growth %
+  leadGenerationRate: number; // New leads per month
+  commissionGrowthRate: number; // Month-over-month commission growth
+  averageDaysOnMarket: number; // Time to first booking
+  propertyViewsToBookingRatio: number; // Views to booking conversion
+  clientSatisfactionScore: number; // Average client rating
+  marketPenetration: number; // Market share %
+  averageCommissionPerProperty: number;
+  propertyUtilizationRate: number; // % of properties actively generating bookings
+  crossSellingSuccess: number; // Additional services sold per client
+}
+
+interface EnhancedAgentDashboard extends AgentDashboard {
+  additionalKPIs: AdditionalAgentKPIs;
+  performanceTrends: {
+    conversionTrend: Array<{ month: string; rate: number }>;
+    retentionTrend: Array<{ month: string; rate: number }>;
+    revenueTrend: Array<{ month: string; revenue: number }>;
+    satisfactionTrend: Array<{ month: string; score: number }>;
+  };
+  competitiveMetrics: {
+    marketRanking: number;
+    totalAgentsInMarket: number;
+    marketSharePercentage: number;
+    competitorComparison: {
+      averageCommission: number;
+      averageProperties: number;
+      averageClientRetention: number;
+    };
+  };
+  clientSegmentation: {
+    newClients: number;
+    repeatClients: number;
+    vipClients: number;
+    inactiveClients: number;
+  };
+}
+
 const prisma = new PrismaClient();
 
 export class PropertyService {
   private emailService = new BrevoPropertyMailingService();
+  private enhancedService = new EnhancedPropertyService();
   
   // --- PROPERTY CRUD OPERATIONS ---
   async createProperty(hostId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
@@ -54,24 +103,24 @@ export class PropertyService {
       throw new Error('End date must be after start date');
     }
 
-  let upiNumber: string | undefined;
-  let propertyAddress: string | undefined;
-  let locationString: string;
+    let upiNumber: string | undefined;
+    let propertyAddress: string | undefined;
+    let locationString: string;
 
-  if (typeof data.location === 'object' && data.location.type) {
-    if (data.location.type === 'upi') {
-      upiNumber = data.location.upi;
-      locationString = `UPI: ${data.location.upi}`;
-    } else if (data.location.type === 'address') {
-      propertyAddress = data.location.address;
-      locationString = data.location.address;
+    if (typeof data.location === 'object' && data.location.type) {
+      if (data.location.type === 'upi') {
+        upiNumber = data.location.upi;
+        locationString = `UPI: ${data.location.upi}`;
+      } else if (data.location.type === 'address') {
+        propertyAddress = data.location.address;
+        locationString = data.location.address;
+      } else {
+        locationString = data.location.address || data.location.upi || '';
+      }
     } else {
-      locationString = data.location.address || data.location.upi || '';
+      // Fallback for string location (backward compatibility)
+      locationString = typeof data.location === 'string' ? data.location : '';
     }
-  } else {
-    // Fallback for string location (backward compatibility)
-    locationString = typeof data.location === 'string' ? data.location : '';
-  }
 
     const property = await prisma.property.create({
       data: {
@@ -93,7 +142,6 @@ export class PropertyService {
         video3D: data.video3D,
         availableFrom: new Date(data.availabilityDates.start),
         availableTo: new Date(data.availabilityDates.end),
-        ownerDetails: data.ownerDetails ? JSON.stringify(data.ownerDetails) : undefined, // Fix: use undefined instead of null
         status: 'pending' // Default status for new properties
       },
       include: {
@@ -129,77 +177,77 @@ export class PropertyService {
   }
 
   async updateProperty(propertyId: number, hostId: number, data: UpdatePropertyDto): Promise<PropertyInfo> {
-  const existingProperty = await prisma.property.findFirst({
-    where: { id: propertyId, hostId }
-  });
+    const existingProperty = await prisma.property.findFirst({
+      where: { id: propertyId, hostId }
+    });
 
-  if (!existingProperty) {
-    throw new Error('Property not found or access denied');
-  }
+    if (!existingProperty) {
+      throw new Error('Property not found or access denied');
+    }
 
-  // Handle location updates
-  let locationUpdates: any = {};
-  if (data.location) {
-    if (typeof data.location === 'object' && data.location.type) {
-      if (data.location.type === 'upi') {
+    // Handle location updates
+    let locationUpdates: any = {};
+    if (data.location) {
+      if (typeof data.location === 'object' && data.location.type) {
+        if (data.location.type === 'upi') {
+          locationUpdates = {
+            location: `UPI: ${data.location.upi}`,
+            upiNumber: data.location.upi,
+            propertyAddress: null // Clear address when switching to UPI
+          };
+        } else if (data.location.type === 'address') {
+          locationUpdates = {
+            location: data.location.address,
+            propertyAddress: data.location.address,
+            upiNumber: null // Clear UPI when switching to address
+          };
+        }
+      } else if (typeof data.location === 'string') {
         locationUpdates = {
-          location: `UPI: ${data.location.upi}`,
-          upiNumber: data.location.upi,
-          propertyAddress: null // Clear address when switching to UPI
-        };
-      } else if (data.location.type === 'address') {
-        locationUpdates = {
-          location: data.location.address,
-          propertyAddress: data.location.address,
-          upiNumber: null // Clear UPI when switching to address
+          location: data.location
         };
       }
-    } else if (typeof data.location === 'string') {
-      locationUpdates = {
-        location: data.location
-      };
     }
-  }
 
-  let updatedImages = existingProperty.images || undefined;
-  if (data.images) {
-    const currentImages = existingProperty.images 
-      ? JSON.parse(existingProperty.images as string) 
-      : {};
-    updatedImages = JSON.stringify({ ...currentImages, ...data.images });
-  }
-
-  const property = await prisma.property.update({
-    where: { id: propertyId },
-    data: {
-      ...(data.name && { name: data.name }),
-      ...locationUpdates, // Apply location updates
-      ...(data.type && { type: data.type }),
-      ...(data.category && { category: data.category }),
-      ...(data.pricePerNight && { pricePerNight: data.pricePerNight }),
-      ...(data.pricePerTwoNights && { pricePerTwoNights: data.pricePerTwoNights }),
-      ...(data.beds && { beds: data.beds }),
-      ...(data.baths && { baths: data.baths }),
-      ...(data.maxGuests && { maxGuests: data.maxGuests }),
-      ...(data.features && { features: JSON.stringify(data.features) }),
-      ...(data.description && { description: data.description }),
-      ...(data.video3D && { video3D: data.video3D }),
-      ...(data.status && { status: data.status }),
-      ...(data.availabilityDates && {
-        availableFrom: new Date(data.availabilityDates.start),
-        availableTo: new Date(data.availabilityDates.end)
-      }),
-      ...(updatedImages !== undefined && { images: updatedImages })
-    },
-    include: {
-      host: true,
-      reviews: true,
-      bookings: true
+    let updatedImages = existingProperty.images || undefined;
+    if (data.images) {
+      const currentImages = existingProperty.images 
+        ? JSON.parse(existingProperty.images as string) 
+        : {};
+      updatedImages = JSON.stringify({ ...currentImages, ...data.images });
     }
-  });
 
-  return this.transformToPropertyInfo(property);
-}
+    const property = await prisma.property.update({
+      where: { id: propertyId },
+      data: {
+        ...(data.name && { name: data.name }),
+        ...locationUpdates,
+        ...(data.type && { type: data.type }),
+        ...(data.category && { category: data.category }),
+        ...(data.pricePerNight && { pricePerNight: data.pricePerNight }),
+        ...(data.pricePerTwoNights && { pricePerTwoNights: data.pricePerTwoNights }),
+        ...(data.beds && { beds: data.beds }),
+        ...(data.baths && { baths: data.baths }),
+        ...(data.maxGuests && { maxGuests: data.maxGuests }),
+        ...(data.features && { features: JSON.stringify(data.features) }),
+        ...(data.description && { description: data.description }),
+        ...(data.video3D && { video3D: data.video3D }),
+        ...(data.status && { status: data.status }),
+        ...(data.availabilityDates && {
+          availableFrom: new Date(data.availabilityDates.start),
+          availableTo: new Date(data.availabilityDates.end)
+        }),
+        ...(updatedImages !== undefined && { images: updatedImages })
+      },
+      include: {
+        host: true,
+        reviews: true,
+        bookings: true
+      }
+    });
+
+    return this.transformToPropertyInfo(property);
+  }
 
   async deleteProperty(propertyId: number, hostId: number): Promise<void> {
     const property = await prisma.property.findFirst({
@@ -255,7 +303,6 @@ export class PropertyService {
     return this.transformToPropertyInfo(property);
   }
 
-  // --- THIS ENTIRE METHOD HAS BEEN UPDATED ---
   async searchProperties(filters: PropertySearchFilters, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
     
@@ -265,7 +312,6 @@ export class PropertyService {
 
     // Apply filters
     if (filters.location) {
-      // UPDATED: Removed `mode: 'insensitive'`
       whereClause.location = { contains: filters.location };
     }
     if (filters.type) {
@@ -303,13 +349,13 @@ export class PropertyService {
       whereClause.hostId = filters.hostId;
     }
     
-    // UPDATED: Keyword search block
+    // Keyword search block
     const orConditions = [];
     if (filters.search) {
       orConditions.push(
-        { name: { contains: filters.search } }, // mode removed
-        { location: { contains: filters.search } }, // mode removed
-        { description: { contains: filters.search } } // description added
+        { name: { contains: filters.search } },
+        { location: { contains: filters.search } },
+        { description: { contains: filters.search } }
       );
     }
     
@@ -321,7 +367,7 @@ export class PropertyService {
       }
     }
 
-    // UPDATED: Sort options block
+    // Sort options block
     const orderBy: any = {};
     if (filters.sortBy) {
       if (filters.sortBy === 'rating') {
@@ -364,29 +410,28 @@ export class PropertyService {
     const whereClause: any = { hostId };
     
     if (filters?.status) {
-        whereClause.status = filters.status;
+      whereClause.status = filters.status;
     }
 
     const properties = await prisma.property.findMany({
-        where: whereClause,
-        include: {
-            host: true,
-            reviews: { select: { rating: true } },
-            bookings: {
-                where: { status: 'confirmed' },
-                select: { id: true }
-            }
-        },
-        orderBy: { createdAt: 'desc' }
+      where: whereClause,
+      include: {
+        host: true,
+        reviews: { select: { rating: true } },
+        bookings: {
+          where: { status: 'confirmed' },
+          select: { id: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
     });
 
-    // ✅ Use Promise.all to handle async transformations
     const transformedProperties = await Promise.all(
-        properties.map((p: any) => this.transformToPropertyInfo(p))
+      properties.map((p: any) => this.transformToPropertyInfo(p))
     );
     
     return transformedProperties;
-}
+  }
 
   // --- BOOKING MANAGEMENT ---
   async createBooking(guestId: number, data: BookingRequest): Promise<BookingInfo> {
@@ -475,10 +520,13 @@ export class PropertyService {
 
   // --- REVIEW MANAGEMENT ---
   async createReview(userId: number, data: CreateReviewDto): Promise<PropertyReview> {
+    // Ensure data.propertyId is treated as a number
+    const propertyIdAsNumber = Number(data.propertyId);
+
     // Check if user has completed booking for this property
     const completedBooking = await prisma.booking.findFirst({
       where: {
-        propertyId: data.propertyId,
+        propertyId: propertyIdAsNumber, // Use the converted number
         guestId: userId,
         status: 'completed',
         checkOut: { lt: new Date() }
@@ -507,7 +555,7 @@ export class PropertyService {
         userId,
         rating: data.rating,
         comment: data.comment,
-        images: data.images ? JSON.stringify(data.images) : undefined // Fix: use undefined instead of null
+        images: data.images ? JSON.stringify(data.images) : undefined
       },
       include: { user: true }
     });
@@ -522,7 +570,7 @@ export class PropertyService {
         include: { host: true }
       });
 
-      if (propertyWithHost) {
+      if (propertyWithHost && propertyWithHost.host && propertyWithHost.hostId) {
         await this.emailService.sendNewReviewNotificationEmail({
           host: {
             firstName: propertyWithHost.host.firstName,
@@ -615,9 +663,1160 @@ export class PropertyService {
       totalRevenue,
       averageRating: avgRating._avg.averageRating || 0,
       recentBookings: bookings.slice(0, 5).map((b: any) => this.transformToBookingInfo(b)),
-      propertyPerformance: [], // Implement based on requirements
+      propertyPerformance: [],
       upcomingCheckIns: upcomingCheckIns.map((b: any) => this.transformToBookingInfo(b)),
       pendingReviews: reviews
+    };
+  }
+
+  // --- GUEST MANAGEMENT ---
+  async getHostGuests(hostId: number, filters?: GuestSearchFilters) {
+    const whereClause: any = {
+      bookingsAsGuest: {
+        some: {
+          property: {
+            hostId: hostId
+          }
+        }
+      }
+    };
+
+    // Apply search filters
+    if (filters?.search) {
+      whereClause.OR = [
+        { firstName: { contains: filters.search } },
+        { lastName: { contains: filters.search } },
+        { email: { contains: filters.search } }
+      ];
+    }
+
+    if (filters?.verificationStatus) {
+      whereClause.verificationStatus = filters.verificationStatus;
+    }
+
+    // Date range filter for bookings
+    if (filters?.dateRange) {
+      whereClause.bookingsAsGuest.some.createdAt = {
+        gte: new Date(filters.dateRange.start),
+        lte: new Date(filters.dateRange.end)
+      };
+    }
+
+    const orderBy: any = {};
+    if (filters?.sortBy) {
+      switch (filters.sortBy) {
+        case 'name':
+          orderBy.firstName = filters.sortOrder || 'asc';
+          break;
+        case 'joinDate':
+          orderBy.createdAt = filters.sortOrder || 'desc';
+          break;
+        default:
+          orderBy[filters.sortBy] = filters.sortOrder || 'desc';
+      }
+    } else {
+      orderBy.createdAt = 'desc';
+    }
+
+    const guests = await prisma.user.findMany({
+      where: whereClause,
+      include: {
+        bookingsAsGuest: {
+          where: {
+            property: { hostId }
+          },
+          include: {
+            property: { select: { name: true } }
+          },
+          orderBy: { createdAt: 'desc' }
+        },
+        reviews: {
+          where: {
+            property: { hostId }
+          }
+        }
+      },
+      orderBy
+    });
+
+    return guests.map((guest: any) => this.transformToGuestProfile(guest));
+  }
+
+  async getGuestDetails(hostId: number, guestId: number): Promise<GuestBookingHistory> {
+    const guest = await prisma.user.findFirst({
+      where: {
+        id: guestId,
+        bookingsAsGuest: {
+          some: {
+            property: { hostId }
+          }
+        }
+      },
+      include: {
+        bookingsAsGuest: {
+          where: {
+            property: { hostId }
+          },
+          include: {
+            property: { select: { name: true } }
+          },
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    });
+
+    if (!guest) {
+      throw new Error('Guest not found or no booking history with your properties');
+    }
+
+    const bookings = guest.bookingsAsGuest.map((b: any) => this.transformToBookingInfo(b));
+    const totalRevenue = bookings
+      .filter(b => b.status === 'completed')
+      .reduce((sum, b) => sum + b.totalPrice, 0);
+
+    const avgStayDuration = bookings.length > 0 
+      ? bookings.reduce((sum, b) => {
+          const checkIn = new Date(b.checkIn);
+          const checkOut = new Date(b.checkOut);
+          return sum + Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
+        }, 0) / bookings.length
+      : 0;
+
+    // Find most booked property
+    const propertyBookings = bookings.reduce((acc: any, b) => {
+      acc[b.propertyName] = (acc[b.propertyName] || 0) + 1;
+      return acc;
+    }, {});
+    
+    const favoriteProperty = Object.keys(propertyBookings).length > 0 
+      ? Object.keys(propertyBookings).reduce((a, b) => propertyBookings[a] > propertyBookings[b] ? a : b)
+      : undefined;
+
+    return {
+      guestId: guest.id,
+      bookings,
+      totalBookings: bookings.length,
+      totalRevenue,
+      averageStayDuration: avgStayDuration,
+      favoriteProperty
+    };
+  }
+
+  async getHostBookings(hostId: number, filters?: BookingFilters, page: number = 1, limit: number = 20) {
+    const skip = (page - 1) * limit;
+    
+    const whereClause: any = {
+      property: { hostId }
+    };
+
+    if (filters?.status) {
+      whereClause.status = { in: filters.status };
+    }
+
+    if (filters?.propertyId) {
+      whereClause.propertyId = filters.propertyId;
+    }
+
+    if (filters?.guestId) {
+      whereClause.guestId = filters.guestId;
+    }
+
+    if (filters?.dateRange) {
+      whereClause.createdAt = {
+        gte: new Date(filters.dateRange.start),
+        lte: new Date(filters.dateRange.end)
+      };
+    }
+
+    const orderBy: any = {};
+    if (filters?.sortBy) {
+      switch (filters.sortBy) {
+        case 'date':
+          orderBy.checkIn = filters.sortOrder || 'desc';
+          break;
+        case 'amount':
+          orderBy.totalPrice = filters.sortOrder || 'desc';
+          break;
+        case 'property':
+          orderBy.property = { name: filters.sortOrder || 'asc' };
+          break;
+        case 'guest':
+          orderBy.guest = { firstName: filters.sortOrder || 'asc' };
+          break;
+        default:
+          orderBy.createdAt = 'desc';
+      }
+    } else {
+      orderBy.createdAt = 'desc';
+    }
+
+    const [bookings, total] = await Promise.all([
+      prisma.booking.findMany({
+        where: whereClause,
+        include: {
+          property: { select: { name: true, location: true } },
+          guest: { select: { firstName: true, lastName: true, email: true, profileImage: true } }
+        },
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.booking.count({ where: whereClause })
+    ]);
+
+    return {
+      bookings: bookings.map((b: any) => this.transformToBookingInfo(b)),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    };
+  }
+
+  async updateBooking(hostId: number, bookingId: string, data: BookingUpdateDto): Promise<BookingInfo> {
+    // Verify host owns the property for this booking
+    const booking = await prisma.booking.findFirst({
+      where: {
+        id: bookingId,
+        property: { hostId }
+      },
+      include: {
+        property: true,
+        guest: true
+      }
+    });
+
+    if (!booking) {
+      throw new Error('Booking not found or access denied');
+    }
+
+    const updateData: any = {};
+    
+    if (data.status) updateData.status = data.status;
+    if (data.notes) updateData.notes = data.notes;
+    if (data.specialRequests) updateData.specialRequests = data.specialRequests;
+    if (data.checkInInstructions) updateData.checkInInstructions = data.checkInInstructions;
+    if (data.checkOutInstructions) updateData.checkOutInstructions = data.checkOutInstructions;
+
+    const updatedBooking = await prisma.booking.update({
+      where: { id: bookingId },
+      data: updateData,
+      include: {
+        property: true,
+        guest: true
+      }
+    });
+
+    return this.transformToBookingInfo(updatedBooking);
+  }
+
+  async getBookingCalendar(hostId: number, year: number, month: number): Promise<BookingCalendar> {
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0);
+    
+    const bookings = await prisma.booking.findMany({
+      where: {
+        property: { hostId },
+        status: { in: ['confirmed', 'completed'] },
+        OR: [
+          {
+            checkIn: { gte: startDate, lte: endDate }
+          },
+          {
+            checkOut: { gte: startDate, lte: endDate }
+          },
+          {
+            AND: [
+              { checkIn: { lte: startDate } },
+              { checkOut: { gte: endDate } }
+            ]
+          }
+        ]
+      },
+      include: {
+        property: { select: { name: true } },
+        guest: { select: { firstName: true, lastName: true } }
+      }
+    });
+
+    const days: BookingCalendarDay[] = [];
+    const today = new Date();
+
+    for (let day = 1; day <= endDate.getDate(); day++) {
+      const currentDate = new Date(year, month - 1, day);
+      const dateStr = currentDate.toISOString().split('T')[0];
+      
+      const dayBookings = bookings
+        .filter(booking => {
+          const checkIn = new Date(booking.checkIn);
+          const checkOut = new Date(booking.checkOut);
+          return currentDate >= checkIn && currentDate <= checkOut;
+        })
+        .map(booking => {
+          const checkIn = new Date(booking.checkIn);
+          const checkOut = new Date(booking.checkOut);
+          
+          let type: 'check_in' | 'check_out' | 'ongoing' = 'ongoing';
+          if (currentDate.toDateString() === checkIn.toDateString()) {
+            type = 'check_in';
+          } else if (currentDate.toDateString() === checkOut.toDateString()) {
+            type = 'check_out';
+          }
+
+          return {
+            id: booking.id,
+            guestName: `${booking.guest.firstName} ${booking.guest.lastName}`,
+            propertyName: booking.property.name,
+            type,
+            status: booking.status as BookingStatus
+          };
+        });
+
+      const revenue = dayBookings.reduce((sum, booking) => {
+        const fullBooking = bookings.find(b => b.id === booking.id);
+        return sum + (fullBooking?.totalPrice || 0);
+      }, 0);
+
+      days.push({
+        date: dateStr,
+        bookings: dayBookings,
+        revenue,
+        isToday: currentDate.toDateString() === today.toDateString()
+      });
+    }
+
+    return {
+      year,
+      month,
+      days
+    };
+  }
+
+  async getEarningsOverview(hostId: number): Promise<EarningsOverview> {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
+    const [
+      totalEarnings,
+      monthlyEarnings,
+      yearlyEarnings,
+      lastMonthEarnings,
+      totalBookings,
+      monthlyBookings,
+      occupiedNights,
+      totalNights
+    ] = await Promise.all([
+      prisma.booking.aggregate({
+        where: {
+          property: { hostId },
+          status: 'completed'
+        },
+        _sum: { totalPrice: true }
+      }),
+      prisma.booking.aggregate({
+        where: {
+          property: { hostId },
+          status: 'completed',
+          checkOut: { gte: startOfMonth }
+        },
+        _sum: { totalPrice: true }
+      }),
+      prisma.booking.aggregate({
+        where: {
+          property: { hostId },
+          status: 'completed',
+          checkOut: { gte: startOfYear }
+        },
+        _sum: { totalPrice: true }
+      }),
+      prisma.booking.aggregate({
+        where: {
+          property: { hostId },
+          status: 'completed',
+          checkOut: { gte: lastMonthStart, lte: lastMonthEnd }
+        },
+        _sum: { totalPrice: true }
+      }),
+      prisma.booking.count({
+        where: {
+          property: { hostId },
+          status: 'completed'
+        }
+      }),
+      prisma.booking.count({
+        where: {
+          property: { hostId },
+          status: 'completed',
+          checkOut: { gte: startOfMonth }
+        }
+      }),
+      prisma.booking.findMany({
+        where: {
+          property: { hostId },
+          status: 'completed'
+        },
+        select: { checkIn: true, checkOut: true }
+      }),
+      prisma.property.count({
+        where: { hostId, status: 'active' }
+      })
+    ]);
+
+    const occupiedNightsCount = occupiedNights.reduce((total, booking) => {
+      const nights = Math.ceil((new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) / (1000 * 60 * 60 * 24));
+      return total + nights;
+    }, 0);
+
+    const totalAvailableNights = totalNights * 365;
+    const occupancyRate = totalAvailableNights > 0 ? (occupiedNightsCount / totalAvailableNights) * 100 : 0;
+
+    const avgNightlyRate = occupiedNightsCount > 0 ? (totalEarnings._sum.totalPrice || 0) / occupiedNightsCount : 0;
+
+    const currentMonth = monthlyEarnings._sum.totalPrice || 0;
+    const lastMonth = lastMonthEarnings._sum.totalPrice || 0;
+    const revenueGrowth = lastMonth > 0 ? ((currentMonth - lastMonth) / lastMonth) * 100 : 0;
+
+    return {
+      totalEarnings: totalEarnings._sum.totalPrice || 0,
+      monthlyEarnings: currentMonth,
+      yearlyEarnings: yearlyEarnings._sum.totalPrice || 0,
+      pendingPayouts: 0,
+      completedPayouts: 0,
+      averageNightlyRate: avgNightlyRate,
+      occupancyRate: occupancyRate,
+      revenueGrowth: revenueGrowth
+    };
+  }
+
+  async getEarningsBreakdown(hostId: number): Promise<EarningsBreakdown[]> {
+    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+    const properties = await prisma.property.findMany({
+      where: { hostId },
+      include: {
+        bookings: {
+          where: { status: 'completed' },
+          select: {
+            totalPrice: true,
+            checkIn: true,
+            checkOut: true,
+            createdAt: true
+          }
+        }
+      }
+    });
+
+    return properties.map(property => {
+      const allBookings = property.bookings;
+      const monthlyBookings = allBookings.filter(b => new Date(b.checkOut) >= startOfMonth);
+      
+      const totalEarnings = allBookings.reduce((sum, b) => sum + b.totalPrice, 0);
+      const monthlyEarnings = monthlyBookings.reduce((sum, b) => sum + b.totalPrice, 0);
+      
+      const totalNights = allBookings.reduce((sum, b) => {
+        const nights = Math.ceil((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / (1000 * 60 * 60 * 24));
+        return sum + nights;
+      }, 0);
+
+      const avgBookingValue = allBookings.length > 0 ? totalEarnings / allBookings.length : 0;
+      const occupancyRate = totalNights > 0 ? (totalNights / (365 * (new Date().getFullYear() - new Date(property.createdAt).getFullYear() + 1))) * 100 : 0;
+      
+      const lastBooking = allBookings.length > 0 
+        ? allBookings.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
+        : null;
+
+      return {
+        propertyId: property.id,
+        propertyName: property.name,
+        totalEarnings,
+        monthlyEarnings,
+        bookingsCount: allBookings.length,
+        averageBookingValue: avgBookingValue,
+        occupancyRate: Math.min(occupancyRate, 100),
+        lastBooking: lastBooking?.createdAt.toISOString()
+      };
+    });
+  }
+
+  async getHostAnalytics(hostId: number, timeRange: 'week' | 'month' | 'quarter' | 'year' = 'month'): Promise<HostAnalytics> {
+    const now = new Date();
+    let startDate: Date;
+
+    switch (timeRange) {
+      case 'week':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case 'quarter':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+        break;
+      case 'year':
+        startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+        break;
+      default:
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+    }
+
+    const [overview, propertyPerformance, bookingTrends, guestInsights, revenueAnalytics] = await Promise.all([
+      this.getAnalyticsOverview(hostId, timeRange),
+      this.getPropertyPerformanceMetrics(hostId, timeRange),
+      this.getBookingTrendData(hostId, startDate),
+      this.getGuestAnalytics(hostId),
+      this.getRevenueAnalytics(hostId)
+    ]);
+
+    return {
+      overview,
+      propertyPerformance,
+      bookingTrends,
+      guestInsights,
+      revenueAnalytics,
+      marketComparison: {
+        averagePrice: 0,
+        myAveragePrice: revenueAnalytics.monthlyRevenue.reduce((sum, m) => sum + m.revenue, 0) / Math.max(revenueAnalytics.monthlyRevenue.length, 1),
+        occupancyRate: 0,
+        myOccupancyRate: overview.occupancyRate,
+        competitorCount: 0,
+        marketPosition: 'mid_range',
+        opportunities: []
+      }
+    };
+  }
+
+  async getEnhancedHostDashboard(hostId: number): Promise<EnhancedHostDashboard> {
+    const basicDashboard = await this.getHostDashboard(hostId);
+    
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+
+    const [todayCheckIns, todayCheckOuts, occupiedProperties, pendingActions, recentActivity] = await Promise.all([
+      prisma.booking.count({
+        where: {
+          property: { hostId },
+          status: 'confirmed',
+          checkIn: {
+            gte: new Date(todayStr),
+            lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+          }
+        }
+      }),
+      prisma.booking.count({
+        where: {
+          property: { hostId },
+          status: 'confirmed',
+          checkOut: {
+            gte: new Date(todayStr),
+            lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+          }
+        }
+      }),
+      prisma.booking.count({
+        where: {
+          property: { hostId },
+          status: 'confirmed',
+          checkIn: { lte: today },
+          checkOut: { gt: today }
+        }
+      }),
+      prisma.booking.count({
+        where: {
+          property: { hostId },
+          status: 'pending'
+        }
+      }),
+      this.getRecentActivity(hostId)
+    ]);
+
+    return {
+      ...basicDashboard,
+      quickStats: {
+        todayCheckIns,
+        todayCheckOuts,
+        occupiedProperties,
+        pendingActions
+      },
+      recentActivity,
+      alerts: [],
+      marketTrends: {
+        demandTrend: 'stable',
+        averagePrice: 0,
+        competitorActivity: 'Normal activity in your area'
+      }
+    };
+  }
+
+  // --- AGENT MANAGEMENT ---
+  async getAgentDashboard(agentId: number): Promise<AgentDashboard> {
+    const [
+      totalClientsData,
+      activeClientsData,
+      totalCommissions,
+      pendingCommissions,
+      recentBookings,
+      monthlyCommissions
+    ] = await Promise.all([
+      prisma.agentBooking.groupBy({
+        by: ['clientId'],
+        where: { agentId }
+      }),
+      prisma.agentBooking.groupBy({
+        by: ['clientId'],
+        where: {
+          agentId,
+          status: 'active',
+          createdAt: { gte: new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000) }
+        }
+      }),
+      prisma.agentBooking.aggregate({
+        where: { agentId },
+        _sum: { commission: true }
+      }),
+      prisma.agentBooking.aggregate({
+        where: { 
+          agentId,
+          status: 'active'
+        },
+        _sum: { commission: true }
+      }),
+      prisma.agentBooking.findMany({
+        where: { agentId },
+        include: {
+          client: { select: { firstName: true, lastName: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10
+      }),
+      this.getAgentMonthlyCommissions(agentId)
+    ]);
+
+    const totalClients = totalClientsData.length;
+    const activeClients = activeClientsData.length;
+
+    const avgCommissionPerBooking = recentBookings.length > 0 
+      ? (totalCommissions._sum.commission || 0) / recentBookings.length 
+      : 0;
+
+    return {
+      totalClients,
+      activeClients,
+      totalCommissions: totalCommissions._sum.commission || 0,
+      pendingCommissions: pendingCommissions._sum.commission || 0,
+      avgCommissionPerBooking,
+      recentBookings: recentBookings.map(this.transformToAgentBookingInfo),
+      monthlyCommissions
+    };
+  }
+
+  // --- ENHANCED AGENT KPIs ---
+  async getEnhancedAgentDashboard(agentId: number): Promise<EnhancedAgentDashboard> {
+    const [
+      basicDashboard, 
+      additionalKPIs, 
+      performanceTrends, 
+      competitiveMetrics,
+      clientSegmentation
+    ] = await Promise.all([
+      this.getAgentDashboard(agentId),
+      this.getAdditionalAgentKPIs(agentId),
+      this.getAgentPerformanceTrends(agentId),
+      this.getAgentCompetitiveMetrics(agentId),
+      this.getAgentClientSegmentation(agentId)
+    ]);
+
+    return {
+      ...basicDashboard,
+      additionalKPIs,
+      performanceTrends,
+      competitiveMetrics,
+      clientSegmentation
+    };
+  }
+
+  // --- PUBLIC KPI METHODS (Fixed accessibility) ---
+  async getAdditionalAgentKPIs(agentId: number): Promise<AdditionalAgentKPIs> {
+    const timeRange = 30; // Last 30 days
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - timeRange);
+
+    const [
+      conversionRate,
+      averageResponseTime,
+      customerRetentionRate,
+      revenuePerClient,
+      bookingSuccessRate,
+      portfolioGrowthRate,
+      leadGenerationRate,
+      commissionGrowthRate,
+      averageDaysOnMarket,
+      propertyViewsToBookingRatio,
+      clientSatisfactionScore,
+      marketPenetration,
+      averageCommissionPerProperty,
+      propertyUtilizationRate,
+      crossSellingSuccess
+    ] = await Promise.all([
+      this.getAgentConversionRate(agentId, startDate),
+      this.getAgentAverageResponseTime(agentId, startDate),
+      this.getAgentCustomerRetentionRate(agentId),
+      this.getAgentRevenuePerClient(agentId, startDate),
+      this.getAgentBookingSuccessRate(agentId, startDate),
+      this.getAgentPortfolioGrowthRate(agentId),
+      this.getAgentLeadGenerationRate(agentId, startDate),
+      this.getAgentCommissionGrowthRate(agentId),
+      this.getAgentAverageDaysOnMarket(agentId),
+      this.getAgentPropertyViewsToBookingRatio(agentId, startDate),
+      this.getAgentClientSatisfactionScore(agentId),
+      this.getAgentMarketPenetration(agentId),
+      this.getAgentAverageCommissionPerProperty(agentId),
+      this.getAgentPropertyUtilizationRate(agentId),
+      this.getAgentCrossSellingSuccess(agentId, startDate)
+    ]);
+
+    return {
+      conversionRate,
+      averageResponseTime,
+      customerRetentionRate,
+      revenuePerClient,
+      bookingSuccessRate,
+      portfolioGrowthRate,
+      leadGenerationRate,
+      commissionGrowthRate,
+      averageDaysOnMarket,
+      propertyViewsToBookingRatio,
+      clientSatisfactionScore,
+      marketPenetration,
+      averageCommissionPerProperty,
+      propertyUtilizationRate,
+      crossSellingSuccess
+    };
+  }
+
+  // --- PUBLIC KPI CALCULATION METHODS ---
+  async getAgentConversionRate(agentId: number, startDate: Date): Promise<number> {
+    // TODO: Add Lead model to schema
+    // const leads = await prisma.lead.count({
+    //   where: {
+    //     agentId,
+    //     createdAt: { gte: startDate }
+    //   }
+    // });
+    const leads = 0;
+
+    const conversions = await prisma.agentBooking.count({
+      where: {
+        agentId,
+        createdAt: { gte: startDate },
+        status: { in: ['confirmed', 'completed'] }
+      }
+    });
+
+    return leads > 0 ? (conversions / leads) * 100 : 0;
+  }
+
+  async getAgentAverageResponseTime(agentId: number, startDate: Date): Promise<number> {
+    // TODO: Add Inquiry model to schema
+    // const inquiries = await prisma.inquiry.findMany({
+    //   where: {
+    //     agentId,
+    //     createdAt: { gte: startDate },
+    //     respondedAt: { not: null }
+    //   },
+    //   select: {
+    //     createdAt: true,
+    //     respondedAt: true
+    //   }
+    // });
+    const inquiries: any[] = [];
+
+    if (inquiries.length === 0) return 0;
+
+    const totalResponseTime = inquiries.reduce((sum: any, inquiry: any) => {
+      if (inquiry.respondedAt) {
+        const diff = inquiry.respondedAt.getTime() - inquiry.createdAt.getTime();
+        return sum + (diff / (1000 * 60 * 60)); // Convert to hours
+      }
+      return sum;
+    }, 0);
+
+    return totalResponseTime / inquiries.length;
+  }
+
+  async getAgentCustomerRetentionRate(agentId: number): Promise<number> {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    const allClients = await prisma.agentBooking.groupBy({
+      by: ['clientId'],
+      where: {
+        agentId,
+        createdAt: { gte: sixMonthsAgo }
+      }
+    });
+
+    const repeatClients = await prisma.agentBooking.groupBy({
+      by: ['clientId'],
+      where: {
+        agentId,
+        createdAt: { gte: sixMonthsAgo }
+      },
+      having: {
+        clientId: { _count: { gt: 1 } }
+      }
+    });
+
+    return allClients.length > 0 ? (repeatClients.length / allClients.length) * 100 : 0;
+  }
+
+  async getAgentRevenuePerClient(agentId: number, startDate: Date): Promise<number> {
+    const clientRevenue = await prisma.agentBooking.groupBy({
+      by: ['clientId'],
+      where: {
+        agentId,
+        createdAt: { gte: startDate },
+        status: 'completed'
+      },
+      _sum: {
+        commission: true
+      }
+    });
+
+    if (clientRevenue.length === 0) return 0;
+
+    const totalRevenue = clientRevenue.reduce((sum, client) => sum + (client._sum.commission || 0), 0);
+    return totalRevenue / clientRevenue.length;
+  }
+
+  async getAgentBookingSuccessRate(agentId: number, startDate: Date): Promise<number> {
+    const totalBookings = await prisma.agentBooking.count({
+      where: {
+        agentId,
+        createdAt: { gte: startDate }
+      }
+    });
+
+    const successfulBookings = await prisma.agentBooking.count({
+      where: {
+        agentId,
+        createdAt: { gte: startDate },
+        status: { in: ['confirmed', 'completed'] }
+      }
+    });
+
+    return totalBookings > 0 ? (successfulBookings / totalBookings) * 100 : 0;
+  }
+
+  async getAgentPortfolioGrowthRate(agentId: number): Promise<number> {
+    const today = new Date();
+    const lastMonth = new Date();
+    lastMonth.setMonth(lastMonth.getMonth() - 1);
+    const twoMonthsAgo = new Date();
+    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+
+    const currentCount = await this.getAgentManagedPropertiesCount(agentId, lastMonth, today);
+    const previousCount = await this.getAgentManagedPropertiesCount(agentId, twoMonthsAgo, lastMonth);
+
+    return previousCount > 0 ? ((currentCount - previousCount) / previousCount) * 100 : 0;
+  }
+
+  async getAgentLeadGenerationRate(agentId: number, startDate: Date): Promise<number> {
+    // TODO: Add Lead model to schema
+    // const leads = await prisma.lead.count({
+    //   where: {
+    //     agentId,
+    //     createdAt: { gte: startDate }
+    //   }
+    // });
+    const leads = 0;
+
+    const daysInPeriod = Math.ceil((new Date().getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+    const monthlyRate = (leads / daysInPeriod) * 30;
+
+    return monthlyRate;
+  }
+
+  async getAgentCommissionGrowthRate(agentId: number): Promise<number> {
+    const today = new Date();
+    const lastMonth = new Date();
+    lastMonth.setMonth(lastMonth.getMonth() - 1);
+    const twoMonthsAgo = new Date();
+    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+
+    const [currentCommission, previousCommission] = await Promise.all([
+      prisma.agentBooking.aggregate({
+        where: {
+          agentId,
+          createdAt: { gte: lastMonth, lte: today },
+          status: 'completed'
+        },
+        _sum: { commission: true }
+      }),
+      prisma.agentBooking.aggregate({
+        where: {
+          agentId,
+          createdAt: { gte: twoMonthsAgo, lte: lastMonth },
+          status: 'completed'
+        },
+        _sum: { commission: true }
+      })
+    ]);
+
+    const current = currentCommission._sum.commission || 0;
+    const previous = previousCommission._sum.commission || 0;
+
+    return previous > 0 ? ((current - previous) / previous) * 100 : 0;
+  }
+
+  async getAgentAverageDaysOnMarket(agentId: number): Promise<number> {
+    const properties = await prisma.property.findMany({
+      where: {
+        host: {
+          clientBookings: {
+            some: {
+              agentId,
+              status: 'active'
+            }
+          }
+        }
+      },
+      include: {
+        bookings: {
+          where: { status: 'confirmed' },
+          orderBy: { createdAt: 'asc' },
+          take: 1
+        }
+      }
+    });
+
+    const propertiesWithBookings = properties.filter(p => p.bookings.length > 0);
+    
+    if (propertiesWithBookings.length === 0) return 0;
+
+    const totalDays = propertiesWithBookings.reduce((sum, property) => {
+      const firstBooking = property.bookings[0];
+      const daysOnMarket = Math.ceil(
+        (firstBooking.createdAt.getTime() - property.createdAt.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      return sum + daysOnMarket;
+    }, 0);
+
+    return totalDays / propertiesWithBookings.length;
+  }
+
+  async getAgentPropertyViewsToBookingRatio(agentId: number, startDate: Date): Promise<number> {
+    const properties = await this.getAgentPropertiesBasic(agentId);
+    const propertyIds = properties.map(p => p.id);
+
+    const [totalViews, totalBookings] = await Promise.all([
+      // TODO: Add PropertyView model to schema
+      // prisma.propertyView.count({
+      //   where: {
+      //     propertyId: { in: propertyIds },
+      //     createdAt: { gte: startDate }
+      //   }
+      // }),
+      Promise.resolve(0),
+      prisma.booking.count({
+        where: {
+          propertyId: { in: propertyIds },
+          createdAt: { gte: startDate },
+          status: { in: ['confirmed', 'completed'] }
+        }
+      })
+    ]);
+
+    return totalViews > 0 ? (totalBookings / totalViews) * 100 : 0;
+  }
+
+  async getAgentClientSatisfactionScore(agentId: number): Promise<number> {
+    // TODO: Add AgentReview model to schema
+    // const reviews = await prisma.agentReview.aggregate({
+    //   where: {
+    //     agentId,
+    //     createdAt: { gte: new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000) }
+    //   },
+    //   _avg: { rating: true }
+    // });
+    const reviews = { _avg: { rating: 0 }, _count: { id: 0 } };
+
+    return reviews._avg.rating || 0;
+  }
+
+  async getAgentMarketPenetration(agentId: number): Promise<number> {
+    const [agentProperties, totalActiveProperties] = await Promise.all([
+      this.getAgentPropertiesBasic(agentId),
+      prisma.property.count({
+        where: { status: 'active' }
+      })
+    ]);
+
+    return totalActiveProperties > 0 ? (agentProperties.length / totalActiveProperties) * 100 : 0;
+  }
+
+  async getAgentAverageCommissionPerProperty(agentId: number): Promise<number> {
+    const properties = await this.getAgentPropertiesBasic(agentId);
+    
+    if (properties.length === 0) return 0;
+
+    const totalCommission = await prisma.agentBooking.aggregate({
+      where: {
+        agentId,
+        status: 'completed'
+      },
+      _sum: { commission: true }
+    });
+
+    return (totalCommission._sum.commission || 0) / properties.length;
+  }
+
+  async getAgentPropertyUtilizationRate(agentId: number): Promise<number> {
+    const properties = await this.getAgentPropertiesBasic(agentId);
+    const propertyIds = properties.map(p => p.id);
+
+    const propertiesWithBookings = await prisma.property.count({
+      where: {
+        id: { in: propertyIds },
+        bookings: {
+          some: {
+            status: { in: ['confirmed', 'completed'] },
+            createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+          }
+        }
+      }
+    });
+
+    return properties.length > 0 ? (propertiesWithBookings / properties.length) * 100 : 0;
+  }
+
+  async getAgentCrossSellingSuccess(agentId: number, startDate: Date): Promise<number> {
+    const clientsWithMultipleServices = await prisma.agentBooking.groupBy({
+      by: ['clientId'],
+      where: {
+        agentId,
+        createdAt: { gte: startDate }
+      },
+      _count: { bookingType: true },
+      having: {
+        bookingType: { _count: { gt: 1 } }
+      }
+    });
+
+    const totalClients = await prisma.agentBooking.groupBy({
+      by: ['clientId'],
+      where: {
+        agentId,
+        createdAt: { gte: startDate }
+      }
+    });
+
+    return totalClients.length > 0 ? (clientsWithMultipleServices.length / totalClients.length) * 100 : 0;
+  }
+
+  // Performance trends calculation
+  async getAgentPerformanceTrends(agentId: number) {
+    const months = 12;
+    const trends = {
+      conversionTrend: [] as Array<{ month: string; rate: number }>,
+      retentionTrend: [] as Array<{ month: string; rate: number }>,
+      revenueTrend: [] as Array<{ month: string; revenue: number }>,
+      satisfactionTrend: [] as Array<{ month: string; score: number }>
+    };
+
+    for (let i = months - 1; i >= 0; i--) {
+      const startDate = new Date();
+      startDate.setMonth(startDate.getMonth() - i - 1);
+      const endDate = new Date();
+      endDate.setMonth(endDate.getMonth() - i);
+
+      const monthStr = startDate.toISOString().slice(0, 7);
+
+      const [conversionRate, retentionRate, revenue, satisfaction] = await Promise.all([
+        this.getAgentConversionRate(agentId, startDate),
+        this.getAgentCustomerRetentionRate(agentId),
+        this.getAgentMonthlyRevenue(agentId, startDate, endDate),
+        this.getAgentMonthlySatisfaction(agentId, startDate, endDate)
+      ]);
+
+      trends.conversionTrend.push({ month: monthStr, rate: conversionRate });
+      trends.retentionTrend.push({ month: monthStr, rate: retentionRate });
+      trends.revenueTrend.push({ month: monthStr, revenue });
+      trends.satisfactionTrend.push({ month: monthStr, score: satisfaction });
+    }
+
+    return trends;
+  }
+
+  // Competitive metrics calculation
+  async getAgentCompetitiveMetrics(agentId: number) {
+    const [agentStats, marketStats] = await Promise.all([
+      this.getAgentStats(agentId),
+      this.getMarketStats()
+    ]);
+
+    const agentRanking = await prisma.user.count({
+      where: {
+        userType: 'agent',
+        clientBookings: {
+          some: {
+            commission: { gt: agentStats.totalCommission }
+          }
+        }
+      }
+    });
+
+    return {
+      marketRanking: agentRanking + 1,
+      totalAgentsInMarket: marketStats.totalAgents,
+      marketSharePercentage: marketStats.totalCommission > 0 
+        ? (agentStats.totalCommission / marketStats.totalCommission) * 100 
+        : 0,
+      competitorComparison: {
+        averageCommission: marketStats.averageCommission,
+        averageProperties: marketStats.averageProperties,
+        averageClientRetention: marketStats.averageClientRetention
+      }
+    };
+  }
+
+  // Client segmentation
+  async getAgentClientSegmentation(agentId: number) {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+
+    const [newClients, repeatClients, vipClients, inactiveClients] = await Promise.all([
+      prisma.agentBooking.groupBy({
+        by: ['clientId'],
+        where: {
+          agentId,
+          createdAt: { gte: threeMonthsAgo }
+        },
+        having: {
+          clientId: { _count: { equals: 1 } }
+        }
+      }),
+      prisma.agentBooking.groupBy({
+        by: ['clientId'],
+        where: {
+          agentId,
+          createdAt: { gte: sixMonthsAgo }
+        },
+        having: {
+          clientId: { _count: { gt: 1 } }
+        }
+      }),
+      this.getVIPClients(agentId),
+      this.getInactiveClients(agentId, sixMonthsAgo)
+    ]);
+
+    return {
+      newClients: newClients.length,
+      repeatClients: repeatClients.length,
+      vipClients: vipClients,
+      inactiveClients: inactiveClients
     };
   }
 
@@ -638,18 +1837,17 @@ export class PropertyService {
     });
   }
 
- private async getBlockedDates(propertyId: number): Promise<string[]> {
-  const blockedDates = await prisma.blockedDate.findMany({
-    where: { 
-      propertyId,
-      endDate: { gte: new Date() },
-      isActive: true
-    }
-  });
-  
-  return blockedDates.flatMap(bd => this.getDateRange(bd.startDate, bd.endDate));
-}
-
+  private async getBlockedDates(propertyId: number): Promise<string[]> {
+    const blockedDates = await prisma.blockedDate.findMany({
+      where: { 
+        propertyId,
+        endDate: { gte: new Date() },
+        isActive: true
+      }
+    });
+    
+    return blockedDates.flatMap(bd => this.getDateRange(bd.startDate, bd.endDate));
+  }
 
   private getDateRange(start: Date, end: Date): string[] {
     const dates = [];
@@ -665,7 +1863,7 @@ export class PropertyService {
 
   private async transformToPropertyInfo(property: any): Promise<PropertyInfo> {
     const blockedDates = await this.getBlockedDates(property.id);
-    
+
     return {
       id: property.id,
       name: property.name,
@@ -679,15 +1877,15 @@ export class PropertyService {
       beds: property.beds,
       baths: property.baths,
       maxGuests: property.maxGuests,
-      features: property.features ? JSON.parse(property.features as string) : [], // Fix: safely parse with type assertion and fallback
+      features: property.features ? JSON.parse(property.features as string) : [],
       description: property.description,
-      images: property.images ? JSON.parse(property.images as string) : {}, // Fix: safely parse with type assertion and fallback
+      images: property.images ? JSON.parse(property.images as string) : {},
       video3D: property.video3D,
       rating: property.averageRating || 0,
       reviewsCount: property.reviewsCount || 0,
       hostId: property.hostId,
-      hostName: `${property.host.firstName} ${property.host.lastName}`.trim(),
-      hostProfileImage: property.host.profileImage,
+      hostName: property.host ? `${property.host.firstName} ${property.host.lastName}`.trim() : 'Unknown Host',
+      hostProfileImage: property.host?.profileImage || null,
       status: property.status,
       availability: {
         isAvailable: property.status === 'active' &&
@@ -706,23 +1904,22 @@ export class PropertyService {
   }
 
   private transformToPropertySummary(property: any): PropertySummary {
-    // Fix: safely parse images with fallback
     const images = property.images ? JSON.parse(property.images as string) : {};
     const mainImage = this.getMainImage(images);
-    
+
     return {
       id: property.id,
       name: property.name,
       location: property.location,
       category: property.category,
-      type: property.type, 
+      type: property.type,
       pricePerNight: property.pricePerNight,
       image: mainImage,
       rating: property.averageRating || 0,
       reviewsCount: property.reviewsCount || 0,
       beds: property.beds,
       baths: property.baths,
-      hostName: `${property.host.firstName} ${property.host.lastName}`.trim(),
+      hostName: property.host ? `${property.host.firstName} ${property.host.lastName}`.trim() : 'Unknown Host',
       availability: property.status === 'active' ? 'Available' : 'Unavailable'
     };
   }
@@ -755,7 +1952,7 @@ export class PropertyService {
       userProfileImage: review.user.profileImage,
       rating: review.rating,
       comment: review.comment,
-      images: review.images ? JSON.parse(review.images as string) : undefined, // Fix: safely parse with type assertion
+      images: review.images ? JSON.parse(review.images as string) : undefined,
       response: review.response,
       createdAt: review.createdAt.toISOString(),
       updatedAt: review.updatedAt.toISOString()
@@ -763,7 +1960,6 @@ export class PropertyService {
   }
 
   private getMainImage(images: PropertyImages): string {
-    // Priority order for main image
     const priorities: (keyof PropertyImages)[] = ['exterior', 'livingRoom', 'bedroom', 'kitchen', 'diningArea'];
     
     for (const category of priorities) {
@@ -772,212 +1968,327 @@ export class PropertyService {
       }
     }
     
-    // Fallback to any available image
     for (const category of Object.keys(images) as (keyof PropertyImages)[]) {
       if (images[category] && images[category].length > 0) {
         return images[category][0];
       }
     }
     
-    return ''; // Default placeholder
+    return '';
   }
 
-  // --- MEDIA MANAGEMENT ---
-  async uploadPropertyImages(propertyId: number, hostId: number, category: keyof PropertyImages, imageUrls: string[]): Promise<PropertyInfo> {
-    const property = await prisma.property.findFirst({
-      where: { id: propertyId, hostId }
-    });
-
-    if (!property) {
-      throw new Error('Property not found or access denied');
-    }
-
-    // Fix: safely parse images with fallback
-    const currentImages = property.images ? JSON.parse(property.images as string) : {};
-    currentImages[category] = [...(currentImages[category] || []), ...imageUrls];
-
-    const updatedProperty = await prisma.property.update({
-      where: { id: propertyId },
-      data: { images: JSON.stringify(currentImages) },
-      include: {
-        host: true,
-        reviews: true,
-        bookings: true
-      }
-    });
-
-    return this.transformToPropertyInfo(updatedProperty);
+  private transformToGuestProfile(guest: any): GuestProfile {
+    const bookings = guest.bookingsAsGuest || [];
+    const completedBookings = bookings.filter((b: any) => b.status === 'completed');
+    
+    return {
+      id: guest.id,
+      firstName: guest.firstName,
+      lastName: guest.lastName,
+      email: guest.email,
+      phone: guest.phone,
+      profileImage: guest.profileImage,
+      verificationStatus: guest.verificationStatus || 'unverified',
+      joinDate: guest.createdAt.toISOString(),
+      totalBookings: bookings.length,
+      totalSpent: completedBookings.reduce((sum: number, b: any) => sum + b.totalPrice, 0),
+      averageRating: guest.averageRating || 0,
+      lastBooking: bookings.length > 0 ? bookings[0].createdAt.toISOString() : undefined,
+      preferredCommunication: guest.preferredCommunication || 'email',
+      notes: guest.hostNotes
+    };
   }
 
-  async removePropertyImage(propertyId: number, hostId: number, category: keyof PropertyImages, imageUrl: string): Promise<PropertyInfo> {
-    const property = await prisma.property.findFirst({
-      where: { id: propertyId, hostId }
-    });
-
-    if (!property) {
-      throw new Error('Property not found or access denied');
-    }
-
-    // Fix: safely parse images with fallback
-    const currentImages = property.images ? JSON.parse(property.images as string) : {};
-    if (currentImages[category]) {
-      currentImages[category] = currentImages[category].filter((url: string) => url !== imageUrl);
-    }
-
-    const updatedProperty = await prisma.property.update({
-      where: { id: propertyId },
-      data: { images: JSON.stringify(currentImages) },
-      include: {
-        host: true,
-        reviews: true,
-        bookings: true
-      }
-    });
-
-    return this.transformToPropertyInfo(updatedProperty);
+  private async getAnalyticsOverview(hostId: number, timeRange: 'week' | 'month' | 'quarter' | 'year'): Promise<AnalyticsOverview> {
+    return {
+      totalViews: 0,
+      totalBookings: 0,
+      totalRevenue: 0,
+      averageRating: 0,
+      occupancyRate: 0,
+      conversionRate: 0,
+      repeatGuestRate: 0,
+      timeRange
+    };
   }
 
-  // --- AVAILABILITY MANAGEMENT ---
-  async updatePropertyAvailability(propertyId: number, hostId: number, availableFrom: string, availableTo: string): Promise<PropertyInfo> {
-    const property = await prisma.property.findFirst({
-      where: { id: propertyId, hostId }
-    });
+  private async getPropertyPerformanceMetrics(hostId: number, timeRange: string): Promise<PropertyPerformanceMetrics[]> {
+    return [];
+  }
 
-    if (!property) {
-      throw new Error('Property not found or access denied');
-    }
+  private async getBookingTrendData(hostId: number, startDate: Date): Promise<BookingTrendData[]> {
+    return [];
+  }
 
-    const updatedProperty = await prisma.property.update({
-      where: { id: propertyId },
-      data: {
-        availableFrom: new Date(availableFrom),
-        availableTo: new Date(availableTo)
+  private async getGuestAnalytics(hostId: number): Promise<GuestAnalytics> {
+    return {
+      totalGuests: 0,
+      newGuests: 0,
+      returningGuests: 0,
+      averageStayDuration: 0,
+      guestDemographics: {
+        ageGroups: [],
+        countries: [],
+        purposes: []
       },
-      include: {
-        host: true,
-        reviews: true,
-        bookings: true
+      guestSatisfaction: {
+        averageRating: 0,
+        ratingDistribution: [],
+        commonComplaints: [],
+        commonPraises: []
       }
-    });
-
-    return this.transformToPropertyInfo(updatedProperty);
+    };
+  }
+ 
+  private async getRevenueAnalytics(hostId: number): Promise<RevenueAnalytics> {
+    return {
+      monthlyRevenue: [],
+      revenueByProperty: [],
+      seasonalTrends: [],
+      pricingOptimization: []
+    };
   }
 
-  async blockDates(propertyId: number, hostId: number, startDate: string, endDate: string, reason?: string): Promise<void> {
-  const property = await prisma.property.findFirst({
-    where: { id: propertyId, hostId }
-  });
-
-  if (!property) {
-    throw new Error('Property not found or access denied');
-  }
-
-  await prisma.blockedDate.create({
-    data: {
-      propertyId,
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
-      reason: reason || 'Blocked by host',
-      isActive: true
-    }
-  });
-}
-
-  // --- PRICING MANAGEMENT ---
-  async updatePropertyPricing(propertyId: number, hostId: number, pricePerNight: number, pricePerTwoNights?: number): Promise<PropertyInfo> {
-    const property = await prisma.property.findFirst({
-      where: { id: propertyId, hostId }
-    });
-
-    if (!property) {
-      throw new Error('Property not found or access denied');
-    }
-
-    const updatedProperty = await prisma.property.update({
-      where: { id: propertyId },
-      data: {
-        pricePerNight,
-        pricePerTwoNights
-      },
-      include: {
-        host: true,
-        reviews: true,
-        bookings: true
-      }
-    });
-
-    return this.transformToPropertyInfo(updatedProperty);
-  }
-
-  // --- PROPERTY STATUS MANAGEMENT ---
-  async activateProperty(propertyId: number, hostId: number): Promise<PropertyInfo> {
-    return this.updatePropertyStatus(propertyId, hostId, 'active');
-  }
-
-  async deactivateProperty(propertyId: number, hostId: number): Promise<PropertyInfo> {
-    return this.updatePropertyStatus(propertyId, hostId, 'inactive');
-  }
-
-  private async updatePropertyStatus(propertyId: number, hostId: number, status: string): Promise<PropertyInfo> {
-    const property = await prisma.property.findFirst({
-      where: { id: propertyId, hostId }
-    });
-
-    if (!property) {
-      throw new Error('Property not found or access denied');
-    }
-
-    const updatedProperty = await prisma.property.update({
-      where: { id: propertyId },
-      data: { status },
-      include: {
-        host: true,
-        reviews: true,
-        bookings: true
-      }
-    });
-
-    try {
-      // Send status update email when status changes
-      await this.emailService.sendPropertyStatusUpdateEmail({
-        host: {
-          firstName: updatedProperty.host.firstName,
-          lastName: updatedProperty.host.lastName,
-          email: updatedProperty.host.email,
-          id: updatedProperty.hostId
+  private async getRecentActivity(hostId: number): Promise<DashboardActivity[]> {
+    const [recentBookings, recentReviews] = await Promise.all([
+      prisma.booking.findMany({
+        where: { property: { hostId } },
+        include: {
+          property: { select: { name: true } },
+          guest: { select: { firstName: true, lastName: true } }
         },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/logo.png'
+        orderBy: { createdAt: 'desc' },
+        take: 5
+      }),
+      prisma.review.findMany({
+        where: { property: { hostId } },
+        include: {
+          property: { select: { name: true } },
+          user: { select: { firstName: true, lastName: true } }
         },
-        property: await this.transformToPropertyInfo(updatedProperty),
-        newStatus: status as 'active' | 'pending' | 'rejected' | 'inactive'
+        orderBy: { createdAt: 'desc' },
+        take: 5
+      })
+    ]);
+
+    const activities: DashboardActivity[] = [];
+
+    recentBookings.forEach(booking => {
+      activities.push({
+        id: `booking-${booking.id}`,
+        type: 'booking',
+        title: 'New Booking',
+        description: `${booking.guest.firstName} ${booking.guest.lastName} booked ${booking.property.name}`,
+        timestamp: booking.createdAt.toISOString(),
+        propertyId: booking.propertyId,
+        bookingId: booking.id,
+        isRead: false,
+        priority: booking.status === 'pending' ? 'high' : 'medium'
       });
-    } catch (emailError) {
-      console.error('Failed to send property status update email:', emailError);
-    }
-
-    return this.transformToPropertyInfo(updatedProperty);
-  }
-
-  // --- SEARCH SUGGESTIONS ---
-  async getLocationSuggestions(query: string): Promise<string[]> {
-    const properties = await prisma.property.findMany({
-      where: {
-        location: { contains: query },
-        status: 'active'
-      },
-      select: { location: true },
-      distinct: ['location'],
-      take: 10
     });
 
-    return properties.map((p: { location: any; }) => p.location);
+    recentReviews.forEach(review => {
+      activities.push({
+        id: `review-${review.id}`,
+        type: 'review',
+        title: 'New Review',
+        description: `${review.user.firstName} ${review.user.lastName} reviewed ${review.property.name} (${review.rating} stars)`,
+        timestamp: review.createdAt.toISOString(),
+        propertyId: review.propertyId,
+        isRead: false,
+        priority: review.rating < 3 ? 'high' : 'low'
+      });
+    });
+
+    return activities
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 10);
   }
 
-// --- ADMIN PROPERTY MANAGEMENT ---
+  private async getAgentMonthlyCommissions(agentId: number): Promise<MonthlyCommissionData[]> {
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+
+    const commissions = await prisma.agentBooking.findMany({
+      where: {
+        agentId,
+        createdAt: { gte: twelveMonthsAgo }
+      },
+      select: {
+        commission: true,
+        createdAt: true
+      }
+    });
+
+    const monthlyData: { [key: string]: { commission: number; bookings: number } } = {};
+    
+    commissions.forEach(commission => {
+      const month = commission.createdAt.toISOString().slice(0, 7);
+      if (!monthlyData[month]) {
+        monthlyData[month] = { commission: 0, bookings: 0 };
+      }
+      monthlyData[month].commission += commission.commission;
+      monthlyData[month].bookings += 1;
+    });
+
+    return Object.entries(monthlyData).map(([month, data]) => ({
+      month,
+      commission: data.commission,
+      bookings: data.bookings
+    }));
+  }
+
+  private transformToAgentBookingInfo(agentBooking: any): AgentBookingInfo {
+    return {
+      id: agentBooking.id,
+      clientName: `${agentBooking.client.firstName} ${agentBooking.client.lastName}`,
+      bookingType: agentBooking.bookingType,
+      commission: agentBooking.commission,
+      commissionStatus: agentBooking.status,
+      bookingDate: agentBooking.createdAt.toISOString(),
+      createdAt: agentBooking.createdAt.toISOString()
+    };
+  }
+
+  private async getAgentManagedPropertiesCount(agentId: number, startDate: Date, endDate: Date): Promise<number> {
+    return await prisma.property.count({
+      where: {
+        host: {
+          clientBookings: {
+            some: {
+              agentId,
+              status: 'active',
+              createdAt: { gte: startDate, lte: endDate }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  private async getAgentMonthlyRevenue(agentId: number, startDate: Date, endDate: Date): Promise<number> {
+    const result = await prisma.agentBooking.aggregate({
+      where: {
+        agentId,
+        createdAt: { gte: startDate, lte: endDate },
+        status: 'completed'
+      },
+      _sum: { commission: true }
+    });
+
+    return result._sum.commission || 0;
+  }
+
+  private async getAgentMonthlySatisfaction(agentId: number, startDate: Date, endDate: Date): Promise<number> {
+    // TODO: Add AgentReview model to schema
+    // const result = await prisma.agentReview.aggregate({
+    //   where: {
+    //     agentId,
+    //     createdAt: { gte: startDate, lte: endDate }
+    //   },
+    //   _avg: { rating: true }
+    // });
+    const result = { _avg: { rating: 0 } };
+
+    return result._avg.rating || 0;
+  }
+
+  private async getAgentStats(agentId: number) {
+    const [commissionData, propertiesCount] = await Promise.all([
+      prisma.agentBooking.aggregate({
+        where: { agentId, status: 'completed' },
+        _sum: { commission: true }
+      }),
+      this.getAgentPropertiesBasic(agentId)
+    ]);
+
+    return {
+      totalCommission: commissionData._sum.commission || 0,
+      totalProperties: propertiesCount.length
+    };
+  }
+
+  private async getMarketStats() {
+    const [totalAgents, allCommissions, allProperties] = await Promise.all([
+      prisma.user.count({ where: { userType: 'agent' } }),
+      prisma.agentBooking.aggregate({
+        where: { status: 'completed' },
+        _sum: { commission: true }
+      }),
+      prisma.property.count({ where: { status: 'active' } })
+    ]);
+
+    return {
+      totalAgents,
+      totalCommission: allCommissions._sum.commission || 0,
+      averageCommission: totalAgents > 0 ? (allCommissions._sum.commission || 0) / totalAgents : 0,
+      averageProperties: totalAgents > 0 ? allProperties / totalAgents : 0,
+      averageClientRetention: 75
+    };
+  }
+
+  private async getVIPClients(agentId: number): Promise<number> {
+    const averageCommission = await prisma.agentBooking.aggregate({
+      where: { agentId, status: 'completed' },
+      _avg: { commission: true }
+    });
+
+    const vipClients = await prisma.agentBooking.groupBy({
+      by: ['clientId'],
+      where: {
+        agentId,
+        status: 'completed'
+      },
+      _sum: { commission: true },
+      having: {
+        commission: { _sum: { gt: (averageCommission._avg.commission || 0) * 2 } }
+      }
+    });
+
+    return vipClients.length;
+  }
+
+  private async getInactiveClients(agentId: number, sixMonthsAgo: Date): Promise<number> {
+    const allClients = await prisma.agentBooking.groupBy({
+      by: ['clientId'],
+      where: { agentId }
+    });
+
+    const activeClients = await prisma.agentBooking.groupBy({
+      by: ['clientId'],
+      where: {
+        agentId,
+        createdAt: { gte: sixMonthsAgo }
+      }
+    });
+
+    return allClients.length - activeClients.length;
+  }
+
+  private async getAgentPropertiesBasic(agentId: number) {
+    return prisma.property.findMany({
+      where: {
+        host: {
+          clientBookings: {
+            some: {
+              agentId,
+              status: 'active'
+            }
+          }
+        }
+      },
+      select: {
+        id: true,
+        name: true,
+        location: true,
+        averageRating: true,
+        totalBookings: true,
+        hostId: true
+      }
+    });
+  }
+
+  // --- ADMIN & OTHER METHODS ---
   async updatePropertyStatusByAdmin(propertyId: number, status: 'active' | 'pending' | 'rejected' | 'inactive', rejectionReason?: string): Promise<PropertyInfo> {
     const property = await prisma.property.findUnique({
       where: { id: propertyId },
@@ -1002,25 +2313,26 @@ export class PropertyService {
       }
     });
 
-    // Send status update email
     try {
-      await this.emailService.sendPropertyStatusUpdateEmail({
-        host: {
-          firstName: updatedProperty.host.firstName,
-          lastName: updatedProperty.host.lastName,
-          email: updatedProperty.host.email,
-          id: updatedProperty.hostId
-        },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/logo.png'
-        },
-        property: await this.transformToPropertyInfo(updatedProperty),
-        newStatus: status,
-        rejectionReason
-      });
+      if (updatedProperty.host && updatedProperty.hostId) {
+        await this.emailService.sendPropertyStatusUpdateEmail({
+          host: {
+            firstName: updatedProperty.host.firstName,
+            lastName: updatedProperty.host.lastName,
+            email: updatedProperty.host.email,
+            id: updatedProperty.hostId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/logo.png'
+          },
+          property: await this.transformToPropertyInfo(updatedProperty),
+          newStatus: status,
+          rejectionReason
+        });
+      }
     } catch (emailError) {
       console.error('Failed to send property status update email:', emailError);
     }
@@ -1028,7 +2340,6 @@ export class PropertyService {
     return this.transformToPropertyInfo(updatedProperty);
   }
 
-  // --- FEATURED PROPERTIES ---
   async getFeaturedProperties(limit: number = 8): Promise<PropertySummary[]> {
     const properties = await prisma.property.findMany({
       where: {
@@ -1049,7 +2360,6 @@ export class PropertyService {
     return properties.map((p: any) => this.transformToPropertySummary(p));
   }
 
-  // --- SIMILAR PROPERTIES ---
   async getSimilarProperties(propertyId: number, limit: number = 6): Promise<PropertySummary[]> {
     const property = await prisma.property.findUnique({
       where: { id: propertyId }
@@ -1078,2021 +2388,1386 @@ export class PropertyService {
     return properties.map((p: any) => this.transformToPropertySummary(p));
   }
 
-  // Additional methods to add to PropertyService class
+  async uploadPropertyImages(propertyId: number, hostId: number, category: keyof PropertyImages, imageUrls: string[]): Promise<PropertyInfo> {
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, hostId }
+    });
 
-// --- GUEST MANAGEMENT METHODS ---
-async getHostGuests(hostId: number, filters?: GuestSearchFilters) {
-  const whereClause: any = {
-    bookingsAsGuest: {
-      some: {
-        property: {
-          hostId: hostId
-        }
-      }
+    if (!property) {
+      throw new Error('Property not found or access denied');
     }
-  };
 
-  // Apply search filters
-  if (filters?.search) {
-    whereClause.OR = [
-      { firstName: { contains: filters.search } },
-      { lastName: { contains: filters.search } },
-      { email: { contains: filters.search } }
-    ];
-  }
+    const currentImages = property.images ? JSON.parse(property.images as string) : {};
+    currentImages[category] = [...(currentImages[category] || []), ...imageUrls];
 
-  if (filters?.verificationStatus) {
-    whereClause.verificationStatus = filters.verificationStatus;
-  }
-
-  // Date range filter for bookings
-  if (filters?.dateRange) {
-    whereClause.bookingsAsGuest.some.createdAt = {
-      gte: new Date(filters.dateRange.start),
-      lte: new Date(filters.dateRange.end)
-    };
-  }
-
-  const orderBy: any = {};
-  if (filters?.sortBy) {
-    switch (filters.sortBy) {
-      case 'name':
-        orderBy.firstName = filters.sortOrder || 'asc';
-        break;
-      case 'joinDate':
-        orderBy.createdAt = filters.sortOrder || 'desc';
-        break;
-      default:
-        orderBy[filters.sortBy] = filters.sortOrder || 'desc';
-    }
-  } else {
-    orderBy.createdAt = 'desc';
-  }
-
-  const guests = await prisma.user.findMany({
-    where: whereClause,
-    include: {
-      bookingsAsGuest: {
-        where: {
-          property: { hostId }
-        },
-        include: {
-          property: { select: { name: true } }
-        },
-        orderBy: { createdAt: 'desc' }
-      },
-      reviews: {
-        where: {
-          property: { hostId }
-        }
-      }
-    },
-    orderBy
-  });
-
-  return guests.map((guest: any) => this.transformToGuestProfile(guest));
-}
-
-async getGuestDetails(hostId: number, guestId: number): Promise<GuestBookingHistory> {
-  const guest = await prisma.user.findFirst({
-    where: {
-      id: guestId,
-      bookingsAsGuest: {
-        some: {
-          property: { hostId }
-        }
-      }
-    },
-    include: {
-      bookingsAsGuest: {
-        where: {
-          property: { hostId }
-        },
-        include: {
-          property: { select: { name: true } }
-        },
-        orderBy: { createdAt: 'desc' }
-      }
-    }
-  });
-
-  if (!guest) {
-    throw new Error('Guest not found or no booking history with your properties');
-  }
-
-  const bookings = guest.bookingsAsGuest.map((b: any) => this.transformToBookingInfo(b));
-  const totalRevenue = bookings
-    .filter(b => b.status === 'completed')
-    .reduce((sum, b) => sum + b.totalPrice, 0);
-
-  const avgStayDuration = bookings.length > 0 
-    ? bookings.reduce((sum, b) => {
-        const checkIn = new Date(b.checkIn);
-        const checkOut = new Date(b.checkOut);
-        return sum + Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
-      }, 0) / bookings.length
-    : 0;
-
-  // Find most booked property
-  const propertyBookings = bookings.reduce((acc: any, b) => {
-    acc[b.propertyName] = (acc[b.propertyName] || 0) + 1;
-    return acc;
-  }, {});
-  
-  const favoriteProperty = Object.keys(propertyBookings).length > 0 
-    ? Object.keys(propertyBookings).reduce((a, b) => propertyBookings[a] > propertyBookings[b] ? a : b)
-    : undefined;
-
-  return {
-    guestId: guest.id,
-    bookings,
-    totalBookings: bookings.length,
-    totalRevenue,
-    averageStayDuration: avgStayDuration,
-    favoriteProperty
-  };
-}
-
-async getHostBookings(hostId: number, filters?: BookingFilters, page: number = 1, limit: number = 20) {
-  const skip = (page - 1) * limit;
-  
-  const whereClause: any = {
-    property: { hostId }
-  };
-
-  if (filters?.status) {
-    whereClause.status = { in: filters.status };
-  }
-
-  if (filters?.propertyId) {
-    whereClause.propertyId = filters.propertyId;
-  }
-
-  if (filters?.guestId) {
-    whereClause.guestId = filters.guestId;
-  }
-
-  if (filters?.dateRange) {
-    whereClause.createdAt = {
-      gte: new Date(filters.dateRange.start),
-      lte: new Date(filters.dateRange.end)
-    };
-  }
-
-  const orderBy: any = {};
-  if (filters?.sortBy) {
-    switch (filters.sortBy) {
-      case 'date':
-        orderBy.checkIn = filters.sortOrder || 'desc';
-        break;
-      case 'amount':
-        orderBy.totalPrice = filters.sortOrder || 'desc';
-        break;
-      case 'property':
-        orderBy.property = { name: filters.sortOrder || 'asc' };
-        break;
-      case 'guest':
-        orderBy.guest = { firstName: filters.sortOrder || 'asc' };
-        break;
-      default:
-        orderBy.createdAt = 'desc';
-    }
-  } else {
-    orderBy.createdAt = 'desc';
-  }
-
-  const [bookings, total] = await Promise.all([
-    prisma.booking.findMany({
-      where: whereClause,
+    const updatedProperty = await prisma.property.update({
+      where: { id: propertyId },
+      data: { images: JSON.stringify(currentImages) },
       include: {
-        property: { select: { name: true, location: true } },
-        guest: { select: { firstName: true, lastName: true, email: true, profileImage: true } }
-      },
-      orderBy,
-      skip,
-      take: limit
-    }),
-    prisma.booking.count({ where: whereClause })
-  ]);
+        host: true,
+        reviews: true,
+        bookings: true
+      }
+    });
 
-  return {
-    bookings: bookings.map((b: any) => this.transformToBookingInfo(b)),
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit)
-  };
-}
-
-async updateBooking(hostId: number, bookingId: string, data: BookingUpdateDto): Promise<BookingInfo> {
-  // Verify host owns the property for this booking
-  const booking = await prisma.booking.findFirst({
-    where: {
-      id: bookingId,
-      property: { hostId }
-    },
-    include: {
-      property: true,
-      guest: true
-    }
-  });
-
-  if (!booking) {
-    throw new Error('Booking not found or access denied');
+    return this.transformToPropertyInfo(updatedProperty);
   }
 
-  const updateData: any = {};
-  
-  if (data.status) updateData.status = data.status;
-  if (data.notes) updateData.notes = data.notes;
-  if (data.specialRequests) updateData.specialRequests = data.specialRequests;
-  if (data.checkInInstructions) updateData.checkInInstructions = data.checkInInstructions;
-  if (data.checkOutInstructions) updateData.checkOutInstructions = data.checkOutInstructions;
+  async removePropertyImage(propertyId: number, hostId: number, category: keyof PropertyImages, imageUrl: string): Promise<PropertyInfo> {
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, hostId }
+    });
 
-  const updatedBooking = await prisma.booking.update({
-    where: { id: bookingId },
-    data: updateData,
-    include: {
-      property: true,
-      guest: true
+    if (!property) {
+      throw new Error('Property not found or access denied');
     }
-  });
 
-  return this.transformToBookingInfo(updatedBooking);
-}
-
-async getBookingCalendar(hostId: number, year: number, month: number): Promise<BookingCalendar> {
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 0);
-  
-  const bookings = await prisma.booking.findMany({
-    where: {
-      property: { hostId },
-      status: { in: ['confirmed', 'completed'] },
-      OR: [
-        {
-          checkIn: { gte: startDate, lte: endDate }
-        },
-        {
-          checkOut: { gte: startDate, lte: endDate }
-        },
-        {
-          AND: [
-            { checkIn: { lte: startDate } },
-            { checkOut: { gte: endDate } }
-          ]
-        }
-      ]
-    },
-    include: {
-      property: { select: { name: true } },
-      guest: { select: { firstName: true, lastName: true } }
+    const currentImages = property.images ? JSON.parse(property.images as string) : {};
+    if (currentImages[category]) {
+      currentImages[category] = currentImages[category].filter((url: string) => url !== imageUrl);
     }
-  });
 
-  const days: BookingCalendarDay[] = [];
-  const today = new Date();
+    const updatedProperty = await prisma.property.update({
+      where: { id: propertyId },
+      data: { images: JSON.stringify(currentImages) },
+      include: {
+        host: true,
+        reviews: true,
+        bookings: true
+      }
+    });
 
-  for (let day = 1; day <= endDate.getDate(); day++) {
-    const currentDate = new Date(year, month - 1, day);
-    const dateStr = currentDate.toISOString().split('T')[0];
-    
-    const dayBookings = bookings
-      .filter(booking => {
-        const checkIn = new Date(booking.checkIn);
-        const checkOut = new Date(booking.checkOut);
-        return currentDate >= checkIn && currentDate <= checkOut;
-      })
-      .map(booking => {
-        const checkIn = new Date(booking.checkIn);
-        const checkOut = new Date(booking.checkOut);
-        
-        let type: 'check_in' | 'check_out' | 'ongoing' = 'ongoing';
-        if (currentDate.toDateString() === checkIn.toDateString()) {
-          type = 'check_in';
-        } else if (currentDate.toDateString() === checkOut.toDateString()) {
-          type = 'check_out';
-        }
+    return this.transformToPropertyInfo(updatedProperty);
+  }
 
-        return {
-          id: booking.id,
-          guestName: `${booking.guest.firstName} ${booking.guest.lastName}`,
-          propertyName: booking.property.name,
-          type,
-          status: booking.status as BookingStatus  // Cast to BookingStatus type
-        };
-      });
+  async updatePropertyAvailability(propertyId: number, hostId: number, availableFrom: string, availableTo: string): Promise<PropertyInfo> {
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, hostId }
+    });
 
-    const revenue = dayBookings.reduce((sum, booking) => {
-      const fullBooking = bookings.find(b => b.id === booking.id);
-      return sum + (fullBooking?.totalPrice || 0);
-    }, 0);
+    if (!property) {
+      throw new Error('Property not found or access denied');
+    }
 
-    days.push({
-      date: dateStr,
-      bookings: dayBookings,
-      revenue,
-      isToday: currentDate.toDateString() === today.toDateString()
+    const updatedProperty = await prisma.property.update({
+      where: { id: propertyId },
+      data: {
+        availableFrom: new Date(availableFrom),
+        availableTo: new Date(availableTo)
+      },
+      include: {
+        host: true,
+        reviews: true,
+        bookings: true
+      }
+    });
+
+    return this.transformToPropertyInfo(updatedProperty);
+  }
+
+  async blockDates(propertyId: number, hostId: number, startDate: string, endDate: string, reason?: string): Promise<void> {
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, hostId }
+    });
+
+    if (!property) {
+      throw new Error('Property not found or access denied');
+    }
+
+    await prisma.blockedDate.create({
+      data: {
+        propertyId,
+        startDate: new Date(startDate),
+        endDate: new Date(endDate),
+        reason: reason || 'Blocked by host',
+        isActive: true
+      }
     });
   }
 
-  return {
-    year,
-    month,
-    days
-  };
-}
+  async updatePropertyPricing(propertyId: number, hostId: number, pricePerNight: number, pricePerTwoNights?: number): Promise<PropertyInfo> {
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, hostId }
+    });
 
-async getEarningsOverview(hostId: number): Promise<EarningsOverview> {
-  const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const startOfYear = new Date(now.getFullYear(), 0, 1);
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-
-  const [
-    totalEarnings,
-    monthlyEarnings,
-    yearlyEarnings,
-    lastMonthEarnings,
-    totalBookings,
-    monthlyBookings,
-    occupiedNights,
-    totalNights
-  ] = await Promise.all([
-    // Total earnings from completed bookings
-    prisma.booking.aggregate({
-      where: {
-        property: { hostId },
-        status: 'completed'
-      },
-      _sum: { totalPrice: true }
-    }),
-    // This month's earnings
-    prisma.booking.aggregate({
-      where: {
-        property: { hostId },
-        status: 'completed',
-        checkOut: { gte: startOfMonth }
-      },
-      _sum: { totalPrice: true }
-    }),
-    // This year's earnings
-    prisma.booking.aggregate({
-      where: {
-        property: { hostId },
-        status: 'completed',
-        checkOut: { gte: startOfYear }
-      },
-      _sum: { totalPrice: true }
-    }),
-    // Last month's earnings for growth calculation
-    prisma.booking.aggregate({
-      where: {
-        property: { hostId },
-        status: 'completed',
-        checkOut: { gte: lastMonthStart, lte: lastMonthEnd }
-      },
-      _sum: { totalPrice: true }
-    }),
-    // Total bookings count
-    prisma.booking.count({
-      where: {
-        property: { hostId },
-        status: 'completed'
-      }
-    }),
-    // This month's bookings
-    prisma.booking.count({
-      where: {
-        property: { hostId },
-        status: 'completed',
-        checkOut: { gte: startOfMonth }
-      }
-    }),
-    // Calculate occupied nights (approximate)
-    prisma.booking.findMany({
-      where: {
-        property: { hostId },
-        status: 'completed'
-      },
-      select: { checkIn: true, checkOut: true }
-    }),
-    // Get total available nights from properties
-    prisma.property.count({
-      where: { hostId, status: 'active' }
-    })
-  ]);
-
-  // Calculate occupied nights
-  const occupiedNightsCount = occupiedNights.reduce((total, booking) => {
-    const nights = Math.ceil((new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) / (1000 * 60 * 60 * 24));
-    return total + nights;
-  }, 0);
-
-  // Approximate total available nights (365 days * active properties)
-  const totalAvailableNights = totalNights * 365;
-  const occupancyRate = totalAvailableNights > 0 ? (occupiedNightsCount / totalAvailableNights) * 100 : 0;
-
-  // Calculate average nightly rate
-  const avgNightlyRate = occupiedNightsCount > 0 ? (totalEarnings._sum.totalPrice || 0) / occupiedNightsCount : 0;
-
-  // Calculate revenue growth
-  const currentMonth = monthlyEarnings._sum.totalPrice || 0;
-  const lastMonth = lastMonthEarnings._sum.totalPrice || 0;
-  const revenueGrowth = lastMonth > 0 ? ((currentMonth - lastMonth) / lastMonth) * 100 : 0;
-
-  return {
-    totalEarnings: totalEarnings._sum.totalPrice || 0,
-    monthlyEarnings: currentMonth,
-    yearlyEarnings: yearlyEarnings._sum.totalPrice || 0,
-    pendingPayouts: 0, // TODO: Implement with Payout model
-    completedPayouts: 0, // TODO: Implement with Payout model
-    averageNightlyRate: avgNightlyRate,
-    occupancyRate: occupancyRate,
-    revenueGrowth: revenueGrowth
-  };
-}
-
-async getEarningsBreakdown(hostId: number): Promise<EarningsBreakdown[]> {
-  const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-
-  const properties = await prisma.property.findMany({
-    where: { hostId },
-    include: {
-      bookings: {
-        where: { status: 'completed' },
-        select: {
-          totalPrice: true,
-          checkIn: true,
-          checkOut: true,
-          createdAt: true
-        }
-      }
+    if (!property) {
+      throw new Error('Property not found or access denied');
     }
-  });
 
-  return properties.map(property => {
-    const allBookings = property.bookings;
-    const monthlyBookings = allBookings.filter(b => new Date(b.checkOut) >= startOfMonth);
-    
-    const totalEarnings = allBookings.reduce((sum, b) => sum + b.totalPrice, 0);
-    const monthlyEarnings = monthlyBookings.reduce((sum, b) => sum + b.totalPrice, 0);
-    
-    const totalNights = allBookings.reduce((sum, b) => {
-      const nights = Math.ceil((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / (1000 * 60 * 60 * 24));
-      return sum + nights;
-    }, 0);
+    const updatedProperty = await prisma.property.update({
+      where: { id: propertyId },
+      data: {
+        pricePerNight,
+        pricePerTwoNights
+      },
+      include: {
+        host: true,
+        reviews: true,
+        bookings: true
+      }
+    });
 
-    const avgBookingValue = allBookings.length > 0 ? totalEarnings / allBookings.length : 0;
-    const occupancyRate = totalNights > 0 ? (totalNights / (365 * (new Date().getFullYear() - new Date(property.createdAt).getFullYear() + 1))) * 100 : 0;
-    
-    const lastBooking = allBookings.length > 0 
-      ? allBookings.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
-      : null;
-
-    return {
-      propertyId: property.id,
-      propertyName: property.name,
-      totalEarnings,
-      monthlyEarnings,
-      bookingsCount: allBookings.length,
-      averageBookingValue: avgBookingValue,
-      occupancyRate: Math.min(occupancyRate, 100), // Cap at 100%
-      lastBooking: lastBooking?.createdAt.toISOString()
-    };
-  });
-}
-
-// --- ANALYTICS METHODS ---
-async getHostAnalytics(hostId: number, timeRange: 'week' | 'month' | 'quarter' | 'year' = 'month'): Promise<HostAnalytics> {
-  const now = new Date();
-  let startDate: Date;
-
-  switch (timeRange) {
-    case 'week':
-      startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      break;
-    case 'quarter':
-      startDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
-      break;
-    case 'year':
-      startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-      break;
-    default: // month
-      startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+    return this.transformToPropertyInfo(updatedProperty);
   }
 
-  const [overview, propertyPerformance, bookingTrends, guestInsights, revenueAnalytics] = await Promise.all([
-    this.getAnalyticsOverview(hostId, timeRange),
-    this.getPropertyPerformanceMetrics(hostId, timeRange),
-    this.getBookingTrendData(hostId, startDate),
-    this.getGuestAnalytics(hostId),
-    this.getRevenueAnalytics(hostId)
-  ]);
+  async activateProperty(propertyId: number, hostId: number): Promise<PropertyInfo> {
+    return this.updatePropertyStatus(propertyId, hostId, 'active');
+  }
 
-  return {
-    overview,
-    propertyPerformance,
-    bookingTrends,
-    guestInsights,
-    revenueAnalytics,
-    marketComparison: {
-      averagePrice: 0, // TODO: Implement market data
-      myAveragePrice: revenueAnalytics.monthlyRevenue.reduce((sum, m) => sum + m.revenue, 0) / Math.max(revenueAnalytics.monthlyRevenue.length, 1),
-      occupancyRate: 0, // TODO: Implement market data
-      myOccupancyRate: overview.occupancyRate,
-      competitorCount: 0, // TODO: Implement market data
-      marketPosition: 'mid_range', // TODO: Implement market analysis
-      opportunities: [] // TODO: Implement opportunity analysis
+  async deactivateProperty(propertyId: number, hostId: number): Promise<PropertyInfo> {
+    return this.updatePropertyStatus(propertyId, hostId, 'inactive');
+  }
+
+  private async updatePropertyStatus(propertyId: number, hostId: number, status: string): Promise<PropertyInfo> {
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, hostId }
+    });
+
+    if (!property) {
+      throw new Error('Property not found or access denied');
     }
-  };
-}
 
-// --- ENHANCED DASHBOARD ---
-async getEnhancedHostDashboard(hostId: number): Promise<EnhancedHostDashboard> {
-  const basicDashboard = await this.getHostDashboard(hostId);
-  
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
+    const updatedProperty = await prisma.property.update({
+      where: { id: propertyId },
+      data: { status },
+      include: {
+        host: true,
+        reviews: true,
+        bookings: true
+      }
+    });
 
-  const [todayCheckIns, todayCheckOuts, occupiedProperties, pendingActions, recentActivity] = await Promise.all([
-    // Today's check-ins
-    prisma.booking.count({
+    try {
+      if (updatedProperty.host && updatedProperty.hostId) {
+        await this.emailService.sendPropertyStatusUpdateEmail({
+          host: {
+            firstName: updatedProperty.host.firstName,
+            lastName: updatedProperty.host.lastName,
+            email: updatedProperty.host.email,
+            id: updatedProperty.hostId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/logo.png'
+          },
+          property: await this.transformToPropertyInfo(updatedProperty),
+          newStatus: status as 'active' | 'pending' | 'rejected' | 'inactive'
+        });
+      }
+    } catch (emailError) {
+      console.error('Failed to send property status update email:', emailError);
+    }
+
+    return this.transformToPropertyInfo(updatedProperty);
+  }
+
+  async getLocationSuggestions(query: string): Promise<string[]> {
+    const properties = await prisma.property.findMany({
       where: {
-        property: { hostId },
-        status: 'confirmed',
-        checkIn: {
-          gte: new Date(todayStr),
-          lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+        location: { contains: query },
+        status: 'active'
+      },
+      select: { location: true },
+      distinct: ['location'],
+      take: 10
+    });
+
+    return properties.map((p: { location: any; }) => p.location);
+  }
+
+  // --- AGENT PROPERTY MANAGEMENT ---
+  async getAgentProperties(agentId: number, filters: any, page: number = 1, limit: number = 20) {
+    const skip = (page - 1) * limit;
+
+    // Get all clients this agent manages
+    const agentClients = await prisma.agentBooking.findMany({
+      where: { agentId, status: 'active' },
+      select: { clientId: true }
+    });
+
+    const clientIds = agentClients.map(ac => ac.clientId);
+
+    // Query properties where:
+    // 1. hostId is in the agent's client list, OR
+    // 2. agentId matches (for properties directly assigned to agent)
+    const whereClause: any = {
+      OR: [
+        { hostId: { in: clientIds } },
+        { agentId: agentId }
+      ]
+    };
+
+    if (filters.clientId) {
+      // Override to filter by specific client
+      whereClause.AND = [
+        { OR: whereClause.OR },
+        { hostId: filters.clientId }
+      ];
+      delete whereClause.OR;
+    }
+    if (filters.status) {
+      whereClause.status = filters.status;
+    }
+    if (filters.search) {
+      if (!whereClause.AND) {
+        whereClause.AND = [];
+      }
+      whereClause.AND.push({
+        OR: [
+          { name: { contains: filters.search } },
+          { location: { contains: filters.search } }
+        ]
+      });
+    }
+
+    const orderBy: any = {};
+    if (filters.sortBy) {
+      switch (filters.sortBy) {
+        case 'name':
+          orderBy.name = filters.sortOrder || 'asc';
+          break;
+        case 'location':
+          orderBy.location = filters.sortOrder || 'asc';
+          break;
+        case 'price':
+          orderBy.pricePerNight = filters.sortOrder || 'asc';
+          break;
+        case 'rating':
+          orderBy.averageRating = filters.sortOrder || 'desc';
+          break;
+        default:
+          orderBy.createdAt = filters.sortOrder || 'desc';
+      }
+    } else {
+      orderBy.createdAt = 'desc';
+    }
+
+    const [properties, total] = await Promise.all([
+      prisma.property.findMany({
+        where: whereClause,
+        include: {
+          host: { select: { firstName: true, lastName: true, email: true } },
+          reviews: { select: { rating: true } },
+          bookings: {
+            where: { status: { not: '' } },
+            select: { totalPrice: true }
+          }
+        },
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.property.count({ where: whereClause })
+    ]);
+
+    const transformedProperties = await Promise.all(
+      properties.map(async (property: any) => {
+        return {
+          ...await this.transformToPropertyInfo(property),
+          hostEmail: property.host.email,
+          totalRevenue: property.bookings.reduce((sum: number, b: any) => sum + b.totalPrice, 0),
+        };
+      })
+    );
+
+    return {
+      properties: transformedProperties,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    };
+  }
+
+  async getAgentPropertyDetails(agentId: number, propertyId: number): Promise<PropertyInfo> {
+    const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
+    if (!hasAccess) {
+      throw new Error('Access denied. Property not associated with your clients.');
+    }
+
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      include: {
+        host: true,
+        reviews: {
+          include: { user: true },
+          orderBy: { createdAt: 'desc' },
+          take: 10
+        },
+        bookings: {
+          where: { status: 'confirmed' },
+          select: { id: true }
         }
       }
-    }),
-    // Today's check-outs
-    prisma.booking.count({
-      where: {
-        property: { hostId },
-        status: 'confirmed',
-        checkOut: {
-          gte: new Date(todayStr),
-          lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
-        }
-      }
-    }),
-    // Currently occupied properties
-    prisma.booking.count({
-      where: {
-        property: { hostId },
-        status: 'confirmed',
-        checkIn: { lte: today },
-        checkOut: { gt: today }
-      }
-    }),
-    // Pending actions (bookings, reviews, etc.)
-    prisma.booking.count({
-      where: {
-        property: { hostId },
-        status: 'pending'
-      }
-    }),
-    // Recent activity
-    this.getRecentActivity(hostId)
-  ]);
+    });
 
-  return {
-    ...basicDashboard,
-    quickStats: {
-      todayCheckIns,
-      todayCheckOuts,
-      occupiedProperties,
-      pendingActions
-    },
-    recentActivity,
-    alerts: [], // TODO: Implement alert system
-    marketTrends: {
-      demandTrend: 'stable', // TODO: Implement market analysis
-      averagePrice: 0, // TODO: Implement market data
-      competitorActivity: 'Normal activity in your area' // TODO: Implement competitor tracking
+    if (!property) {
+      throw new Error('Property not found');
     }
-  };
-}
 
-// --- HELPER METHODS ---
-private transformToGuestProfile(guest: any): GuestProfile {
-  const bookings = guest.bookingsAsGuest || [];
-  const completedBookings = bookings.filter((b: any) => b.status === 'completed');
-  
-  return {
-    id: guest.id,
-    firstName: guest.firstName,
-    lastName: guest.lastName,
-    email: guest.email,
-    phone: guest.phone,
-    profileImage: guest.profileImage,
-    verificationStatus: guest.verificationStatus || 'unverified',
-    joinDate: guest.createdAt.toISOString(),
-    totalBookings: bookings.length,
-    totalSpent: completedBookings.reduce((sum: number, b: any) => sum + b.totalPrice, 0),
-    averageRating: guest.averageRating || 0,
-    lastBooking: bookings.length > 0 ? bookings[0].createdAt.toISOString() : undefined,
-    preferredCommunication: guest.preferredCommunication || 'email',
-    notes: guest.hostNotes
-  };
-}
+    return this.transformToPropertyInfo(property);
+  }
 
-
-private async getAnalyticsOverview(hostId: number, timeRange: 'week' | 'month' | 'quarter' | 'year'): Promise<AnalyticsOverview> {
-  // Implementation would depend on having view tracking and other metrics
-  return {
-    totalViews: 0, // TODO: Implement view tracking
-    totalBookings: 0,
-    totalRevenue: 0,
-    averageRating: 0,
-    occupancyRate: 0,
-    conversionRate: 0,
-    repeatGuestRate: 0,
-    timeRange
-  };
-}
-
-private async getPropertyPerformanceMetrics(hostId: number, timeRange: string): Promise<PropertyPerformanceMetrics[]> {
-  // Simplified implementation - expand based on needs
-  return [];
-}
-
-private async getBookingTrendData(hostId: number, startDate: Date): Promise<BookingTrendData[]> {
-  // Simplified implementation - expand based on needs
-  return [];
-}
-
-private async getGuestAnalytics(hostId: number): Promise<GuestAnalytics> {
-  // Simplified implementation - expand based on needs
-  return {
-    totalGuests: 0,
-    newGuests: 0,
-    returningGuests: 0,
-    averageStayDuration: 0,
-    guestDemographics: {
-      ageGroups: [],
-      countries: [],
-      purposes: []
-    },
-    guestSatisfaction: {
-      averageRating: 0,
-      ratingDistribution: [],
-      commonComplaints: [],
-      commonPraises: []
+  async updateAgentProperty(agentId: number, propertyId: number, data: any): Promise<PropertyInfo> {
+    const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
+    if (!hasAccess) {
+      throw new Error('Access denied. Property not associated with your clients.');
     }
-  };
-}
- 
-private async getRevenueAnalytics(hostId: number): Promise<RevenueAnalytics> {
-  // Simplified implementation - expand based on needs
-  return {
-    monthlyRevenue: [],
-    revenueByProperty: [],
-    seasonalTrends: [],
-    pricingOptimization: []
-  };
-}
 
-private async getRecentActivity(hostId: number): Promise<DashboardActivity[]> {
-  // Get recent bookings, reviews, etc. and combine into activity feed
-  const [recentBookings, recentReviews] = await Promise.all([
-    prisma.booking.findMany({
-      where: { property: { hostId } },
+    const existingProperty = await prisma.property.findUnique({
+      where: { id: propertyId }
+    });
+
+    if (!existingProperty) {
+      throw new Error('Property not found');
+    }
+
+    const updateData: any = {};
+    
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.features !== undefined) updateData.features = JSON.stringify(data.features);
+    if (data.pricePerNight !== undefined) updateData.pricePerNight = data.pricePerNight;
+    if (data.pricePerTwoNights !== undefined) updateData.pricePerTwoNights = data.pricePerTwoNights;
+    if (data.minStay !== undefined) updateData.minStay = data.minStay;
+    if (data.maxStay !== undefined) updateData.maxStay = data.maxStay;
+    
+    if (data.availabilityDates) {
+      updateData.availableFrom = new Date(data.availabilityDates.start);
+      updateData.availableTo = new Date(data.availabilityDates.end);
+    }
+    
+    if (data.images) {
+      const currentImages = existingProperty.images 
+        ? JSON.parse(existingProperty.images as string) 
+        : {};
+      updateData.images = JSON.stringify({ ...currentImages, ...data.images });
+    }
+
+    const property = await prisma.property.update({
+      where: { id: propertyId },
+      data: updateData,
+      include: {
+        host: true,
+        reviews: true,
+        bookings: true
+      }
+    });
+
+    return this.transformToPropertyInfo(property);
+  }
+
+  async getAgentPropertyPerformance(agentId: number, timeRange: 'week' | 'month' | 'quarter' | 'year') {
+    const properties = await this.getAgentPropertiesBasic(agentId);
+    
+    const now = new Date();
+    let startDate: Date;
+    
+    switch (timeRange) {
+      case 'week':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case 'quarter':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+        break;
+      case 'year':
+        startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+        break;
+      default:
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+    }
+
+    const performance = await Promise.all(
+      properties.map(async (property: any) => {
+        const [bookings, revenue, occupancyData] = await Promise.all([
+          prisma.booking.count({
+            where: {
+              propertyId: property.id,
+              createdAt: { gte: startDate },
+              status: { in: ['confirmed', 'completed'] }
+            }
+          }),
+          prisma.booking.aggregate({
+            where: {
+              propertyId: property.id,
+              createdAt: { gte: startDate },
+              status: 'completed'
+            },
+            _sum: { totalPrice: true }
+          }),
+          this.calculatePropertyOccupancy(property.id, startDate, now)
+        ]);
+
+        const commission = await this.getAgentPropertyCommission(agentId, property.hostId);
+
+        return {
+          propertyId: property.id,
+          propertyName: property.name,
+          bookings,
+          revenue: revenue._sum.totalPrice || 0,
+          occupancyRate: occupancyData.occupancyRate,
+          agentCommission: (revenue._sum.totalPrice || 0) * (commission / 100),
+          averageRating: property.averageRating || 0
+        };
+      })
+    );
+
+    return {
+      timeRange,
+      properties: performance,
+      summary: {
+        totalBookings: performance.reduce((sum, p) => sum + p.bookings, 0),
+        totalRevenue: performance.reduce((sum, p) => sum + p.revenue, 0),
+        totalCommission: performance.reduce((sum, p) => sum + p.agentCommission, 0),
+        averageOccupancy: performance.reduce((sum, p) => sum + p.occupancyRate, 0) / Math.max(performance.length, 1)
+      }
+    };
+  }
+
+  async getAgentPropertyBookings(agentId: number, propertyId: number) {
+    const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
+    if (!hasAccess) {
+      throw new Error('Access denied. Property not associated with your clients.');
+    }
+
+    const bookings = await prisma.booking.findMany({
+      where: { propertyId },
+      include: {
+        guest: true,
+        property: { select: { name: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return bookings.map((b: any) => ({
+      ...this.transformToBookingInfo(b),
+      agentCommission: this.calculateBookingCommission(b.totalPrice, agentId)
+    }));
+  }
+
+  async createAgentBooking(agentId: number, data: any): Promise<BookingInfo> {
+    const hasAccess = await this.verifyAgentPropertyAccess(agentId, data.propertyId);
+    if (!hasAccess) {
+      throw new Error('Access denied. Property not associated with your clients.');
+    }
+
+    const clientRelation = await prisma.agentBooking.findFirst({
+      where: {
+        agentId,
+        clientId: data.clientId,
+        status: 'active'
+      }
+    });
+
+    if (!clientRelation) {
+      throw new Error('Client not associated with your account.');
+    }
+
+    const booking = await this.createBooking(data.clientId, data);
+
+    const commissionRate = await this.getAgentCommissionRate(agentId);
+    await prisma.agentBooking.create({
+      data: {
+        agentId,
+        clientId: data.clientId,
+        bookingType: 'property',
+        bookingId: booking.id,
+        commission: data.totalPrice * (commissionRate / 100),
+        commissionRate,
+        status: 'active'
+      }
+    });
+
+    return booking;
+  }
+
+  async getAgentBookings(agentId: number, filters: any, page: number = 1, limit: number = 20) {
+    const skip = (page - 1) * limit;
+    
+    const whereClause: any = {
+      agentId
+    };
+
+    if (filters.clientId) {
+      whereClause.clientId = filters.clientId;
+    }
+
+    if (filters.dateRange) {
+      whereClause.createdAt = {
+        gte: new Date(filters.dateRange.start),
+        lte: new Date(filters.dateRange.end)
+      };
+    }
+
+    const orderBy: any = {};
+    if (filters.sortBy === 'date') {
+      orderBy.createdAt = filters.sortOrder || 'desc';
+    } else {
+      orderBy.createdAt = 'desc';
+    }
+
+    const [agentBookings, total] = await Promise.all([
+      prisma.agentBooking.findMany({
+        where: whereClause,
+        include: {
+          client: { select: { firstName: true, lastName: true } }
+        },
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.agentBooking.count({ where: whereClause })
+    ]);
+
+    const bookingIds = agentBookings.map(ab => ab.bookingId);
+    const actualBookings = await prisma.booking.findMany({
+      where: { id: { in: bookingIds } },
       include: {
         property: { select: { name: true } },
         guest: { select: { firstName: true, lastName: true } }
+      }
+    });
+
+    const enrichedBookings = agentBookings.map(agentBooking => {
+      const actualBooking = actualBookings.find(b => b.id === agentBooking.bookingId);
+      return {
+        ...this.transformToBookingInfo(actualBooking),
+        agentCommission: agentBooking.commission,
+        commissionStatus: agentBooking.status,
+        clientName: `${agentBooking.client.firstName} ${agentBooking.client.lastName}`
+      };
+    });
+
+    return {
+      bookings: enrichedBookings,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    };
+  }
+
+  async getAgentBookingCalendar(agentId: number, year: number, month: number): Promise<BookingCalendar> {
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0);
+    
+    const agentProperties = await this.getAgentPropertiesBasic(agentId);
+    const propertyIds = agentProperties.map((p: any) => p.id);
+
+    const bookings = await prisma.booking.findMany({
+      where: {
+        propertyId: { in: propertyIds },
+        status: { in: ['confirmed', 'completed'] },
+        OR: [
+          { checkIn: { gte: startDate, lte: endDate } },
+          { checkOut: { gte: startDate, lte: endDate } },
+          {
+            AND: [
+              { checkIn: { lte: startDate } },
+              { checkOut: { gte: endDate } }
+            ]
+          }
+        ]
       },
-      orderBy: { createdAt: 'desc' },
-      take: 5
-    }),
-    prisma.review.findMany({
-      where: { property: { hostId } },
       include: {
         property: { select: { name: true } },
-        user: { select: { firstName: true, lastName: true } }
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 5
-    })
-  ]);
-
-  const activities: DashboardActivity[] = [];
-
-  // Add booking activities
-  recentBookings.forEach(booking => {
-    activities.push({
-      id: `booking-${booking.id}`,
-      type: 'booking',
-      title: 'New Booking',
-      description: `${booking.guest.firstName} ${booking.guest.lastName} booked ${booking.property.name}`,
-      timestamp: booking.createdAt.toISOString(),
-      propertyId: booking.propertyId,
-      bookingId: booking.id,
-      isRead: false,
-      priority: booking.status === 'pending' ? 'high' : 'medium'
+        guest: { select: { firstName: true, lastName: true } }
+      }
     });
-  });
 
-  // Add review activities
-  recentReviews.forEach(review => {
-    activities.push({
-      id: `review-${review.id}`,
-      type: 'review',
-      title: 'New Review',
-      description: `${review.user.firstName} ${review.user.lastName} reviewed ${review.property.name} (${review.rating} stars)`,
-      timestamp: review.createdAt.toISOString(),
-      propertyId: review.propertyId,
-      isRead: false,
-      priority: review.rating < 3 ? 'high' : 'low'
-    });
-  });
+    const days: BookingCalendarDay[] = [];
+    const today = new Date();
 
-  // Sort by timestamp and return most recent
-  return activities
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-    .slice(0, 10);
-}
+    for (let day = 1; day <= endDate.getDate(); day++) {
+      const currentDate = new Date(year, month - 1, day);
+      const dateStr = currentDate.toISOString().split('T')[0];
+      
+      const dayBookings = bookings
+        .filter(booking => {
+          const checkIn = new Date(booking.checkIn);
+          const checkOut = new Date(booking.checkOut);
+          return currentDate >= checkIn && currentDate <= checkOut;
+        })
+        .map(booking => {
+          const checkIn = new Date(booking.checkIn);
+          const checkOut = new Date(booking.checkOut);
+          
+          let type: 'check_in' | 'check_out' | 'ongoing' = 'ongoing';
+          if (currentDate.toDateString() === checkIn.toDateString()) {
+            type = 'check_in';
+          } else if (currentDate.toDateString() === checkOut.toDateString()) {
+            type = 'check_out';
+          }
 
-// Add these methods to your PropertyService class
+          return {
+            id: booking.id,
+            guestName: `${booking.guest.firstName} ${booking.guest.lastName}`,
+            propertyName: booking.property.name,
+            type,
+            status: booking.status as BookingStatus
+          };
+        });
 
-async getAgentDashboard(agentId: number): Promise<AgentDashboard> {
-  const [
-    totalClientsData,
-    activeClientsData,
-    totalCommissions,
-    pendingCommissions,
-    recentBookings,
-    monthlyCommissions
-  ] = await Promise.all([
-    // Total unique clients using groupBy
-    prisma.agentBooking.groupBy({
-      by: ['clientId'],
-      where: { agentId }
-    }),
-    // Active unique clients using groupBy
-    prisma.agentBooking.groupBy({
-      by: ['clientId'],
+      const revenue = dayBookings.reduce((sum, booking) => {
+        const fullBooking = bookings.find(b => b.id === booking.id);
+        return sum + (fullBooking?.totalPrice || 0);
+      }, 0);
+
+      days.push({
+        date: dateStr,
+        bookings: dayBookings,
+        revenue,
+        isToday: currentDate.toDateString() === today.toDateString()
+      });
+    }
+
+    return {
+      year,
+      month,
+      days
+    };
+  }
+
+  async updateAgentBooking(agentId: number, bookingId: string, data: BookingUpdateDto): Promise<BookingInfo> {
+    const agentBooking = await prisma.agentBooking.findFirst({
       where: {
         agentId,
-        status: 'active',
-        createdAt: { gte: new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000) }
+        bookingId
       }
-    }),
-    // Rest remains the same...
-    prisma.agentBooking.aggregate({
-      where: { agentId },
-      _sum: { commission: true }
-    }),
-    prisma.agentBooking.aggregate({
-      where: { 
-        agentId,
-        status: 'active'
-      },
-      _sum: { commission: true }
-    }),
-    prisma.agentBooking.findMany({
-      where: { agentId },
+    });
+
+    if (!agentBooking) {
+      throw new Error('Access denied. Booking not associated with your account.');
+    }
+
+    const allowedUpdates: any = {};
+    if (data.notes !== undefined) allowedUpdates.notes = data.notes;
+    if (data.specialRequests !== undefined) allowedUpdates.specialRequests = data.specialRequests;
+    if (data.checkInInstructions !== undefined) allowedUpdates.checkInInstructions = data.checkInInstructions;
+    if (data.checkOutInstructions !== undefined) allowedUpdates.checkOutInstructions = data.checkOutInstructions;
+
+    if (data.status && ['confirmed', 'cancelled'].includes(data.status)) {
+      allowedUpdates.status = data.status;
+    }
+
+    const booking = await prisma.booking.update({
+      where: { id: bookingId },
+      data: allowedUpdates,
       include: {
-        client: { select: { firstName: true, lastName: true } }
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 10
-    }),
-    this.getAgentMonthlyCommissions(agentId)
-  ]);
+        property: true,
+        guest: true
+      }
+    });
 
-  const totalClients = totalClientsData.length;
-  const activeClients = activeClientsData.length;
-
-
-  const avgCommissionPerBooking = recentBookings.length > 0 
-    ? (totalCommissions._sum.commission || 0) / recentBookings.length 
-    : 0;
-
-  return {
-    totalClients,
-    activeClients,
-    totalCommissions: totalCommissions._sum.commission || 0,
-    pendingCommissions: pendingCommissions._sum.commission || 0,
-    avgCommissionPerBooking,
-    recentBookings: recentBookings.map(this.transformToAgentBookingInfo),
-    monthlyCommissions
-  };
-}
-
-private async getAgentMonthlyCommissions(agentId: number): Promise<MonthlyCommissionData[]> {
-  const twelveMonthsAgo = new Date();
-  twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
-
-  const commissions = await prisma.agentBooking.findMany({
-    where: {
-      agentId,
-      createdAt: { gte: twelveMonthsAgo }
-    },
-    select: {
-      commission: true,
-      createdAt: true
-    }
-  });
-
-  // Group by month
-  const monthlyData: { [key: string]: { commission: number; bookings: number } } = {};
-  
-  commissions.forEach(commission => {
-    const month = commission.createdAt.toISOString().slice(0, 7); // YYYY-MM
-    if (!monthlyData[month]) {
-      monthlyData[month] = { commission: 0, bookings: 0 };
-    }
-    monthlyData[month].commission += commission.commission;
-    monthlyData[month].bookings += 1;
-  });
-
-  return Object.entries(monthlyData).map(([month, data]) => ({
-    month,
-    commission: data.commission,
-    bookings: data.bookings
-  }));
-}
-
-// --- AGENT PROPERTY MANAGEMENT ---
-async getAgentProperties(agentId: number, filters: any, page: number = 1, limit: number = 20) {
-  const skip = (page - 1) * limit;
-  
-  
-  const whereClause: any = {
-    hostId: agentId  // or uploadedBy: agentId, depending on your schema
-  };
-
-  // Apply filters (same as before)
-  if (filters.clientId) {
-    whereClause.hostId = filters.clientId;
-  }
-  if (filters.status) {
-    whereClause.status = filters.status;
-  }
-  if (filters.search) {
-    whereClause.OR = [
-      { name: { contains: filters.search } },
-      { location: { contains: filters.search } }
-    ];
+    return this.transformToBookingInfo(booking);
   }
 
-  // Sorting logic (same as before)
-  const orderBy: any = {};
-  if (filters.sortBy) {
-    switch (filters.sortBy) {
-      case 'name':
-        orderBy.name = filters.sortOrder || 'asc';
+  async getAgentEarnings(agentId: number, timeRange: 'week' | 'month' | 'quarter' | 'year'): Promise<AgentEarnings> {
+    const now = new Date();
+    let startDate: Date;
+    
+    switch (timeRange) {
+      case 'week':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         break;
-      case 'location':
-        orderBy.location = filters.sortOrder || 'asc';
+      case 'quarter':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
         break;
-      case 'price':
-        orderBy.pricePerNight = filters.sortOrder || 'asc';
-        break;
-      case 'rating':
-        orderBy.averageRating = filters.sortOrder || 'desc';
+      case 'year':
+        startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
         break;
       default:
-        orderBy.createdAt = filters.sortOrder || 'desc';
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
     }
-  } else {
-    orderBy.createdAt = 'desc';
+
+    const [totalEarnings, totalBookings, periodEarnings, periodBookings, commissionBreakdown] = await Promise.all([
+      prisma.agentBooking.aggregate({
+        where: { agentId },
+        _sum: { commission: true }
+      }),
+      prisma.agentBooking.count({
+        where: { agentId }
+      }),
+      prisma.agentBooking.aggregate({
+        where: {
+          agentId,
+          createdAt: { gte: startDate }
+        },
+        _sum: { commission: true }
+      }),
+      prisma.agentBooking.count({
+        where: {
+          agentId,
+          createdAt: { gte: startDate }
+        }
+      }),
+      prisma.agentBooking.groupBy({
+        by: ['bookingType'],
+        where: { agentId },
+        _sum: { commission: true },
+        _count: true
+      })
+    ]);
+
+    return {
+      totalEarnings: totalEarnings._sum.commission || 0,
+      totalBookings,
+      periodEarnings: periodEarnings._sum.commission || 0,
+      periodBookings,
+      commissionBreakdown: commissionBreakdown.map(item => ({
+        bookingType: item.bookingType,
+        totalCommission: item._sum.commission || 0,
+        bookingCount: item._count
+      })),
+      timeRange
+    };
   }
 
-  const [properties, total] = await Promise.all([
-    prisma.property.findMany({
-      where: whereClause,
+  async getAgentEarningsBreakdown(agentId: number) {
+    const agentBookings = await prisma.agentBooking.findMany({
+      where: { agentId },
+      include: {
+        client: { select: { firstName: true, lastName: true, email: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const bookingIds = agentBookings.filter(ab => ab.bookingType === 'property').map(ab => ab.bookingId);
+    const actualBookings = await prisma.booking.findMany({
+      where: { id: { in: bookingIds } },
+      select: { id: true, totalPrice: true, createdAt: true }
+    });
+
+    return agentBookings.map(agentBooking => {
+      const actualBooking = actualBookings.find(b => b.id === agentBooking.bookingId);
+      
+      return {
+        id: agentBooking.id,
+        clientName: `${agentBooking.client.firstName} ${agentBooking.client.lastName}`,
+        bookingType: agentBooking.bookingType,
+        bookingValue: actualBooking?.totalPrice || 0,
+        commission: agentBooking.commission,
+        commissionRate: agentBooking.commissionRate,
+        commissionStatus: agentBooking.status,
+        bookingDate: actualBooking?.createdAt.toISOString() || agentBooking.createdAt.toISOString(),
+        notes: agentBooking.notes
+      } as AgentCommissionInfo;
+    });
+  }
+
+  async getClientProperties(agentId: number, clientId: number) {
+    const hasAccess = await this.verifyAgentClientAccess(agentId, clientId);
+    if (!hasAccess) {
+      throw new Error('Access denied. Client not associated with your account.');
+    }
+
+    const properties = await prisma.property.findMany({
+      where: { hostId: clientId },
       include: {
         host: { select: { firstName: true, lastName: true, email: true } },
         reviews: { select: { rating: true } },
         bookings: {
-          where: { status: { not: '' } },
+          where: { status: 'completed' },
           select: { totalPrice: true }
         }
       },
-      orderBy,
-      skip,
-      take: limit
-    }),
-    prisma.property.count({ where: whereClause })
-  ]);
+      orderBy: { createdAt: 'desc' }
+    });
 
-  // Transform properties (simplified since no commission calculation needed)
-  const transformedProperties = await Promise.all(
-    properties.map(async (property: any) => {
-      return {
+    return Promise.all(
+      properties.map(async (property: any) => ({
         ...await this.transformToPropertyInfo(property),
-        hostEmail: property.host.email,
-        totalRevenue: property.bookings.reduce((sum: number, b: any) => sum + b.totalPrice, 0),
-   
-      };
-    })
-  );
-
-  return {
-    properties: transformedProperties,
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit)
-  };
-}
-
-async getAgentPropertyDetails(agentId: number, propertyId: number): Promise<PropertyInfo> {
-  // Verify agent has access to this property
-  const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
-  if (!hasAccess) {
-    throw new Error('Access denied. Property not associated with your clients.');
+        totalRevenue: property.bookings.reduce((sum: number, b: any) => sum + b.totalPrice, 0)
+      }))
+    );
   }
 
-  const property = await prisma.property.findUnique({
-    where: { id: propertyId },
-    include: {
-      host: true,
-      reviews: {
-        include: { user: true },
-        orderBy: { createdAt: 'desc' },
-        take: 10
-      },
-      bookings: {
-        where: { status: 'confirmed' },
-        select: { id: true }
+  async establishClientRelationship(agentId: number, clientId: number, bookingType: string = 'general'): Promise<any> {
+    console.log('🔗 Establishing relationship - AgentID:', agentId, 'ClientID:', clientId);
+
+    // Prevent self-relationship
+    if (agentId === clientId) {
+      throw new Error('Agent cannot establish relationship with themselves. Please provide a different client ID.');
+    }
+
+    // Verify client exists and is a host
+    const client = await prisma.user.findUnique({
+      where: { id: clientId },
+      select: { id: true, email: true, userType: true, firstName: true, lastName: true }
+    });
+
+    console.log('👤 Client found:', client);
+
+    if (!client) {
+      throw new Error('Client not found.');
+    }
+
+    // Verify client is a host (can own properties)
+    if (client.userType !== 'host' && client.userType !== 'admin') {
+      throw new Error(`User with ID ${clientId} is not a host. Only hosts can have properties managed by agents. User type: ${client.userType}`);
+    }
+
+    // Check if relationship already exists
+    const existingRelationship = await prisma.agentBooking.findFirst({
+      where: {
+        agentId,
+        clientId,
+        status: 'active'
       }
+    });
+
+    console.log('🔍 Existing relationship:', existingRelationship);
+
+    if (existingRelationship) {
+      throw new Error('Relationship with this client already exists.');
     }
-  });
 
-  if (!property) {
-    throw new Error('Property not found');
-  }
+    // Get commission rate from config (default agent split)
+    const commissionRate = await this.getAgentCommissionRateFromConfig();
+    console.log('💰 Commission rate from config:', commissionRate);
 
-  return this.transformToPropertyInfo(property);
-}
+    // Create agent-client relationship
+    const relationship = await prisma.agentBooking.create({
+      data: {
+        agentId,
+        clientId,
+        bookingType: bookingType,
+        bookingId: `relationship-${Date.now()}`,
+        commission: 0,
+        commissionRate,
+        status: 'active',
+        notes: `Agent-client relationship established for ${bookingType} management`
+      }
+    });
 
-async updateAgentProperty(agentId: number, propertyId: number, data: any): Promise<PropertyInfo> {
-  // Verify agent has access to this property
-  const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
-  if (!hasAccess) {
-    throw new Error('Access denied. Property not associated with your clients.');
-  }
+    console.log('✅ Relationship created:', relationship);
 
-  const existingProperty = await prisma.property.findUnique({
-    where: { id: propertyId }
-  });
-
-  if (!existingProperty) {
-    throw new Error('Property not found');
-  }
-
-  // Prepare update data (only allowed fields)
-  const updateData: any = {};
-  
-  if (data.description !== undefined) updateData.description = data.description;
-  if (data.features !== undefined) updateData.features = JSON.stringify(data.features);
-  if (data.pricePerNight !== undefined) updateData.pricePerNight = data.pricePerNight;
-  if (data.pricePerTwoNights !== undefined) updateData.pricePerTwoNights = data.pricePerTwoNights;
-  if (data.minStay !== undefined) updateData.minStay = data.minStay;
-  if (data.maxStay !== undefined) updateData.maxStay = data.maxStay;
-  
-  if (data.availabilityDates) {
-    updateData.availableFrom = new Date(data.availabilityDates.start);
-    updateData.availableTo = new Date(data.availabilityDates.end);
-  }
-  
-  if (data.images) {
-    const currentImages = existingProperty.images 
-      ? JSON.parse(existingProperty.images as string) 
-      : {};
-    updateData.images = JSON.stringify({ ...currentImages, ...data.images });
-  }
-
-  const property = await prisma.property.update({
-    where: { id: propertyId },
-    data: updateData,
-    include: {
-      host: true,
-      reviews: true,
-      bookings: true
-    }
-  });
-
-  return this.transformToPropertyInfo(property);
-}
-
-async getAgentPropertyPerformance(agentId: number, timeRange: 'week' | 'month' | 'quarter' | 'year') {
-  const properties = await this.getAgentPropertiesBasic(agentId);
-  
-  const now = new Date();
-  let startDate: Date;
-  
-  switch (timeRange) {
-    case 'week':
-      startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      break;
-    case 'quarter':
-      startDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
-      break;
-    case 'year':
-      startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-      break;
-    default: // month
-      startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
-  }
-
-  const performance = await Promise.all(
-    properties.map(async (property: any) => {
-      const [bookings, revenue, occupancyData] = await Promise.all([
-        prisma.booking.count({
-          where: {
-            propertyId: property.id,
-            createdAt: { gte: startDate },
-            status: { in: ['confirmed', 'completed'] }
-          }
-        }),
-        prisma.booking.aggregate({
-          where: {
-            propertyId: property.id,
-            createdAt: { gte: startDate },
-            status: 'completed'
-          },
-          _sum: { totalPrice: true }
-        }),
-        this.calculatePropertyOccupancy(property.id, startDate, now)
-      ]);
-
-      const commission = await this.getAgentPropertyCommission(agentId, property.hostId);
-
-      return {
-        propertyId: property.id,
-        propertyName: property.name,
-        bookings,
-        revenue: revenue._sum.totalPrice || 0,
-        occupancyRate: occupancyData.occupancyRate,
-        agentCommission: (revenue._sum.totalPrice || 0) * (commission / 100),
-        averageRating: property.averageRating || 0
-      };
-    })
-  );
-
-  return {
-    timeRange,
-    properties: performance,
-    summary: {
-      totalBookings: performance.reduce((sum, p) => sum + p.bookings, 0),
-      totalRevenue: performance.reduce((sum, p) => sum + p.revenue, 0),
-      totalCommission: performance.reduce((sum, p) => sum + p.agentCommission, 0),
-      averageOccupancy: performance.reduce((sum, p) => sum + p.occupancyRate, 0) / Math.max(performance.length, 1)
-    }
-  };
-}
-
-// --- AGENT BOOKING MANAGEMENT ---
-async getAgentPropertyBookings(agentId: number, propertyId: number) {
-  // Verify agent has access to this property
-  const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
-  if (!hasAccess) {
-    throw new Error('Access denied. Property not associated with your clients.');
-  }
-
-  const bookings = await prisma.booking.findMany({
-    where: { propertyId },
-    include: {
-      guest: true,
-      property: { select: { name: true } }
-    },
-    orderBy: { createdAt: 'desc' }
-  });
-
-  return bookings.map((b: any) => ({
-    ...this.transformToBookingInfo(b),
-    agentCommission: this.calculateBookingCommission(b.totalPrice, agentId)
-  }));
-}
-
-async createAgentBooking(agentId: number, data: any): Promise<BookingInfo> {
-  // Verify agent has access to this property
-  const hasAccess = await this.verifyAgentPropertyAccess(agentId, data.propertyId);
-  if (!hasAccess) {
-    throw new Error('Access denied. Property not associated with your clients.');
-  }
-
-  // Verify client relationship
-  const clientRelation = await prisma.agentBooking.findFirst({
-    where: {
-      agentId,
-      clientId: data.clientId,
-      status: 'active'
-    }
-  });
-
-  if (!clientRelation) {
-    throw new Error('Client not associated with your account.');
-  }
-
-  // Create the booking (reuse existing logic)
-  const booking = await this.createBooking(data.clientId, data);
-
-  // Create agent booking record
-  const commissionRate = await this.getAgentCommissionRate(agentId);
-  await prisma.agentBooking.create({
-    data: {
-      agentId,
-      clientId: data.clientId,
-      bookingType: 'property',
-      bookingId: booking.id,
-      commission: data.totalPrice * (commissionRate / 100),
-      commissionRate,
-      status: 'active'
-    }
-  });
-
-  return booking;
-}
-
-async getAgentBookings(agentId: number, filters: any, page: number = 1, limit: number = 20) {
-  const skip = (page - 1) * limit;
-  
-  const whereClause: any = {
-    agentId
-  };
-
-  if (filters.clientId) {
-    whereClause.clientId = filters.clientId;
-  }
-
-  if (filters.dateRange) {
-    whereClause.createdAt = {
-      gte: new Date(filters.dateRange.start),
-      lte: new Date(filters.dateRange.end)
-    };
-  }
-
-  const orderBy: any = {};
-  if (filters.sortBy === 'date') {
-    orderBy.createdAt = filters.sortOrder || 'desc';
-  } else {
-    orderBy.createdAt = 'desc';
-  }
-
-  const [agentBookings, total] = await Promise.all([
-    prisma.agentBooking.findMany({
-      where: whereClause,
-      include: {
-        client: { select: { firstName: true, lastName: true } }
-      },
-      orderBy,
-      skip,
-      take: limit
-    }),
-    prisma.agentBooking.count({ where: whereClause })
-  ]);
-
-  // Get actual booking details
-  const bookingIds = agentBookings.map(ab => ab.bookingId);
-  const actualBookings = await prisma.booking.findMany({
-    where: { id: { in: bookingIds } },
-    include: {
-      property: { select: { name: true } },
-      guest: { select: { firstName: true, lastName: true } }
-    }
-  });
-
-  const enrichedBookings = agentBookings.map(agentBooking => {
-    const actualBooking = actualBookings.find(b => b.id === agentBooking.bookingId);
     return {
-      ...this.transformToBookingInfo(actualBooking),
-      agentCommission: agentBooking.commission,
-      commissionStatus: agentBooking.status,
-      clientName: `${agentBooking.client.firstName} ${agentBooking.client.lastName}`
+      id: relationship.id,
+      agentId: relationship.agentId,
+      clientId: relationship.clientId,
+      clientName: `${client.firstName} ${client.lastName}`,
+      clientEmail: client.email,
+      clientType: client.userType,
+      commissionRate: relationship.commissionRate,
+      status: relationship.status,
+      createdAt: relationship.createdAt
     };
-  });
+  }
 
-  return {
-    bookings: enrichedBookings,
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit)
-  };
-}
+  async fixAgentPropertiesAgentId(agentId: number): Promise<any> {
+    // Get all client relationships for this agent
+    const relationships = await prisma.agentBooking.findMany({
+      where: { agentId, status: 'active' },
+      select: { clientId: true }
+    });
 
-async getAgentBookingCalendar(agentId: number, year: number, month: number): Promise<BookingCalendar> {
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 0);
-  
-  // Get all properties managed by this agent
-  const agentProperties = await this.getAgentPropertiesBasic(agentId);
-  const propertyIds = agentProperties.map((p: any) => p.id);
+    const clientIds = [...new Set(relationships.map(r => r.clientId))];
 
-  const bookings = await prisma.booking.findMany({
-    where: {
-      propertyId: { in: propertyIds },
-      status: { in: ['confirmed', 'completed'] },
-      OR: [
-        { checkIn: { gte: startDate, lte: endDate } },
-        { checkOut: { gte: startDate, lte: endDate } },
-        {
-          AND: [
-            { checkIn: { lte: startDate } },
-            { checkOut: { gte: endDate } }
-          ]
+    // Find properties where hostId is in clientIds but agentId is null
+    const propertiesToFix = await prisma.property.findMany({
+      where: {
+        hostId: { in: clientIds },
+        agentId: null
+      },
+      select: { id: true, name: true, hostId: true }
+    });
+
+    // Update all these properties
+    const updated = await prisma.property.updateMany({
+      where: {
+        hostId: { in: clientIds },
+        agentId: null
+      },
+      data: { agentId }
+    });
+
+    return {
+      propertiesFixed: updated.count,
+      properties: propertiesToFix
+    };
+  }
+
+  async getAgentClients(agentId: number): Promise<any[]> {
+    const relationships = await prisma.agentBooking.findMany({
+      where: {
+        agentId,
+      },
+      include: {
+        client: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            userType: true,
+            phone: true,
+            profileImage: true
+          }
         }
-      ]
-    },
-    include: {
-      property: { select: { name: true } },
-      guest: { select: { firstName: true, lastName: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return relationships.map(rel => ({
+      relationshipId: rel.id,
+      clientId: rel.clientId,
+      clientName: `${rel.client.firstName} ${rel.client.lastName}`,
+      clientEmail: rel.client.email,
+      clientPhone: rel.client.phone,
+      clientType: rel.client.userType,
+      profileImage: rel.client.profileImage,
+      commissionRate: rel.commissionRate,
+      bookingType: rel.bookingType,
+      establishedAt: rel.createdAt
+    }));
+  }
+
+  async createClientProperty(agentId: number, clientId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
+    console.log('🔍 Checking access - AgentID:', agentId, 'ClientID:', clientId);
+
+    // Verify client exists and is a host
+    const client = await prisma.user.findUnique({
+      where: { id: clientId },
+      select: { id: true, email: true, userType: true, firstName: true, lastName: true }
+    });
+
+    if (!client) {
+      throw new Error('Client not found.');
     }
-  });
 
-  const days: BookingCalendarDay[] = [];
-  const today = new Date();
+    // Verify client is a host (can own properties)
+    if (client.userType !== 'host' && client.userType !== 'admin') {
+      throw new Error(`User with ID ${clientId} is not a host. Only hosts can have properties managed by agents. User type: ${client.userType}`);
+    }
 
-  for (let day = 1; day <= endDate.getDate(); day++) {
-    const currentDate = new Date(year, month - 1, day);
-    const dateStr = currentDate.toISOString().split('T')[0];
-    
-    const dayBookings = bookings
-      .filter(booking => {
-        const checkIn = new Date(booking.checkIn);
-        const checkOut = new Date(booking.checkOut);
-        return currentDate >= checkIn && currentDate <= checkOut;
-      })
-      .map(booking => {
-        const checkIn = new Date(booking.checkIn);
-        const checkOut = new Date(booking.checkOut);
-        
-        let type: 'check_in' | 'check_out' | 'ongoing' = 'ongoing';
-        if (currentDate.toDateString() === checkIn.toDateString()) {
-          type = 'check_in';
-        } else if (currentDate.toDateString() === checkOut.toDateString()) {
-          type = 'check_out';
+    // Check if relationship exists
+    let hasAccess = await this.verifyAgentClientAccess(agentId, clientId);
+    console.log('✅ Access result:', hasAccess);
+
+    // If no relationship exists, create it automatically
+    if (!hasAccess) {
+      console.log('🔗 No relationship found. Creating one automatically...');
+
+      const commissionRate = await this.getAgentCommissionRateFromConfig();
+
+      await prisma.agentBooking.create({
+        data: {
+          agentId,
+          clientId,
+          bookingType: 'property',
+          bookingId: `auto-relationship-${Date.now()}`,
+          commission: 0,
+          commissionRate,
+          status: 'active',
+          notes: `Agent-client relationship auto-created for property management`
         }
-
-        return {
-          id: booking.id,
-          guestName: `${booking.guest.firstName} ${booking.guest.lastName}`,
-          propertyName: booking.property.name,
-          type,
-          status: booking.status as BookingStatus
-        };
       });
 
-    const revenue = dayBookings.reduce((sum, booking) => {
-      const fullBooking = bookings.find(b => b.id === booking.id);
-      return sum + (fullBooking?.totalPrice || 0);
-    }, 0);
+      console.log('✅ Relationship created automatically');
+      hasAccess = true;
+    }
 
-    days.push({
-      date: dateStr,
-      bookings: dayBookings,
-      revenue,
-      isToday: currentDate.toDateString() === today.toDateString()
+    // Create the property (hostId will be clientId)
+    const property = await this.createProperty(clientId, data);
+
+    // Update property to set agentId
+    await prisma.property.update({
+      where: { id: property.id },
+      data: { agentId: agentId }
     });
-  }
 
-  return {
-    year,
-    month,
-    days
-  };
-}
+    console.log(`✅ Property ${property.id} created with hostId=${clientId} and agentId=${agentId}`);
 
-async updateAgentBooking(agentId: number, bookingId: string, data: BookingUpdateDto): Promise<BookingInfo> {
-  // Verify agent has access to this booking
-  const agentBooking = await prisma.agentBooking.findFirst({
-    where: {
-      agentId,
-      bookingId
-    }
-  });
-
-  if (!agentBooking) {
-    throw new Error('Access denied. Booking not associated with your account.');
-  }
-
-  // Update the booking (reuse existing logic with restricted permissions)
-  const allowedUpdates: any = {};
-  if (data.notes !== undefined) allowedUpdates.notes = data.notes;
-  if (data.specialRequests !== undefined) allowedUpdates.specialRequests = data.specialRequests;
-  if (data.checkInInstructions !== undefined) allowedUpdates.checkInInstructions = data.checkInInstructions;
-  if (data.checkOutInstructions !== undefined) allowedUpdates.checkOutInstructions = data.checkOutInstructions;
-
-  // Agents can only update certain statuses
-  if (data.status && ['confirmed', 'cancelled'].includes(data.status)) {
-    allowedUpdates.status = data.status;
-  }
-
-  const booking = await prisma.booking.update({
-    where: { id: bookingId },
-    data: allowedUpdates,
-    include: {
-      property: true,
-      guest: true
-    }
-  });
-
-  return this.transformToBookingInfo(booking);
-}
-
-// --- AGENT EARNINGS & COMMISSIONS ---
-async getAgentEarnings(agentId: number, timeRange: 'week' | 'month' | 'quarter' | 'year'): Promise<AgentEarnings> {
-  const now = new Date();
-  let startDate: Date;
-  
-  switch (timeRange) {
-    case 'week':
-      startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      break;
-    case 'quarter':
-      startDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
-      break;
-    case 'year':
-      startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-      break;
-    default: // month
-      startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
-  }
-
-  const [totalEarnings, totalBookings, periodEarnings, periodBookings, commissionBreakdown] = await Promise.all([
-    prisma.agentBooking.aggregate({
-      where: { agentId },
-      _sum: { commission: true }
-    }),
-    prisma.agentBooking.count({
-      where: { agentId }
-    }),
-    prisma.agentBooking.aggregate({
-      where: {
+    // Create property-specific booking record
+    const commissionRate = await this.getAgentCommissionRate(agentId);
+    await prisma.agentBooking.create({
+      data: {
         agentId,
-        createdAt: { gte: startDate }
-      },
-      _sum: { commission: true }
-    }),
-    prisma.agentBooking.count({
-      where: {
-        agentId,
-        createdAt: { gte: startDate }
+        clientId,
+        bookingType: 'property',
+        bookingId: `property-${property.id}`,
+        commission: 0,
+        commissionRate,
+        status: 'active',
+        notes: `Property management for ${property.name}`
       }
-    }),
-    prisma.agentBooking.groupBy({
-      by: ['bookingType'],
-      where: { agentId },
-      _sum: { commission: true },
-      _count: true
-    })
-  ]);
+    });
 
-  return {
-    totalEarnings: totalEarnings._sum.commission || 0,
-    totalBookings,
-    periodEarnings: periodEarnings._sum.commission || 0,
-    periodBookings,
-    commissionBreakdown: commissionBreakdown.map(item => ({
-      bookingType: item.bookingType,
-      totalCommission: item._sum.commission || 0,
-      bookingCount: item._count
-    })),
-    timeRange
-  };
-}
-
-async getAgentEarningsBreakdown(agentId: number) {
-  const agentBookings = await prisma.agentBooking.findMany({
-    where: { agentId },
-    include: {
-      client: { select: { firstName: true, lastName: true, email: true } }
-    },
-    orderBy: { createdAt: 'desc' }
-  });
-
-  // Get actual booking details for revenue calculation
-  const bookingIds = agentBookings.filter(ab => ab.bookingType === 'property').map(ab => ab.bookingId);
-  const actualBookings = await prisma.booking.findMany({
-    where: { id: { in: bookingIds } },
-    select: { id: true, totalPrice: true, createdAt: true }
-  });
-
-  return agentBookings.map(agentBooking => {
-    const actualBooking = actualBookings.find(b => b.id === agentBooking.bookingId);
-    
-    return {
-      id: agentBooking.id,
-      clientName: `${agentBooking.client.firstName} ${agentBooking.client.lastName}`,
-      bookingType: agentBooking.bookingType,
-      bookingValue: actualBooking?.totalPrice || 0,
-      commission: agentBooking.commission,
-      commissionRate: agentBooking.commissionRate,
-      commissionStatus: agentBooking.status,
-      bookingDate: actualBooking?.createdAt.toISOString() || agentBooking.createdAt.toISOString(),
-      notes: agentBooking.notes
-    } as AgentCommissionInfo;
-  });
-}
-
-// --- CLIENT PROPERTY MANAGEMENT ---
-async getClientProperties(agentId: number, clientId: number) {
-  // Verify agent-client relationship
-  const hasAccess = await this.verifyAgentClientAccess(agentId, clientId);
-  if (!hasAccess) {
-    throw new Error('Access denied. Client not associated with your account.');
+    // Return property info
+    return property;
   }
 
-  const properties = await prisma.property.findMany({
-    where: { hostId: clientId },
-    include: {
-      host: { select: { firstName: true, lastName: true, email: true } },
-      reviews: { select: { rating: true } },
-      bookings: {
-        where: { status: 'completed' },
-        select: { totalPrice: true }
-      }
-    },
-    orderBy: { createdAt: 'desc' }
-  });
-
-  return Promise.all(
-    properties.map(async (property: any) => ({
-      ...await this.transformToPropertyInfo(property),
-      totalRevenue: property.bookings.reduce((sum: number, b: any) => sum + b.totalPrice, 0)
-    }))
-  );
-}
-
-async createClientProperty(agentId: number, clientId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
-  // Verify agent-client relationship
-  const hasAccess = await this.verifyAgentClientAccess(agentId, clientId);
-  if (!hasAccess) {
-    throw new Error('Access denied. Client not associated with your account.');
-  }
-
-  // Create property for the client
-  const property = await this.createProperty(clientId, data);
-
-  // Create agent booking relationship for commission tracking
-  const commissionRate = await this.getAgentCommissionRate(agentId);
-  await prisma.agentBooking.create({
-    data: {
-      agentId,
-      clientId,
-      bookingType: 'property',
-      bookingId: `property-${property.id}`, // Placeholder for property relationship
-      commission: 0, // Will be calculated per booking
-      commissionRate,
-      status: 'active',
-      notes: `Property management for ${property.name}`
+  async uploadAgentPropertyImages(agentId: number, propertyId: number, category: keyof PropertyImages, imageUrls: string[]): Promise<PropertyInfo> {
+    const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
+    if (!hasAccess) {
+      throw new Error('Access denied. Property not associated with your clients.');
     }
-  });
 
-  return property;
-}
-
-// --- AGENT MEDIA MANAGEMENT ---
-async uploadAgentPropertyImages(agentId: number, propertyId: number, category: keyof PropertyImages, imageUrls: string[]): Promise<PropertyInfo> {
-  // Verify agent has access to this property
-  const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
-  if (!hasAccess) {
-    throw new Error('Access denied. Property not associated with your clients.');
-  }
-
-  // Get property owner ID
-  const property = await prisma.property.findUnique({
-    where: { id: propertyId },
-    select: { hostId: true }
-  });
-
-  if (!property) {
-    throw new Error('Property not found');
-  }
-
-  // Use existing upload method
-  return this.uploadPropertyImages(propertyId, property.hostId, category, imageUrls);
-}
-
-// --- AGENT GUEST MANAGEMENT ---
-async getAgentGuests(agentId: number, filters: GuestSearchFilters) {
-  // Get all clients of this agent
-  const agentClients = await prisma.agentBooking.findMany({
-    where: { agentId, status: 'active' },
-    select: { clientId: true },
-    distinct: ['clientId']
-  });
-
-  const clientIds = agentClients.map(ac => ac.clientId);
-
-  // Get properties of these clients
-  const clientProperties = await prisma.property.findMany({
-    where: { hostId: { in: clientIds } },
-    select: { id: true }
-  });
-
-  const propertyIds = clientProperties.map(p => p.id);
-
-  // Get guests who have booked these properties
-  const whereClause: any = {
-    bookingsAsGuest: {
-      some: {
-        propertyId: { in: propertyIds }
-      }
-    }
-  };
-
-  if (filters.search) {
-    whereClause.OR = [
-      { firstName: { contains: filters.search } },
-      { lastName: { contains: filters.search } },
-      { email: { contains: filters.search } }
-    ];
-  }
-
-  if (filters.verificationStatus) {
-    whereClause.verificationStatus = filters.verificationStatus;
-  }
-
-  const orderBy: any = {};
-  if (filters.sortBy) {
-    switch (filters.sortBy) {
-      case 'name':
-        orderBy.firstName = filters.sortOrder || 'asc';
-        break;
-      case 'joinDate':
-        orderBy.createdAt = filters.sortOrder || 'desc';
-        break;
-      default:
-        orderBy[filters.sortBy] = filters.sortOrder || 'desc';
-    }
-  } else {
-    orderBy.createdAt = 'desc';
-  }
-
-  const guests = await prisma.user.findMany({
-    where: whereClause,
-    include: {
-      bookingsAsGuest: {
-        where: { propertyId: { in: propertyIds } },
-        include: { property: { select: { name: true } } }
-      }
-    },
-    orderBy
-  });
-
-  return guests.map((guest: any) => this.transformToGuestProfile(guest));
-}
-
-async getClientGuests(agentId: number, clientId: number) {
-  // Verify agent-client relationship
-  const hasAccess = await this.verifyAgentClientAccess(agentId, clientId);
-  if (!hasAccess) {
-    throw new Error('Access denied. Client not associated with your account.');
-  }
-
-  // Get client's properties
-  const clientProperties = await prisma.property.findMany({
-    where: { hostId: clientId },
-    select: { id: true }
-  });
-
-  const propertyIds = clientProperties.map(p => p.id);
-
-  // Get guests who have booked client's properties
-  const guests = await prisma.user.findMany({
-    where: {
-      bookingsAsGuest: {
-        some: {
-          propertyId: { in: propertyIds }
-        }
-      }
-    },
-    include: {
-      bookingsAsGuest: {
-        where: { propertyId: { in: propertyIds } },
-        include: { property: { select: { name: true } } }
-      }
-    },
-    orderBy: { createdAt: 'desc' }
-  });
-
-  return guests.map((guest: any) => this.transformToGuestProfile(guest));
-}
-
-// --- AGENT ANALYTICS ---
-async getAgentPropertyAnalytics(agentId: number, propertyId: number, timeRange: string) {
-  // Verify agent has access to this property
-  const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
-  if (!hasAccess) {
-    throw new Error('Access denied. Property not associated with your clients.');
-  }
-
-  // Reuse existing analytics logic but add agent commission calculations
-  const analytics = await this.getPropertyAnalytics(propertyId, timeRange);
-  const commissionRate = await this.getAgentCommissionRate(agentId);
-  
-  return {
-    ...analytics,
-    agentCommission: {
-      rate: commissionRate,
-      totalEarned: analytics.totalRevenue * (commissionRate / 100),
-      monthlyProjection: analytics.monthlyRevenue * (commissionRate / 100)
-    }
-  };
-}
-
-async getAgentPropertiesAnalyticsSummary(agentId: number, timeRange: string) {
-  const properties = await this.getAgentPropertiesBasic(agentId);
-  
-  const summaryData = await Promise.all(
-    properties.map(async (property: any) => {
-      const analytics = await this.getAgentPropertyAnalytics(agentId, property.id, timeRange);
-      return {
-        propertyId: property.id,
-        propertyName: property.name,
-        ...analytics
-      };
-    })
-  );
-
-  return {
-    timeRange,
-    properties: summaryData,
-    totals: {
-      totalRevenue: summaryData.reduce((sum, p) => sum + (p.totalRevenue || 0), 0),
-      totalCommission: summaryData.reduce((sum, p) => sum + (p.agentCommission?.totalEarned || 0), 0),
-      totalBookings: summaryData.reduce((sum, p) => sum + (p.totalBookings || 0), 0),
-      averageOccupancy: summaryData.reduce((sum, p) => sum + (p.occupancyRate || 0), 0) / Math.max(summaryData.length, 1)
-    }
-  };
-}
-
-// --- AGENT REVIEW MANAGEMENT ---
-async getAgentPropertyReviews(agentId: number, propertyId: number, page: number = 1, limit: number = 10) {
-  // Verify agent has access to this property
-  const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
-  if (!hasAccess) {
-    throw new Error('Access denied. Property not associated with your clients.');
-  }
-
-  return this.getPropertyReviews(propertyId, page, limit);
-}
-
-async getAgentReviewsSummary(agentId: number) {
-  const properties = await this.getAgentPropertiesBasic(agentId);
-  const propertyIds = properties.map((p: any) => p.id);
-
-  const [totalReviews, averageRating, recentReviews, ratingDistribution] = await Promise.all([
-    prisma.review.count({
-      where: { propertyId: { in: propertyIds } }
-    }),
-    prisma.review.aggregate({
-      where: { propertyId: { in: propertyIds } },
-      _avg: { rating: true }
-    }),
-    prisma.review.findMany({
-      where: { propertyId: { in: propertyIds } },
-      include: {
-        user: { select: { firstName: true, lastName: true } },
-        property: { select: { name: true } }
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 10
-    }),
-    prisma.review.groupBy({
-      by: ['rating'],
-      where: { propertyId: { in: propertyIds } },
-      _count: true
-    })
-  ]);
-
-  return {
-    totalReviews,
-    averageRating: averageRating._avg.rating || 0,
-    recentReviews: recentReviews.map((review: any) => this.transformToPropertyReview(review)),
-    ratingDistribution: ratingDistribution.map(item => ({
-      rating: item.rating,
-      count: item._count
-    })),
-    propertiesManaged: properties.length
-  };
-}
-
-// --- HELPER METHODS ---
-private async verifyAgentPropertyAccess(agentId: number, propertyId: number): Promise<boolean> {
-  const property = await prisma.property.findFirst({
-    where: {
-      id: propertyId,
-      host: {
-        clientBookings: {
-          some: {
-            agentId,
-            status: 'active'
-          }
-        }
-      }
-    }
-  });
-
-  return !!property;
-}
-
-private async verifyAgentClientAccess(agentId: number, clientId: number): Promise<boolean> {
-  const relation = await prisma.agentBooking.findFirst({
-    where: {
-      agentId,
-      clientId,
-      status: 'active'
-    }
-  });
-
-  return !!relation;
-}
-
-private async getAgentPropertiesBasic(agentId: number) {
-  return prisma.property.findMany({
-    where: {
-      host: {
-        clientBookings: {
-          some: {
-            agentId,
-            status: 'active'
-          }
-        }
-      }
-    },
-    select: {
-      id: true,
-      name: true,
-      location: true,
-      averageRating: true,
-      totalBookings: true,
-      hostId: true
-    }
-  });
-}
-
-private async getAgentPropertyCommission(agentId: number, hostId: number): Promise<number> {
-  const agentBooking = await prisma.agentBooking.findFirst({
-    where: {
-      agentId,
-      clientId: hostId,
-      status: 'active'
-    },
-    select: { commissionRate: true }
-  });
-
-  return agentBooking?.commissionRate || 0;
-}
-
-private async getAgentCommissionRate(agentId: number): Promise<number> {
-  // This could be stored in user profile or agent settings
-  // For now, return a default rate
-  const agent = await prisma.user.findUnique({
-    where: { id: agentId },
-    select: { id: true } // Could include commissionRate field
-  });
-
-  return 2.19; // Default 5% commission rate
-}
-
-private calculateBookingCommission(bookingValue: number, agentId: number): number {
-  // This would typically fetch the agent's commission rate
-  const commissionRate = 2.19; // Default 5%
-  return bookingValue * (commissionRate / 100);
-}
-
-private calculatePropertyOccupancy(propertyId: number, startDate: Date, endDate: Date): Promise<{ occupancyRate: number }> {
-  // Simplified occupancy calculation
-  // In a real implementation, this would be more sophisticated
-  return Promise.resolve({ occupancyRate: Math.random() * 100 });
-}
-
-private async getPropertyAnalytics(propertyId: number, timeRange: string): Promise<any> {
-  // Simplified analytics - implement based on your requirements
-  return {
-    totalRevenue: 0,
-    monthlyRevenue: 0,
-    totalBookings: 0,
-    occupancyRate: 0
-  };
-}
-
-private transformToAgentBookingInfo(agentBooking: any): AgentBookingInfo {
-  return {
-    id: agentBooking.id,
-    clientName: `${agentBooking.client.firstName} ${agentBooking.client.lastName}`,
-    bookingType: agentBooking.bookingType,
-    commission: agentBooking.commission,
-    commissionStatus: agentBooking.status,
-    bookingDate: agentBooking.createdAt.toISOString(),
-    createdAt: agentBooking.createdAt.toISOString()
-  };
-}
-
-// Add these methods to your PropertyService class
-
-// --- AGENT AS HOST METHODS ---
-async createAgentOwnProperty(agentId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
-  // Create property with agent as the direct host
-  const property = await this.createProperty(agentId, data);
-  
-  // Create a self-referential agent booking record to track this as agent's own property
-  await prisma.agentBooking.create({
-    data: {
-      agentId,
-      clientId: agentId, // Agent is their own client for owned properties
-      bookingType: 'property',
-      bookingId: `own-property-${property.id}`,
-      commission: 0, // No commission on own properties, full revenue
-      commissionRate: 0,
-      status: 'active',
-      notes: `Agent-owned property: ${property.name}`
-    }
-  });
-
-  return property;
-}
-
-async getAgentOwnProperties(agentId: number, filters?: Partial<PropertySearchFilters>) {
-  const whereClause: any = { 
-    hostId: agentId // Direct ownership
-  };
-  
-  if (filters?.status) {
-    whereClause.status = filters.status;
-  }
-
-  const properties = await prisma.property.findMany({
-    where: whereClause,
-    include: {
-      host: true,
-      reviews: { select: { rating: true } },
-      bookings: {
-        where: { status: 'confirmed' },
-        select: { id: true }
-      }
-    },
-    orderBy: { createdAt: 'desc' }
-  });
-
-  return Promise.all(
-    properties.map((p: any) => this.transformToPropertyInfo(p))
-  );
-}
-
-async getAgentOwnPropertyBookings(agentId: number, propertyId: number) {
-  // Verify agent owns this property directly
-  const property = await prisma.property.findFirst({
-    where: { id: propertyId, hostId: agentId }
-  });
-
-  if (!property) {
-    throw new Error('Property not found or not owned by agent');
-  }
-
-  const bookings = await prisma.booking.findMany({
-    where: { propertyId },
-    include: {
-      guest: true,
-      property: { select: { name: true } }
-    },
-    orderBy: { createdAt: 'desc' }
-  });
-
-  return bookings.map((b: any) => this.transformToBookingInfo(b));
-}
-
-async getAgentOwnPropertyGuests(agentId: number, propertyId?: number) {
-  let whereClause: any = {};
-
-  if (propertyId) {
-    // Verify agent owns this specific property
-    const property = await prisma.property.findFirst({
-      where: { id: propertyId, hostId: agentId }
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: { hostId: true }
     });
 
     if (!property) {
-      throw new Error('Property not found or not owned by agent');
+      throw new Error('Property not found');
     }
 
-    whereClause = {
-      bookingsAsGuest: {
-        some: { propertyId }
-      }
-    };
-  } else {
-    // Get guests from all agent-owned properties
-    const agentProperties = await prisma.property.findMany({
-      where: { hostId: agentId },
+    if (!property.hostId) {
+      throw new Error('Property has no host');
+    }
+
+    return this.uploadPropertyImages(propertyId, property.hostId, category, imageUrls);
+  }
+
+  async getAgentGuests(agentId: number, filters: GuestSearchFilters) {
+    const agentClients = await prisma.agentBooking.findMany({
+      where: { agentId, status: 'active' },
+      select: { clientId: true },
+      distinct: ['clientId']
+    });
+
+    const clientIds = agentClients.map(ac => ac.clientId);
+
+    const clientProperties = await prisma.property.findMany({
+      where: { hostId: { in: clientIds } },
       select: { id: true }
     });
 
-    const propertyIds = agentProperties.map(p => p.id);
+    const propertyIds = clientProperties.map(p => p.id);
 
-    whereClause = {
+    const whereClause: any = {
       bookingsAsGuest: {
         some: {
           propertyId: { in: propertyIds }
         }
       }
     };
+
+    if (filters.search) {
+      whereClause.OR = [
+        { firstName: { contains: filters.search } },
+        { lastName: { contains: filters.search } },
+        { email: { contains: filters.search } }
+      ];
+    }
+
+    if (filters.verificationStatus) {
+      whereClause.verificationStatus = filters.verificationStatus;
+    }
+
+    const orderBy: any = {};
+    if (filters.sortBy) {
+      switch (filters.sortBy) {
+        case 'name':
+          orderBy.firstName = filters.sortOrder || 'asc';
+          break;
+        case 'joinDate':
+          orderBy.createdAt = filters.sortOrder || 'desc';
+          break;
+        default:
+          orderBy[filters.sortBy] = filters.sortOrder || 'desc';
+      }
+    } else {
+      orderBy.createdAt = 'desc';
+    }
+
+    const guests = await prisma.user.findMany({
+      where: whereClause,
+      include: {
+        bookingsAsGuest: {
+          where: { propertyId: { in: propertyIds } },
+          include: { property: { select: { name: true } } }
+        }
+      },
+      orderBy
+    });
+
+    return guests.map((guest: any) => this.transformToGuestProfile(guest));
   }
 
-  const guests = await prisma.user.findMany({
-    where: whereClause,
-    include: {
-      bookingsAsGuest: {
-        where: propertyId ? { propertyId } : {
-          propertyId: { in: await this.getAgentOwnPropertyIds(agentId) }
-        },
+  async getClientGuests(agentId: number, clientId: number) {
+    const hasAccess = await this.verifyAgentClientAccess(agentId, clientId);
+    if (!hasAccess) {
+      throw new Error('Access denied. Client not associated with your account.');
+    }
+
+    const clientProperties = await prisma.property.findMany({
+      where: { hostId: clientId },
+      select: { id: true }
+    });
+
+    const propertyIds = clientProperties.map(p => p.id);
+
+    const guests = await prisma.user.findMany({
+      where: {
+        bookingsAsGuest: {
+          some: {
+            propertyId: { in: propertyIds }
+          }
+        }
+      },
+      include: {
+        bookingsAsGuest: {
+          where: { propertyId: { in: propertyIds } },
+          include: { property: { select: { name: true } } }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return guests.map((guest: any) => this.transformToGuestProfile(guest));
+  }
+
+  async getAgentPropertyAnalytics(agentId: number, propertyId: number, timeRange: string) {
+    const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
+    if (!hasAccess) {
+      throw new Error('Access denied. Property not associated with your clients.');
+    }
+
+    const analytics = await this.getPropertyAnalytics(propertyId, timeRange);
+    const commissionRate = await this.getAgentCommissionRate(agentId);
+    
+    return {
+      ...analytics,
+      agentCommission: {
+        rate: commissionRate,
+        totalEarned: analytics.totalRevenue * (commissionRate / 100),
+        monthlyProjection: analytics.monthlyRevenue * (commissionRate / 100)
+      }
+    };
+  }
+
+  async getAgentPropertiesAnalyticsSummary(agentId: number, timeRange: string) {
+    const properties = await this.getAgentPropertiesBasic(agentId);
+    
+    const summaryData = await Promise.all(
+      properties.map(async (property: any) => {
+        const analytics = await this.getAgentPropertyAnalytics(agentId, property.id, timeRange);
+        return {
+          propertyId: property.id,
+          propertyName: property.name,
+          ...analytics
+        };
+      })
+    );
+
+    return {
+      timeRange,
+      properties: summaryData,
+      totals: {
+        totalRevenue: summaryData.reduce((sum, p) => sum + (p.totalRevenue || 0), 0),
+        totalCommission: summaryData.reduce((sum, p) => sum + (p.agentCommission?.totalEarned || 0), 0),
+        totalBookings: summaryData.reduce((sum, p) => sum + (p.totalBookings || 0), 0),
+        averageOccupancy: summaryData.reduce((sum, p) => sum + (p.occupancyRate || 0), 0) / Math.max(summaryData.length, 1)
+      }
+    };
+  }
+
+  async getAgentPropertyReviews(agentId: number, propertyId: number, page: number = 1, limit: number = 10) {
+    const hasAccess = await this.verifyAgentPropertyAccess(agentId, propertyId);
+    if (!hasAccess) {
+      throw new Error('Access denied. Property not associated with your clients.');
+    }
+
+    return this.getPropertyReviews(propertyId, page, limit);
+  }
+
+  async getAgentReviewsSummary(agentId: number) {
+    const properties = await this.getAgentPropertiesBasic(agentId);
+    const propertyIds = properties.map((p: any) => p.id);
+
+    const [totalReviews, averageRating, recentReviews, ratingDistribution] = await Promise.all([
+      prisma.review.count({
+        where: { propertyId: { in: propertyIds } }
+      }),
+      prisma.review.aggregate({
+        where: { propertyId: { in: propertyIds } },
+        _avg: { rating: true }
+      }),
+      prisma.review.findMany({
+        where: { propertyId: { in: propertyIds } },
         include: {
+          user: { select: { firstName: true, lastName: true } },
           property: { select: { name: true } }
         },
-        orderBy: { createdAt: 'desc' }
-      }
-    },
-    orderBy: { createdAt: 'desc' }
-  });
+        orderBy: { createdAt: 'desc' },
+        take: 10
+      }),
+      prisma.review.groupBy({
+        by: ['rating'],
+        where: { propertyId: { in: propertyIds } },
+        _count: true
+      })
+    ]);
 
-  return guests.map((guest: any) => this.transformToGuestProfile(guest));
-}
+    return {
+      totalReviews,
+      averageRating: averageRating._avg.rating || 0,
+      recentReviews: recentReviews.map((review: any) => this.transformToPropertyReview(review)),
+      ratingDistribution: ratingDistribution.map(item => ({
+        rating: item.rating,
+        count: item._count
+      })),
+      propertiesManaged: properties.length
+    };
+  }
 
-// Helper method
-private async getAgentOwnPropertyIds(agentId: number): Promise<number[]> {
-  const properties = await prisma.property.findMany({
-    where: { hostId: agentId },
-    select: { id: true }
-  });
-  return properties.map(p => p.id);
-}
+  // DISABLED: Agents can no longer own properties
+  async createAgentOwnProperty(agentId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
+    throw new Error('Agents cannot own properties. Use createClientProperty to create properties for your clients.');
+  }
 
-// Unified method to get all agent properties (owned + managed)
-async getAllAgentProperties(agentId: number, filters?: any) {
-  const [ownProperties, clientProperties] = await Promise.all([
-    this.getAgentOwnProperties(agentId, filters),
-    this.getAgentProperties(agentId, filters)
-  ]);
+  // DISABLED: Agents can no longer own properties
+  async getAgentOwnProperties(agentId: number, filters?: Partial<PropertySearchFilters>) {
+    // Return empty array - agents cannot own properties
+    return [];
+  }
 
-  // Mark which properties are owned vs managed
-  const enrichedOwnProperties = ownProperties.map(p => ({
-    ...p,
-    relationshipType: 'owned' as const,
-    commissionRate: 0,
-    fullRevenue: true
-  }));
+  // DISABLED: Agents can no longer own properties
+  async getAgentOwnPropertyBookings(agentId: number, propertyId: number) {
+    throw new Error('Agents cannot own properties. Access client property bookings through agent property management routes.');
+  }
 
-  const enrichedClientProperties = clientProperties.properties?.map(p => ({
-    ...p,
-    relationshipType: 'managed' as const,
-    fullRevenue: false
-  })) || [];
+  // DISABLED: Agents can no longer own properties
+  async getAgentOwnPropertyGuests(agentId: number, propertyId?: number) {
+    throw new Error('Agents cannot own properties. Access client guests through agent property management routes.');
+  }
 
-  return {
-    ownProperties: enrichedOwnProperties,
-    managedProperties: enrichedClientProperties,
-    totalOwned: ownProperties.length,
-    totalManaged: enrichedClientProperties.length,
-    totalProperties: ownProperties.length + enrichedClientProperties.length
-  };
-}
+  async getAllAgentProperties(agentId: number, filters?: any) {
+    // DISABLED: Agents can no longer own properties
+    // Only return managed client properties
+    const clientProperties = await this.getAgentProperties(agentId, filters);
 
-// Enhanced agent dashboard including owned properties
-async getEnhancedAgentDashboard(agentId: number): Promise<any> {
-  const [basicDashboard, ownProperties, ownBookings] = await Promise.all([
-    this.getAgentDashboard(agentId),
-    this.getAgentOwnProperties(agentId),
-    this.getAgentOwnPropertyBookings(agentId, 0) // All owned properties
-  ]);
+    const enrichedClientProperties = clientProperties.properties?.map(p => ({
+      ...p,
+      relationshipType: 'managed' as const,
+      fullRevenue: false
+    })) || [];
 
-  const ownPropertyRevenue = await this.getAgentOwnPropertyRevenue(agentId);
+    return {
+      ownProperties: [], // Always empty - agents cannot own properties
+      managedProperties: enrichedClientProperties,
+      totalOwned: 0, // Always 0
+      totalManaged: enrichedClientProperties.length,
+      totalProperties: enrichedClientProperties.length // Only managed properties
+    };
+  }
 
-  return {
-    ...basicDashboard,
-    ownProperties: {
-      count: ownProperties.length,
-      totalRevenue: ownPropertyRevenue,
-      recentBookings: ownBookings.slice(0, 5)
-    },
-    summary: {
-      totalPropertiesOwned: ownProperties.length,
-      totalPropertiesManaged: basicDashboard.totalClients,
-      ownPropertyRevenue,
-      managedPropertyCommissions: basicDashboard.totalCommissions,
-      combinedEarnings: ownPropertyRevenue + basicDashboard.totalCommissions
+  // --- PRIVATE HELPER METHODS ---
+  private async verifyAgentPropertyAccess(agentId: number, propertyId: number): Promise<boolean> {
+    // First, get the property to find the host
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: { hostId: true }
+    });
+
+    if (!property || !property.hostId) {
+      return false;
     }
-  };
-}
 
-private async getAgentOwnPropertyRevenue(agentId: number): Promise<number> {
-  const revenue = await prisma.booking.aggregate({
-    where: {
-      property: { hostId: agentId },
-      status: 'completed'
-    },
-    _sum: { totalPrice: true }
-  });
+    // Then check if the agent has access to this host (as a client)
+    const agentBooking = await prisma.agentBooking.findFirst({
+      where: {
+        agentId,
+        clientId: property.hostId,
+        status: 'active'
+      }
+    });
 
-  return revenue._sum.totalPrice || 0;
-}
+    return !!agentBooking;
+  }
 
+  private async verifyAgentClientAccess(agentId: number, clientId: number): Promise<boolean> {
+    const relation = await prisma.agentBooking.findFirst({
+      where: {
+        agentId,
+        clientId,
+        status: 'active'
+      }
+    });
+
+    return !!relation;
+  }
+
+  // DISABLED: Agents can no longer own properties
+  private async getAgentOwnPropertyIds(agentId: number): Promise<number[]> {
+    // Return empty array - agents cannot own properties
+    return [];
+  }
+
+  private async getAgentPropertyCommission(agentId: number, hostId: number): Promise<number> {
+    const agentBooking = await prisma.agentBooking.findFirst({
+      where: {
+        agentId,
+        clientId: hostId,
+        status: 'active'
+      },
+      select: { commissionRate: true }
+    });
+
+    return agentBooking?.commissionRate || 0;
+  }
+
+  private async getAgentCommissionRate(agentId: number): Promise<number> {
+    const agent = await prisma.user.findUnique({
+      where: { id: agentId },
+      select: { id: true }
+    });
+
+    return 4.38; // Default commission rate
+  }
+
+  private async getAgentCommissionRateFromConfig(): Promise<number> {
+    // Get agent commission from config defaultSplitRules
+    return config.escrow.defaultSplitRules.agent || 4.38;
+  }
+
+  private calculateBookingCommission(bookingValue: number, agentId: number): number {
+    const commissionRate = 4.38;
+    return bookingValue * (commissionRate / 100);
+  }
+
+  private calculatePropertyOccupancy(propertyId: number, startDate: Date, endDate: Date): Promise<{ occupancyRate: number }> {
+    return Promise.resolve({ occupancyRate: Math.random() * 100 });
+  }
+
+  private async getPropertyAnalytics(propertyId: number, timeRange: string): Promise<any> {
+    return {
+      totalRevenue: 0,
+      monthlyRevenue: 0,
+      totalBookings: 0,
+      occupancyRate: 0
+    };
+  }
+
+  // --- TRANSACTION MONITORING METHODS (delegated to enhanced service) ---
+  async getAgentDashboardWithTransactions(agentId: number) {
+    return await this.enhancedService.getAgentDashboardWithTransactions(agentId);
+  }
+
+  async getAgentEarningsWithTransactions(agentId: number, timeRange: 'week' | 'month' | 'quarter' | 'year') {
+    return await this.enhancedService.getAgentEarningsWithTransactions(agentId, timeRange);
+  }
+
+  async getTransactionMonitoringDashboard(agentId: number) {
+    return await this.enhancedService.getTransactionMonitoringDashboard(agentId);
+  }
+
+  async getAgentEscrowTransactions(agentId: number) {
+    return await this.enhancedService.getAgentEscrowTransactions(agentId);
+  }
+
+  async getAgentPaymentTransactions(agentId: number) {
+    return await this.enhancedService.getAgentPaymentTransactions(agentId);
+  }
+
+  async getAgentTransactionSummary(agentId: number) {
+    return await this.enhancedService.getAgentTransactionSummary(agentId);
+  }
+
+  async getAgentMonthlyCommissionsWithTransactions(agentId: number) {
+    return await this.enhancedService.getAgentMonthlyCommissionsWithTransactions(agentId);
+  }
 }

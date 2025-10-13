@@ -51,7 +51,6 @@ export interface PaymentTransaction {
   status: TransactionStatus;
   reference: string;
   externalId?: string;
-  jengaTransactionId?: string;
   description?: string;
   metadata?: Record<string, any>;
   charges?: number;
@@ -123,112 +122,6 @@ export interface TransactionSummary {
   totalCharges: number;
   netAmount: number;
   transactionCount: number;
-}
-
-// --- Jenga API Types ---
-export interface JengaConfig {
-  baseUrl: string;
-  username: string;
-  password: string;
-  apiKey: string;
-  privateKey: string;
-  environment: 'sandbox' | 'production';
-  timeout: number;
-  retryAttempts: number;
-  callbackUrl: string;
-}
-
-export interface JengaCredentials {
-  accessToken?: string;
-  refreshToken?: string;
-  tokenType?: string;
-  expiresAt?: number;
-}
-
-export interface JengaAuthRequest {
-  username: string;
-  password: string;
-}
-
-export interface JengaAuthResponse {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-  expires_in: number;
-}
-
-export interface JengaMobileMoneyRequest {
-  customer: {
-    countryCode: string;
-    mobileNumber: string;
-  };
-  transaction: {
-    amount: string;
-    description: string;
-    type: string;
-    id: string;
-  };
-}
-
-export interface JengaBankTransferRequest {
-  source: {
-    countryCode: string;
-    name: string;
-    accountNumber: string;
-  };
-  destination: {
-    countryCode: string;
-    name: string;
-    bankCode?: string;
-    accountNumber: string;
-    type: string;
-  };
-  transfer: {
-    type: string;
-    amount: string;
-    currencyCode: string;
-    reference: string;
-    date: string;
-    description: string;
-  };
-}
-
-export interface JengaBalanceRequest {
-  countryCode: string;
-  accountNumber: string;
-}
-
-export interface JengaBalanceResponse {
-  accountNumber: string;
-  accountName: string;
-  balances: Array<{
-    type: string;
-    amount: string;
-    currencyCode: string;
-  }>;
-}
-
-export interface JengaTransactionResponse {
-  transactionId: string;
-  transactionCode: string;
-  status: string;
-  message?: string;
-  charges?: string;
-  resultCode?: string;
-  resultDesc?: string;
-}
-
-export interface JengaCallbackData {
-  transactionId: string;
-  merchantTransactionId: string;
-  status: string;
-  resultCode: string;
-  resultDesc: string;
-  amount?: string;
-  charges?: string;
-  accountNumber?: string;
-  phoneNumber?: string;
-  timestamp: string;
 }
 
 // --- Fee and Limits ---

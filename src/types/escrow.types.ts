@@ -1,4 +1,4 @@
-// Escrow-specific types extending the existing payment types
+//src/types/escrow.types.ts
 
 // --- Base Escrow Types ---
 export type EscrowType = 'escrow_deposit' | 'escrow_withdrawal' | 'escrow_transfer' | 'p2p_escrow' | 'escrow_release' | 'escrow_refund';

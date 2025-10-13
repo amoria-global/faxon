@@ -10,7 +10,7 @@ export interface CreateTourDto {
   minGroupSize?: number;
   price: number;
   currency?: string;
-  images: TourImages;
+  images: TourImages | any;
   itinerary: TourItineraryItem[];
   inclusions: string[];
   exclusions: string[];
@@ -180,6 +180,7 @@ export interface TourImages {
   landscape: string[];
   group: string[];
   guide: string[];
+  gallery: string[];
   equipment: string[];
 }
 

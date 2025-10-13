@@ -1,6 +1,7 @@
 //src/services/booking.service.ts
 import { PrismaClient } from '@prisma/client';
 import { BrevoBookingMailingService } from '../utils/brevo.booking';
+import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
 import {
   CreatePropertyBookingDto,
   UpdatePropertyBookingDto,
@@ -31,13 +32,14 @@ const prisma = new PrismaClient();
 
 export class BookingService {
   private emailService = new BrevoBookingMailingService();
+  private paymentStatusEmailService = new BrevoPaymentStatusMailingService();
 
   // --- BLOCKED DATES HELPER METHODS ---
   private async createBlockedDatesForBooking(
-    propertyId: number, 
-    checkIn: Date, 
-    checkOut: Date, 
-    bookingId: string, 
+    propertyId: number,
+    checkIn: Date,
+    checkOut: Date,
+    bookingId: string,
     reason: string = "booked"
   ): Promise<void> {
     await prisma.blockedDate.create({
@@ -62,6 +64,16 @@ export class BookingService {
 
   // --- PROPERTY BOOKING METHODS ---
   async createPropertyBooking(userId: number, data: CreatePropertyBookingDto): Promise<PropertyBookingInfo> {
+    // Validate user exists
+    const guestId = data.clientId || userId;
+    const guest = await prisma.user.findUnique({
+      where: { id: guestId }
+    });
+
+    if (!guest) {
+      throw new Error('Guest user not found');
+    }
+
     // Validate property exists and is available
     const property = await prisma.property.findUnique({
       where: { id: data.propertyId },
@@ -78,7 +90,7 @@ export class BookingService {
 
     const checkInDate = new Date(data.checkIn);
     const checkOutDate = new Date(data.checkOut);
-    
+
     // Validate dates
     if (checkInDate >= checkOutDate) {
       throw new Error('Check-out date must be after check-in date');
@@ -90,8 +102,8 @@ export class BookingService {
 
     // Calculate nights and total price
     const nights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24));
-    const totalPrice = nights === 2 && property.pricePerTwoNights 
-      ? property.pricePerTwoNights 
+    const totalPrice = nights === 2 && property.pricePerTwoNights
+      ? property.pricePerTwoNights
       : nights * property.pricePerNight;
 
     // Check for conflicting bookings
@@ -180,6 +192,7 @@ export class BookingService {
     } catch (blockError) {
       console.error('Failed to create blocked dates:', blockError);
       // Continue even if blocked dates creation fails
+      throw new Error('Failed to create blocked dates: ' + blockError);
     }
 
     // Update property total bookings
@@ -189,41 +202,47 @@ export class BookingService {
     });
 
     try {
-      // Send confirmation email to guest
-      await this.emailService.sendBookingConfirmationEmail({
-        user: {
-          firstName: booking.guest.firstName,
-          lastName: booking.guest.lastName,
-          email: booking.guest.email,
-          id: booking.guestId
-        },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/logo.png'
-        },
-        booking: this.transformToPropertyBookingInfo(booking),
-        recipientType: 'guest'
-      });
+      // Send "booking received - please pay" email to guest
+      if (guest && booking.guest) {
+        await this.paymentStatusEmailService.sendBookingReceivedEmail({
+          user: {
+            firstName: guest.firstName,
+            lastName: guest.lastName,
+            email: guest.email,
+            id: guestId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/favicon.ico'
+          },
+          booking: this.transformToPropertyBookingInfo(booking),
+          recipientType: 'guest',
+          paymentStatus: 'pending'
+        });
+      }
 
-      // Send notification to host
-      await this.emailService.sendNewBookingNotification({
-        user: {
-          firstName: booking.property.host.firstName,
-          lastName: booking.property.host.lastName,
-          email: booking.property.host.email,
-          id: booking.property.hostId
-        },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/logo.png'
-        },
-        booking: this.transformToPropertyBookingInfo(booking),
-        recipientType: 'host'
-      });
+      // Send notification to host - payment pending
+      if (booking.property.host && booking.property.hostId) {
+        await this.paymentStatusEmailService.sendNewBookingAlertToHost({
+          user: {
+            firstName: booking.property.host.firstName,
+            lastName: booking.property.host.lastName,
+            email: booking.property.host.email,
+            id: booking.property.hostId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/favicon.ico'
+          },
+          booking: this.transformToPropertyBookingInfo(booking),
+          recipientType: 'host',
+          paymentStatus: 'pending'
+        });
+      }
     } catch (emailError) {
       console.error('Failed to send property booking emails:', emailError);
       // Don't fail the booking if email fails
@@ -290,25 +309,27 @@ export class BookingService {
         if (data.status === 'cancelled') {
           // Remove blocked dates when booking is cancelled
           await this.removeBlockedDatesForBooking(bookingId);
-          
-          // Send cancellation email
-          await this.emailService.sendBookingCancellationEmail({
-            user: {
-              firstName: updatedBooking.guest.firstName,
-              lastName: updatedBooking.guest.lastName,
-              email: updatedBooking.guest.email,
-              id: updatedBooking.guestId
-            },
-            company: {
-              name: 'Jambolush',
-              website: 'https://jambolush.com',
-              supportEmail: 'support@jambolush.com',
-              logo: 'https://jambolush.com/logo.png'
-            },
-            booking: this.transformToPropertyBookingInfo(updatedBooking),
-            recipientType: 'guest',
-            cancellationReason: data.message || 'Booking has been cancelled as requested.'
-          });
+
+          // Send cancellation email if guest data is available
+          if (updatedBooking.guest) {
+            await this.emailService.sendBookingCancellationEmail({
+              user: {
+                firstName: updatedBooking.guest.firstName,
+                lastName: updatedBooking.guest.lastName,
+                email: updatedBooking.guest.email,
+                id: updatedBooking.guestId
+              },
+              company: {
+                name: 'Jambolush',
+                website: 'https://jambolush.com',
+                supportEmail: 'support@jambolush.com',
+                logo: 'https://jambolush.com/favicon.ico'
+              },
+              booking: this.transformToPropertyBookingInfo(updatedBooking),
+              recipientType: 'guest',
+              cancellationReason: data.message || 'Booking has been cancelled as requested.'
+            });
+          }
         } else if (data.status === 'confirmed' && booking.status !== 'confirmed') {
           // Ensure blocked dates exist when booking is confirmed
           // (in case they weren't created initially or were removed)
@@ -330,9 +351,9 @@ export class BookingService {
   }
 
   async updateBookingDates(
-    bookingId: string, 
-    userId: number, 
-    newCheckIn: Date, 
+    bookingId: string,
+    userId: number,
+    newCheckIn: Date,
     newCheckOut: Date
   ): Promise<PropertyBookingInfo> {
     const booking = await prisma.booking.findFirst({
@@ -406,8 +427,8 @@ export class BookingService {
     // Calculate new price
     const nights = Math.ceil((newCheckOut.getTime() - newCheckIn.getTime()) / (1000 * 60 * 60 * 24));
     const property = await prisma.property.findUnique({ where: { id: booking.propertyId } });
-    const newTotalPrice = nights === 2 && property?.pricePerTwoNights 
-      ? property.pricePerTwoNights 
+    const newTotalPrice = nights === 2 && property?.pricePerTwoNights
+      ? property.pricePerTwoNights
       : nights * (property?.pricePerNight || 0);
 
     // Update booking with new dates and price
@@ -430,7 +451,7 @@ export class BookingService {
     try {
       // Remove old blocked dates
       await this.removeBlockedDatesForBooking(bookingId);
-      
+
       // Create new blocked dates
       await this.createBlockedDatesForBooking(
         booking.propertyId,
@@ -447,8 +468,8 @@ export class BookingService {
   }
 
   async getPropertyAvailability(
-    propertyId: number, 
-    startDate: Date, 
+    propertyId: number,
+    startDate: Date,
     endDate: Date
   ): Promise<{ isAvailable: boolean; blockedPeriods: Array<{ start: Date; end: Date; reason: string }> }> {
     // Get all bookings in the date range
@@ -500,7 +521,7 @@ export class BookingService {
     });
 
     // Check if the requested period overlaps with any blocked period
-    const isAvailable = !blockedPeriods.some(period => 
+    const isAvailable = !blockedPeriods.some(period =>
       period.start < endDate && period.end > startDate
     );
 
@@ -587,6 +608,16 @@ export class BookingService {
 
   // --- TOUR BOOKING METHODS ---
   async createTourBooking(userId: number, data: CreateTourBookingDto): Promise<TourBookingInfo> {
+    // Validate user exists
+    const bookingUserId = data.clientId || userId;
+    const user = await prisma.user.findUnique({
+      where: { id: bookingUserId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
     // Validate tour and schedule
     const schedule = await prisma.tourSchedule.findUnique({
       where: { id: data.scheduleId },
@@ -655,47 +686,53 @@ export class BookingService {
     });
 
     // Update tour total bookings
-     await prisma.tour.update({
+    await prisma.tour.update({
       where: { id: data.tourId },
       data: { totalBookings: { increment: 1 } }
     });
 
     try {
-      // Send confirmation email to guest
-      await this.emailService.sendBookingConfirmationEmail({
-        user: {
-          firstName: booking.user.firstName,
-          lastName: booking.user.lastName,
-          email: booking.user.email,
-          id: booking.userId
-        },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/logo.png'
-        },
-        booking: this.transformToTourBookingInfo(booking),
-        recipientType: 'guest'
-      });
+      // Send "booking received - please pay" email to guest
+      if (user && booking.user) {
+        await this.paymentStatusEmailService.sendBookingReceivedEmail({
+          user: {
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            id: bookingUserId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/favicon.ico'
+          },
+          booking: this.transformToTourBookingInfo(booking),
+          recipientType: 'guest',
+          paymentStatus: 'pending'
+        });
+      }
 
-      // Send notification to tour guide
-      await this.emailService.sendNewBookingNotification({
-        user: {
-          firstName: booking.tour.tourGuide.firstName,
-          lastName: booking.tour.tourGuide.lastName,
-          email: booking.tour.tourGuide.email,
-          id: booking.tourGuideId
-        },
-        company: {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/logo.png'
-        },
-        booking: this.transformToTourBookingInfo(booking),
-        recipientType: 'guide'
-      });
+      // Send notification to tour guide - payment pending
+      if (booking.tour && booking.tour.tourGuide) {
+        await this.paymentStatusEmailService.sendNewBookingAlertToHost({
+          user: {
+            firstName: booking.tour.tourGuide.firstName,
+            lastName: booking.tour.tourGuide.lastName,
+            email: booking.tour.tourGuide.email,
+            id: booking.tourGuideId
+          },
+          company: {
+            name: 'Jambolush',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/favicon.ico'
+          },
+          booking: this.transformToTourBookingInfo(booking),
+          recipientType: 'guide',
+          paymentStatus: 'pending'
+        });
+      }
     } catch (emailError) {
       console.error('Failed to send tour booking emails:', emailError);
       // Don't fail the booking if email fails
@@ -743,7 +780,7 @@ export class BookingService {
     }
 
     const updateData: any = {};
-    
+
     if (data.status) updateData.status = data.status;
     if (data.specialRequests) updateData.specialRequests = data.specialRequests;
     if (data.checkInStatus) updateData.checkInStatus = data.checkInStatus;
@@ -771,23 +808,25 @@ export class BookingService {
 
     if (data.status === 'cancelled') {
       try {
-        await this.emailService.sendBookingCancellationEmail({
-          user: {
-            firstName: updatedBooking.user.firstName,
-            lastName: updatedBooking.user.lastName,
-            email: updatedBooking.user.email,
-            id: updatedBooking.userId
-          },
-          company: {
-            name: 'Jambolush',
-            website: 'https://jambolush.com',
-            supportEmail: 'support@jambolush.com',
-            logo: 'https://jambolush.com/logo.png'
-          },
-          booking: this.transformToTourBookingInfo(updatedBooking),
-          recipientType: 'guest',
-          cancellationReason: data.specialRequests || 'Tour booking has been cancelled as requested.'
-        });
+        if (updatedBooking.user) {
+          await this.emailService.sendBookingCancellationEmail({
+            user: {
+              firstName: updatedBooking.user.firstName,
+              lastName: updatedBooking.user.lastName,
+              email: updatedBooking.user.email,
+              id: updatedBooking.userId
+            },
+            company: {
+              name: 'Jambolush',
+              website: 'https://jambolush.com',
+              supportEmail: 'support@jambolush.com',
+              logo: 'https://jambolush.com/favicon.ico'
+            },
+            booking: this.transformToTourBookingInfo(updatedBooking),
+            recipientType: 'guest',
+            cancellationReason: data.specialRequests || 'Tour booking has been cancelled as requested.'
+          });
+        }
       } catch (emailError) {
         console.error('Failed to send tour cancellation email:', emailError);
       }
@@ -799,53 +838,65 @@ export class BookingService {
   async searchTourBookings(userId: number, filters: TourBookingFilters, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
 
-    const whereClause: any = {
-      OR: [
-        { userId: userId },
-        { tourGuideId: userId }
-      ]
-    };
+    // ✅ FIXED: Build conditions in an array to combine them with AND.
+    const whereConditions: any[] = [
+      {
+        OR: [
+          { userId: userId },
+          { tourGuideId: userId }
+        ]
+      }
+    ];
 
     if (filters.status) {
-      whereClause.status = { in: filters.status };
+      whereConditions.push({ status: { in: filters.status } });
     }
 
     if (filters.tourId) {
-      whereClause.tourId = filters.tourId;
+      whereConditions.push({ tourId: filters.tourId });
     }
 
     if (filters.tourDate) {
       const date = new Date(filters.tourDate);
-      whereClause.schedule = {
-        startDate: {
-          gte: new Date(date.setHours(0, 0, 0, 0)),
-          lt: new Date(date.setHours(23, 59, 59, 999))
+      whereConditions.push({
+        schedule: {
+          startDate: {
+            gte: new Date(date.setHours(0, 0, 0, 0)),
+            lt: new Date(date.setHours(23, 59, 59, 999))
+          }
         }
-      };
+      });
     }
-
+    
     if (filters.category) {
-      whereClause.tour = { category: filters.category };
+      whereConditions.push({ tour: { category: filters.category } });
     }
 
     if (filters.difficulty) {
-      whereClause.tour = { ...whereClause.tour, difficulty: filters.difficulty };
+      whereConditions.push({ tour: { difficulty: filters.difficulty } });
     }
 
     if (filters.minAmount || filters.maxAmount) {
-      whereClause.totalAmount = {};
-      if (filters.minAmount) whereClause.totalAmount.gte = filters.minAmount;
-      if (filters.maxAmount) whereClause.totalAmount.lte = filters.maxAmount;
+      const amountFilter: any = {};
+      if (filters.minAmount) amountFilter.gte = filters.minAmount;
+      if (filters.maxAmount) amountFilter.lte = filters.maxAmount;
+      whereConditions.push({ totalAmount: amountFilter });
     }
 
     if (filters.search) {
-      whereClause.OR = [
-        { tour: { title: { contains: filters.search } } },
-        { tour: { locationCity: { contains: filters.search } } },
-        { user: { firstName: { contains: filters.search } } },
-        { user: { lastName: { contains: filters.search } } }
-      ];
+      // This now gets ADDED to the other conditions, not replacing them.
+      whereConditions.push({
+        OR: [
+          { tour: { title: { contains: filters.search, mode: 'insensitive' } } },
+          { tour: { locationCity: { contains: filters.search, mode: 'insensitive' } } },
+          { user: { firstName: { contains: filters.search, mode: 'insensitive' } } },
+          { user: { lastName: { contains: filters.search, mode: 'insensitive' } } }
+        ]
+      });
     }
+    
+    // Combine all conditions using AND
+    const whereClause = { AND: whereConditions };
 
     const orderBy: any = {};
     if (filters.sortBy) {
@@ -872,7 +923,7 @@ export class BookingService {
     ]);
 
     return {
-      bookings: bookings.map(b => this.transformToTourBookingInfo(b)),
+      bookings: bookings.map(b => this.transformToTourBookingInfo(b)), // Assuming this function exists
       total,
       page,
       limit,
@@ -881,474 +932,482 @@ export class BookingService {
   }
 
   // --- AGENT BOOKING METHODS ---
-async createAgentBooking(agentId: number, data: CreateAgentBookingDto): Promise<AgentBookingInfo> {
-  // Verify agent role
-  const agent = await prisma.user.findFirst({
-    where: { id: agentId, userType: 'agent' }
-  });
+  async createAgentBooking(agentId: number, data: CreateAgentBookingDto): Promise<AgentBookingInfo> {
+    // Verify agent role
+    const agent = await prisma.user.findFirst({
+      where: { id: agentId, userType: 'agent' }
+    });
 
-  if (!agent) {
-    throw new Error('Invalid agent credentials');
+    if (!agent) {
+      throw new Error('Invalid agent credentials');
+    }
+
+    // Verify client exists
+    const client = await prisma.user.findUnique({
+      where: { id: data.clientId }
+    });
+
+    if (!client) {
+      throw new Error('Client not found');
+    }
+
+    let bookingDetails: PropertyBookingInfo | TourBookingInfo;
+    let commission = 0;
+
+    if (data.type === 'property') {
+      const propertyBookingData = data.bookingData as CreatePropertyBookingDto;
+      propertyBookingData.clientId = data.clientId;
+
+      bookingDetails = await this.createPropertyBooking(agentId, propertyBookingData);
+      commission = bookingDetails.totalPrice * (data.commissionRate || 0.05); // 5% default
+    } else {
+      const tourBookingData = data.bookingData as CreateTourBookingDto;
+      tourBookingData.clientId = data.clientId;
+
+      bookingDetails = await this.createTourBooking(agentId, tourBookingData);
+      commission = bookingDetails.totalAmount * (data.commissionRate || 0.05); // 5% default
+    }
+
+    // Create agent booking record (you might need to add this table to schema)
+    // For now, we'll return a composed object
+    return {
+      id: `agent_${bookingDetails.id}`,
+      type: data.type,
+      clientId: data.clientId,
+      client: {
+        firstName: client.firstName,
+        lastName: client.lastName,
+        email: client.email,
+        phone: client.phone || undefined  // Fix: Convert null to undefined
+      },
+      agentId,
+      bookingDetails,
+      commission,
+      commissionRate: data.commissionRate || 0.05,
+      status: 'active',
+      notes: data.notes,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
   }
-
-  // Verify client exists
-  const client = await prisma.user.findUnique({
-    where: { id: data.clientId }
-  });
-
-  if (!client) {
-    throw new Error('Client not found');
-  }
-
-  let bookingDetails: PropertyBookingInfo | TourBookingInfo;
-  let commission = 0;
-
-  if (data.type === 'property') {
-    const propertyBookingData = data.bookingData as CreatePropertyBookingDto;
-    propertyBookingData.clientId = data.clientId;
-    
-    bookingDetails = await this.createPropertyBooking(agentId, propertyBookingData);
-    commission = bookingDetails.totalPrice * (data.commissionRate || 0.05); // 5% default
-  } else {
-    const tourBookingData = data.bookingData as CreateTourBookingDto;
-    tourBookingData.clientId = data.clientId;
-    
-    bookingDetails = await this.createTourBooking(agentId, tourBookingData);
-    commission = bookingDetails.totalAmount * (data.commissionRate || 0.05); // 5% default
-  }
-
-  // Create agent booking record (you might need to add this table to schema)
-  // For now, we'll return a composed object
-  return {
-    id: `agent_${bookingDetails.id}`,
-    type: data.type,
-    clientId: data.clientId,
-    client: {
-      firstName: client.firstName,
-      lastName: client.lastName,
-      email: client.email,
-      phone: client.phone || undefined  // Fix: Convert null to undefined
-    },
-    agentId,
-    bookingDetails,
-    commission,
-    commissionRate: data.commissionRate || 0.05,
-    status: 'active',
-    notes: data.notes,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-}
 
   // --- CALENDAR METHODS ---
-async getUserBookingCalendar(userId: number): Promise<UserBookingCalendar> {
-  const today = new Date();
-  const futureDate = new Date();
-  futureDate.setMonth(futureDate.getMonth() + 6); // Next 6 months
+  async getUserBookingCalendar(userId: number): Promise<UserBookingCalendar> {
+    const today = new Date();
+    const futureDate = new Date();
+    futureDate.setMonth(futureDate.getMonth() + 6); // Next 6 months
 
-  const [propertyBookings, tourBookings] = await Promise.all([
-    prisma.booking.findMany({
-      where: {
-        guestId: userId,
-        checkIn: { gte: today, lte: futureDate }
-      },
-      include: {
-        property: { select: { name: true, location: true } }
-      }
-    }),
-    prisma.tourBooking.findMany({
-      where: {
-        userId: userId,
-        schedule: {
-          startDate: { gte: today, lte: futureDate }
-        }
-      },
-      include: {
-        tour: { 
-          select: { 
-            title: true,
-            duration: true,        // Fix: Include duration
-            locationCity: true     // Fix: Include locationCity
-          } 
+    const [propertyBookings, tourBookings] = await Promise.all([
+      prisma.booking.findMany({
+        where: {
+          guestId: userId,
+          checkIn: { gte: today, lte: futureDate }
         },
-        schedule: true
-      }
-    })
-  ]);
+        include: {
+          property: { select: { name: true, location: true } }
+        }
+      }),
+      prisma.tourBooking.findMany({
+        where: {
+          userId: userId,
+          schedule: {
+            startDate: { gte: today, lte: futureDate }
+          }
+        },
+        include: {
+          tour: {
+            select: {
+              title: true,
+              duration: true,        // Fix: Include duration
+              locationCity: true     // Fix: Include locationCity
+            }
+          },
+          schedule: true
+        }
+      })
+    ]);
 
-  const events: BookingCalendarEvent[] = [];
+    const events: BookingCalendarEvent[] = [];
 
-  // Add property bookings to calendar
-  propertyBookings.forEach(booking => {
-    events.push({
-      id: booking.id,
-      title: `${booking.property.name} - ${booking.property.location}`,
-      start: booking.checkIn.toISOString(),
-      end: booking.checkOut.toISOString(),
-      type: 'property',
-      status: booking.status,
-      color: this.getStatusColor(booking.status),
-      description: `Property booking for ${booking.guests} guests`,
-      location: booking.property.location
+    // Add property bookings to calendar
+    propertyBookings.forEach(booking => {
+      events.push({
+        id: booking.id,
+        title: `${booking.property.name} - ${booking.property.location}`,
+        start: booking.checkIn.toISOString(),
+        end: booking.checkOut.toISOString(),
+        type: 'property',
+        status: booking.status,
+        color: this.getStatusColor(booking.status),
+        description: `Property booking for ${booking.guests} guests`,
+        location: booking.property.location
+      });
     });
-  });
 
-  // Add tour bookings to calendar
-  tourBookings.forEach(booking => {
-    const endDate = new Date(booking.schedule.startDate);
-    endDate.setHours(endDate.getHours() + booking.tour.duration);  // Fix: Now duration is available
+    // Add tour bookings to calendar
+    tourBookings.forEach(booking => {
+      const endDate = new Date(booking.schedule.startDate);
+      endDate.setHours(endDate.getHours() + booking.tour.duration);  // Fix: Now duration is available
 
-    events.push({
-      id: booking.id,
-      title: booking.tour.title,
-      start: booking.schedule.startDate.toISOString(),
-      end: endDate.toISOString(),
-      type: 'tour',
-      status: booking.status,
-      color: this.getStatusColor(booking.status),
-      description: `Tour for ${booking.numberOfParticipants} participants`,
-      location: booking.tour.locationCity  // Fix: Now locationCity is available
+      events.push({
+        id: booking.id,
+        title: booking.tour.title,
+        start: booking.schedule.startDate.toISOString(),
+        end: endDate.toISOString(),
+        type: 'tour',
+        status: booking.status,
+        color: this.getStatusColor(booking.status),
+        description: `Tour for ${booking.numberOfParticipants} participants`,
+        location: booking.tour.locationCity  // Fix: Now locationCity is available
+      });
     });
-  });
 
-  const upcomingBookings = [
-    ...propertyBookings.map(b => this.transformToPropertyBookingInfo(b)),
-    ...tourBookings.map(b => this.transformToTourBookingInfo(b))
-  ].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-   .slice(0, 5);
+    const upcomingBookings = [
+      ...propertyBookings.map(b => this.transformToPropertyBookingInfo(b)),
+      ...tourBookings.map(b => this.transformToTourBookingInfo(b))
+    ].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .slice(0, 5);
 
-  return {
-    userId,
-    events: events.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()),
-    upcomingBookings,
-    conflicts: [] // TODO: Implement conflict detection
-  };
-}
+    return {
+      userId,
+      events: events.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()),
+      upcomingBookings,
+      conflicts: [] // TODO: Implement conflict detection
+    };
+  }
 
   // --- ANALYTICS METHODS ---
-async getGuestBookingStats(userId: number): Promise<GuestBookingStats> {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) throw new Error('User not found');
+  async getGuestBookingStats(userId: number): Promise<GuestBookingStats> {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new Error('User not found');
 
-  const [propertyBookings, tourBookings] = await Promise.all([
-    prisma.booking.findMany({
-      where: { guestId: userId },
-      include: { property: { select: { location: true } } }
-    }),
-    prisma.tourBooking.findMany({
-      where: { userId: userId },
-      include: { 
-        tour: { 
-          select: { 
-            locationCity: true 
-          } 
-        },
-        schedule: {          // Fix: Include schedule
-          select: {
-            startDate: true
+    const [propertyBookings, tourBookings] = await Promise.all([
+      prisma.booking.findMany({
+        where: { guestId: userId },
+        include: { property: { select: { location: true } } }
+      }),
+      prisma.tourBooking.findMany({
+        where: { userId: userId },
+        include: {
+          tour: {
+            select: {
+              locationCity: true
+            }
+          },
+          schedule: {          // Fix: Include schedule
+            select: {
+              startDate: true
+            }
           }
         }
+      })
+    ]);
+
+    const totalBookings = propertyBookings.length + tourBookings.length;
+    const completedBookings = propertyBookings.filter(b => b.status === 'completed').length +
+      tourBookings.filter(b => b.status === 'completed').length;
+    const cancelledBookings = propertyBookings.filter(b => b.status === 'cancelled').length +
+      tourBookings.filter(b => b.status === 'cancelled').length;
+
+    const totalSpent = propertyBookings.reduce((sum, b) => sum + (b.status === 'completed' ? b.totalPrice : 0), 0) +
+      tourBookings.reduce((sum, b) => sum + (b.status === 'completed' ? b.totalAmount : 0), 0);
+
+    const averageBookingValue = completedBookings > 0 ? totalSpent / completedBookings : 0;
+
+    // Get favorite destinations
+    const destinations: { [key: string]: number } = {};
+    propertyBookings.forEach(b => {
+      if (b.status === 'completed') {
+        destinations[b.property.location] = (destinations[b.property.location] || 0) + 1;
       }
-    })
-  ]);
+    });
+    tourBookings.forEach(b => {
+      if (b.status === 'completed') {
+        destinations[b.tour.locationCity] = (destinations[b.tour.locationCity] || 0) + 1;
+      }
+    });
 
-  const totalBookings = propertyBookings.length + tourBookings.length;
-  const completedBookings = propertyBookings.filter(b => b.status === 'completed').length + 
-                            tourBookings.filter(b => b.status === 'completed').length;
-  const cancelledBookings = propertyBookings.filter(b => b.status === 'cancelled').length + 
-                            tourBookings.filter(b => b.status === 'cancelled').length;
-  
-  const totalSpent = propertyBookings.reduce((sum, b) => sum + (b.status === 'completed' ? b.totalPrice : 0), 0) +
-                     tourBookings.reduce((sum, b) => sum + (b.status === 'completed' ? b.totalAmount : 0), 0);
+    const favoriteDestinations = Object.entries(destinations)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5)
+      .map(([dest]) => dest);
 
-  const averageBookingValue = completedBookings > 0 ? totalSpent / completedBookings : 0;
+    const upcomingBookings = propertyBookings.filter(b =>
+      b.status === 'confirmed' && new Date(b.checkIn) > new Date()
+    ).length + tourBookings.filter(b =>
+      b.status === 'confirmed' && new Date(b.schedule.startDate) > new Date()  // Fix: Now schedule is available
+    ).length;
 
-  // Get favorite destinations
-  const destinations: { [key: string]: number } = {};
-  propertyBookings.forEach(b => {
-    if (b.status === 'completed') {
-      destinations[b.property.location] = (destinations[b.property.location] || 0) + 1;
-    }
-  });
-  tourBookings.forEach(b => {
-    if (b.status === 'completed') {
-      destinations[b.tour.locationCity] = (destinations[b.tour.locationCity] || 0) + 1;
-    }
-  });
-
-  const favoriteDestinations = Object.entries(destinations)
-    .sort(([,a], [,b]) => b - a)
-    .slice(0, 5)
-    .map(([dest]) => dest);
-
-  const upcomingBookings = propertyBookings.filter(b => 
-    b.status === 'confirmed' && new Date(b.checkIn) > new Date()
-  ).length + tourBookings.filter(b => 
-    b.status === 'confirmed' && new Date(b.schedule.startDate) > new Date()  // Fix: Now schedule is available
-  ).length;
-
-  return {
-    totalBookings,
-    completedBookings,
-    cancelledBookings,
-    totalSpent,
-    averageBookingValue,
-    favoriteDestinations,
-    upcomingBookings,
-    memberSince: user.createdAt.toISOString()
-  };
-}
+    return {
+      totalBookings,
+      completedBookings,
+      cancelledBookings,
+      totalSpent,
+      averageBookingValue,
+      favoriteDestinations,
+      upcomingBookings,
+      memberSince: user.createdAt.toISOString()
+    };
+  }
 
 
   // --- WISHLIST METHODS ---
   // Update the existing addToWishlist method
-async addToWishlist(userId: number, type: 'property' | 'tour', itemId: string | number, notes?: string): Promise<WishlistItem> {
-  // Currently only supports properties due to schema limitation
-  if (type === 'tour') {
-    throw new Error('Tour wishlists are not supported yet. Please add tourId field to Wishlist model.');
-  }
-
-  const propertyId = itemId as number;
-
-  // Check if property exists
-  const property = await prisma.property.findUnique({
-    where: { id: propertyId },
-    select: {
-      id: true,
-      name: true,
-      location: true,
-      pricePerNight: true,
-      averageRating: true,
-      images: true,
-      status: true
+  async addToWishlist(userId: number, type: 'property' | 'tour', itemId: string | number, notes?: string): Promise<WishlistItem> {
+    // Currently only supports properties due to schema limitation
+    if (type === 'tour') {
+      throw new Error('Tour wishlists are not supported yet. Please add tourId field to Wishlist model.');
     }
-  });
 
-  if (!property) {
-    throw new Error('Property not found');
-  }
+    const propertyId = itemId as number;
 
-  // Check if already in wishlist
-  const existingItem = await prisma.wishlist.findUnique({
-    where: {
-      userId_propertyId: {
+    // Check if property exists
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: {
+        id: true,
+        name: true,
+        location: true,
+        pricePerNight: true,
+        averageRating: true,
+        images: true,
+        status: true
+      }
+    });
+
+    if (!property) {
+      throw new Error('Property not found');
+    }
+
+    // Check if already in wishlist
+    const existingItem = await prisma.wishlist.findUnique({
+      where: {
+        userId_propertyId: {
+          userId,
+          propertyId
+        }
+      }
+    });
+
+    if (existingItem) {
+      throw new Error('Property is already in your wishlist');
+    }
+
+    // Add to wishlist
+    const wishlistItem = await prisma.wishlist.create({
+      data: {
         userId,
         propertyId
       }
-    }
-  });
+    });
 
-  if (existingItem) {
-    throw new Error('Property is already in your wishlist');
-  }
+    // Parse images
+    const images = typeof property.images === 'string'
+      ? JSON.parse(property.images)
+      : property.images || {};
 
-  // Add to wishlist
-  const wishlistItem = await prisma.wishlist.create({
-    data: {
-      userId,
-      propertyId
-    }
-  });
-
-  // Parse images
-  const images = typeof property.images === 'string' 
-    ? JSON.parse(property.images) 
-    : property.images || {};
-
-  return {
-    id: wishlistItem.id,
-    userId,
-    type: 'property',
-    itemId: propertyId,
-    itemDetails: {
-      name: property.name,
-      location: property.location,
-      price: property.pricePerNight,
-      rating: property.averageRating || 0,
-      image: images?.exterior?.[0] || ''
-    },
-    notes,
-    isAvailable: property.status === 'active',
-    priceAlerts: false,
-    createdAt: wishlistItem.createdAt.toISOString()
-  };
-}
-
-async getUserWishlist(
-  userId: number, 
-  filters: WishlistFilters = {}, 
-  page: number = 1, 
-  limit: number = 20
-) {
-  const skip = (page - 1) * limit;
-
-  // Build where clause
-  const whereClause: any = { userId };
-
-  // Since we only support properties for now
-  if (filters.type === 'tour') {
     return {
-      items: [],
-      total: 0,
-      page,
-      limit,
-      totalPages: 0
+      id: wishlistItem.id,
+      userId,
+      type: 'property',
+      itemId: propertyId,
+      itemDetails: {
+        name: property.name,
+        location: property.location,
+        price: property.pricePerNight,
+        rating: property.averageRating || 0,
+        image: images?.exterior?.[0] || ''
+      },
+      notes,
+      isAvailable: property.status === 'active',
+      priceAlerts: false,
+      createdAt: wishlistItem.createdAt.toISOString()
     };
   }
 
-  const propertyWhere: any = {};
+  async getUserWishlist(
+    userId: number,
+    filters: WishlistFilters = {},
+    page: number = 1,
+    limit: number = 20
+  ) {
+    const skip = (page - 1) * limit;
 
-  if (filters.location) {
-    propertyWhere.location = { contains: filters.location, mode: 'insensitive' };
+    // Build where clause
+    const whereClause: any = { userId };
+
+    // Since we only support properties for now
+    if (filters.type === 'tour') {
+      return {
+        items: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 0
+      };
+    }
+
+    const propertyWhere: any = {};
+
+    if (filters.location) {
+      propertyWhere.location = { contains: filters.location, mode: 'insensitive' };
+    }
+
+    if (filters.minPrice || filters.maxPrice) {
+      propertyWhere.pricePerNight = {};
+      if (filters.minPrice) propertyWhere.pricePerNight.gte = filters.minPrice;
+      if (filters.maxPrice) propertyWhere.pricePerNight.lte = filters.maxPrice;
+    }
+
+    if (filters.isAvailable !== undefined) {
+      propertyWhere.status = filters.isAvailable ? 'active' : { not: 'active' };
+    }
+
+    if (filters.search) {
+      propertyWhere.OR = [
+        { name: { contains: filters.search, mode: 'insensitive' } },
+        { location: { contains: filters.search, mode: 'insensitive' } },
+        { description: { contains: filters.search, mode: 'insensitive' } }
+      ];
+    }
+
+    if (Object.keys(propertyWhere).length > 0) {
+      whereClause.property = propertyWhere;
+    }
+
+    const [wishlistItems, total] = await Promise.all([
+      prisma.wishlist.findMany({
+        where: whereClause,
+        include: {
+          property: {
+            select: {
+              id: true,
+              name: true,
+              location: true,
+              pricePerNight: true,
+              averageRating: true,
+              images: true,
+              status: true
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit
+      }),
+      prisma.wishlist.count({ where: whereClause })
+    ]);
+
+    const items: WishlistItem[] = wishlistItems.map(item => {
+      const images = typeof item.property.images === 'string'
+        ? JSON.parse(item.property.images)
+        : item.property.images || {};
+
+      return {
+        id: item.id,
+        userId: item.userId,
+        type: 'property',
+        itemId: item.property.id,
+        itemDetails: {
+          name: item.property.name,
+          location: item.property.location,
+          price: item.property.pricePerNight,
+          rating: item.property.averageRating || 0,
+          image: images?.exterior?.[0] || ''
+        },
+        isAvailable: item.property.status === 'active',
+        priceAlerts: false,
+        createdAt: item.createdAt.toISOString()
+      };
+    });
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    };
   }
 
-  if (filters.minPrice || filters.maxPrice) {
-    propertyWhere.pricePerNight = {};
-    if (filters.minPrice) propertyWhere.pricePerNight.gte = filters.minPrice;
-    if (filters.maxPrice) propertyWhere.pricePerNight.lte = filters.maxPrice;
+  async removeFromWishlist(userId: number, wishlistItemId: string): Promise<void> {
+    const wishlistItem = await prisma.wishlist.findFirst({
+      where: {
+        id: wishlistItemId,
+        userId: userId
+      }
+    });
+
+    if (!wishlistItem) {
+      throw new Error('Wishlist item not found or access denied');
+    }
+
+    await prisma.wishlist.delete({
+      where: { id: wishlistItemId }
+    });
   }
 
-  if (filters.isAvailable !== undefined) {
-    propertyWhere.status = filters.isAvailable ? 'active' : { not: 'active' };
+  async isInWishlist(userId: number, type: 'property' | 'tour', itemId: string | number): Promise<boolean> {
+    if (type === 'tour') {
+      return false; // Not supported yet
+    }
+
+    const existingItem = await prisma.wishlist.findUnique({
+      where: {
+        userId_propertyId: {
+          userId,
+          propertyId: itemId as number
+        }
+      }
+    });
+
+    return !!existingItem;
   }
 
-  if (filters.search) {
-    propertyWhere.OR = [
-      { name: { contains: filters.search, mode: 'insensitive' } },
-      { location: { contains: filters.search, mode: 'insensitive' } },
-      { description: { contains: filters.search, mode: 'insensitive' } }
-    ];
-  }
-
-  if (Object.keys(propertyWhere).length > 0) {
-    whereClause.property = propertyWhere;
-  }
-
-  const [wishlistItems, total] = await Promise.all([
-    prisma.wishlist.findMany({
-      where: whereClause,
+  async getWishlistStats(userId: number): Promise<WishlistStats> {
+    const wishlistItems = await prisma.wishlist.findMany({
+      where: { userId },
       include: {
         property: {
           select: {
-            id: true,
-            name: true,
-            location: true,
             pricePerNight: true,
-            averageRating: true,
-            images: true,
             status: true
           }
         }
-      },
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit
-    }),
-    prisma.wishlist.count({ where: whereClause })
-  ]);
+      }
+    });
 
-  const items: WishlistItem[] = wishlistItems.map(item => {
-    const images = typeof item.property.images === 'string' 
-      ? JSON.parse(item.property.images) 
-      : item.property.images || {};
+    const activeItems = wishlistItems.filter(item => item.property.status === 'active');
+    const totalValue = activeItems.reduce((sum, item) => sum + item.property.pricePerNight, 0);
 
     return {
-      id: item.id,
-      userId: item.userId,
-      type: 'property',
-      itemId: item.property.id,
-      itemDetails: {
-        name: item.property.name,
-        location: item.property.location,
-        price: item.property.pricePerNight,
-        rating: item.property.averageRating || 0,
-        image: images?.exterior?.[0] || ''
-      },
-      isAvailable: item.property.status === 'active',
-      priceAlerts: false,
-      createdAt: item.createdAt.toISOString()
+      totalItems: wishlistItems.length,
+      propertyCount: wishlistItems.length,
+      tourCount: 0, // Not supported yet
+      totalValue,
+      averagePrice: activeItems.length > 0 ? totalValue / activeItems.length : 0
     };
-  });
-
-  return {
-    items,
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit)
-  };
-}
-
-async removeFromWishlist(userId: number, wishlistItemId: string): Promise<void> {
-  const wishlistItem = await prisma.wishlist.findFirst({
-    where: {
-      id: wishlistItemId,
-      userId: userId
-    }
-  });
-
-  if (!wishlistItem) {
-    throw new Error('Wishlist item not found or access denied');
   }
 
-  await prisma.wishlist.delete({
-    where: { id: wishlistItemId }
-  });
-}
-
-async isInWishlist(userId: number, type: 'property' | 'tour', itemId: string | number): Promise<boolean> {
-  if (type === 'tour') {
-    return false; // Not supported yet
+  async clearWishlist(userId: number): Promise<void> {
+    await prisma.wishlist.deleteMany({
+      where: { userId }
+    });
   }
 
-  const existingItem = await prisma.wishlist.findUnique({
-    where: {
-      userId_propertyId: {
-        userId,
-        propertyId: itemId as number
-      }
+  // --- HELPER METHODS ---
+  private transformToPropertyBookingInfo(booking: any): PropertyBookingInfo {
+    const checkIn = new Date(booking.checkIn);
+    const checkOut = new Date(booking.checkOut);
+    const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (!booking.guest) {
+      throw new Error('Booking guest data is missing');
     }
-  });
 
-  return !!existingItem;
-}
-
-async getWishlistStats(userId: number): Promise<WishlistStats> {
-  const wishlistItems = await prisma.wishlist.findMany({
-    where: { userId },
-    include: {
-      property: {
-        select: {
-          pricePerNight: true,
-          status: true
-        }
-      }
+    if (!booking.property || !booking.property.host) {
+      throw new Error('Booking property or host data is missing');
     }
-  });
-
-  const activeItems = wishlistItems.filter(item => item.property.status === 'active');
-  const totalValue = activeItems.reduce((sum, item) => sum + item.property.pricePerNight, 0);
-
-  return {
-    totalItems: wishlistItems.length,
-    propertyCount: wishlistItems.length,
-    tourCount: 0, // Not supported yet
-    totalValue,
-    averagePrice: activeItems.length > 0 ? totalValue / activeItems.length : 0
-  };
-}
-
-async clearWishlist(userId: number): Promise<void> {
-  await prisma.wishlist.deleteMany({
-    where: { userId }
-  });
-}
-
-// --- HELPER METHODS ---
-private transformToPropertyBookingInfo(booking: any): PropertyBookingInfo {
-  const checkIn = new Date(booking.checkIn);
-  const checkOut = new Date(booking.checkOut);
-  const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
 
     return {
       id: booking.id,
@@ -1388,6 +1447,30 @@ private transformToPropertyBookingInfo(booking: any): PropertyBookingInfo {
   }
 
   private transformToTourBookingInfo(booking: any): TourBookingInfo {
+    if (!booking.user) {
+      throw new Error('Booking user data is missing');
+    }
+
+    if (!booking.tour || !booking.tour.tourGuide) {
+      throw new Error('Booking tour or tour guide data is missing');
+    }
+
+    if (!booking.schedule) {
+      throw new Error('Booking schedule data is missing');
+    }
+
+    // ✅ Helper function to safely handle data that might be a JSON string or an object
+    const safeParse = (data: any, fallback: any[] | {} = []) => {
+      if (typeof data === 'string') {
+        try {
+          return JSON.parse(data);
+        } catch (e) {
+          return fallback;
+        }
+      }
+      return data || fallback;
+    };
+
     return {
       id: booking.id,
       tourId: booking.tourId,
@@ -1399,12 +1482,13 @@ private transformToPropertyBookingInfo(booking: any): PropertyBookingInfo {
         duration: booking.tour.duration,
         difficulty: booking.tour.difficulty,
         location: `${booking.tour.locationCity}, ${booking.tour.locationCountry}`,
-        images: JSON.parse(booking.tour.images || '{}'),
+        // ✅ FIXED: Use the helper to safely handle the data
+        images: safeParse(booking.tour.images, {}),
         price: booking.tour.price,
         currency: booking.tour.currency,
-        inclusions: JSON.parse(booking.tour.inclusions || '[]'),
-        exclusions: JSON.parse(booking.tour.exclusions || '[]'),
-        requirements: JSON.parse(booking.tour.requirements || '[]'),
+        inclusions: safeParse(booking.tour.inclusions, []),
+        exclusions: safeParse(booking.tour.exclusions, []),
+        requirements: safeParse(booking.tour.requirements, []),
         meetingPoint: booking.tour.meetingPoint
       },
       scheduleId: booking.scheduleId,
@@ -1436,7 +1520,8 @@ private transformToPropertyBookingInfo(booking: any): PropertyBookingInfo {
         profileImage: booking.user.profileImage
       },
       numberOfParticipants: booking.numberOfParticipants,
-      participants: JSON.parse(booking.participants || '[]'),
+      // ✅ FIXED: Use the helper here as well
+      participants: safeParse(booking.participants, []),
       totalAmount: booking.totalAmount,
       currency: booking.currency,
       status: booking.status as TourBookingStatus,

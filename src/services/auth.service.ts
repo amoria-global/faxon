@@ -5,6 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { config } from '../config/config';
 import { BrevoMailingService } from '../utils/brevo.auth';
+import { BrevoSMSService } from '../utils/brevo.sms.auth';
 import { 
   RegisterDto, 
   LoginDto, 
@@ -19,21 +20,82 @@ import {
   AdminUpdateUserDto,
   TourGuideLoginResponse,
   TourGuideType,
-  DocumentType // Import DocumentType from types/auth.types
+  DocumentType
 } from '../types/auth.types';
-// Remove local DocumentType definition; use the imported one only
 
 const prisma = new PrismaClient();
 const googleClient = new OAuth2Client(config.googleClientId);
 
 export class AuthService {
-  private brevoService: BrevoMailingService;
+  // Essential user fields that exist in the database (avoiding schema mismatch issues)
+  private readonly userSelectFields = {
+    id: true,
+    email: true,
+    firstName: true,
+    lastName: true,
+    password: true,
+    provider: true,
+    providerId: true,
+    phone: true,
+    phoneCountryCode: true,
+    profileImage: true,
+    city: true,
+    zipCode: true,
+    postalCode: true,
+    postcode: true,
+    pinCode: true,
+    eircode: true,
+    cep: true,
+    status: true,
+    userType: true,
+    bio: true,
+    experience: true,
+    languages: true,
+    specializations: true,
+    rating: true,
+    totalTours: true,
+    isVerified: true,
+    licenseNumber: true,
+    certifications: true,
+    totalSessions: true,
+    twoFactorEnabled: true,
+    createdAt: true,
+    updatedAt: true,
+    lastLogin: true,
+    resetPasswordOtp: true,
+    resetPasswordExpires: true,
+    verificationStatus: true,
+    preferredCommunication: true,
+    hostNotes: true,
+    averageRating: true,
+    county: true,
+    region: true,
+    companyName: true,
+    companyTIN: true,
+    employmentContract: true,
+    nationalId: true,
+    tourGuideType: true,
+    verificationDocument: true,
+    kycCompleted: true,
+    kycSubmittedAt: true,
+    kycStatus: true,
+    addressDocument: true,
+    // Referral fields
+    referredBy: true,
+    referralCode: true,
+    referralStatus: true,
+    referredAt: true
+  };
+
+  private brevoEmailService: BrevoMailingService;
+  private brevoSMSService: BrevoSMSService;
 
   constructor() {
-    this.brevoService = new BrevoMailingService();
+    this.brevoEmailService = new BrevoMailingService();
+    this.brevoSMSService = new BrevoSMSService();
   }
 
-  // --- HELPER METHODS FOR EMAIL CONTEXT ---
+  // --- CONTEXT CREATION HELPERS ---
   private createMailingContext(user: any, security?: any, verification?: any) {
     return {
       user: {
@@ -47,6 +109,25 @@ export class AuthService {
         website: config.clientUrl || 'https://jambolush.com',
         supportEmail: config.supportEmail,
         logo: config.companyLogo
+      },
+      security,
+      verification
+    };
+  }
+
+  private createSMSContext(user: any, security?: any, verification?: any) {
+    return {
+      user: {
+        firstName: user.firstName,
+        lastName: user.lastName,
+        phone: user.phone,
+        phoneCountryCode: user.phoneCountryCode,
+        id: user.id
+      },
+      company: {
+        name: 'Jambolush',
+        website: config.clientUrl || 'https://jambolush.com',
+        supportPhone: config.companyPhone || '+250788437347'
       },
       security,
       verification
@@ -75,8 +156,92 @@ export class AuthService {
     return 'Unknown Browser';
   }
 
+  // --- DUAL NOTIFICATION SYSTEM ---
+  async sendNotifications(
+    user: any,
+    notificationType: 'welcome' | 'login' | 'password_reset' | 'password_changed' | 
+                     'suspicious_activity' | 'account_status' | 'profile_update' | 
+                     'phone_verification' | 'two_factor' | 'email_verification',
+    req?: any,
+    verification?: any,
+    additionalData?: any
+  ): Promise<void> {
+    const securityInfo = this.extractSecurityInfo(req);
+    const emailContext = this.createMailingContext(user, securityInfo, verification);
+    const smsContext = this.createSMSContext(user, securityInfo, verification);
+
+    // Always attempt email notifications
+    try {
+      switch (notificationType) {
+        case 'welcome':
+          await this.brevoEmailService.sendWelcomeEmail(emailContext);
+          break;
+        case 'email_verification':
+          await this.brevoEmailService.sendEmailVerification(emailContext);
+          break;
+        case 'login':
+          await this.brevoEmailService.sendLoginNotification(emailContext);
+          break;
+        case 'password_reset':
+          await this.brevoEmailService.sendPasswordResetOTP(emailContext);
+          break;
+        case 'password_changed':
+          await this.brevoEmailService.sendPasswordChangedNotification(emailContext);
+          break;
+        case 'suspicious_activity':
+          await this.brevoEmailService.sendSuspiciousActivityAlert(emailContext);
+          break;
+        case 'account_status':
+          await this.brevoEmailService.sendAccountStatusChange(emailContext, additionalData.status);
+          break;
+        case 'profile_update':
+          await this.brevoEmailService.sendProfileUpdateNotification(emailContext);
+          break;
+      }
+    } catch (emailError) {
+      console.error(`Failed to send ${notificationType} email:`, emailError);
+    }
+
+    // Send SMS if user has phone and preferences allow
+    if (user.phone) {
+      try {
+        const shouldSendSMS = await this.brevoSMSService.shouldSendSMS(user.id, notificationType);
+        if (shouldSendSMS) {
+          switch (notificationType) {
+            case 'welcome':
+              await this.brevoSMSService.sendWelcomeSMS(smsContext);
+              break;
+            case 'login':
+              await this.brevoSMSService.sendLoginNotificationSMS(smsContext);
+              break;
+            case 'password_reset':
+              await this.brevoSMSService.sendPasswordResetSMS(smsContext);
+              break;
+            case 'password_changed':
+              await this.brevoSMSService.sendPasswordChangedSMS(smsContext);
+              break;
+            case 'suspicious_activity':
+              await this.brevoSMSService.sendSuspiciousActivitySMS(smsContext);
+              break;
+            case 'account_status':
+              await this.brevoSMSService.sendAccountStatusChangeSMS(smsContext, additionalData.status);
+              break;
+            case 'phone_verification':
+              await this.brevoSMSService.sendPhoneVerificationSMS(smsContext);
+              break;
+            case 'two_factor':
+              await this.brevoSMSService.sendTwoFactorSMS(smsContext);
+              break;
+          }
+        }
+      } catch (smsError) {
+        console.error(`Failed to send ${notificationType} SMS:`, smsError);
+      }
+    }
+  }
+
   // --- REGISTRATION & LOGIN ---
- async register(data: RegisterDto, req?: any): Promise<AuthResponse> {
+  async register(data: RegisterDto, req?: any): Promise<AuthResponse> {
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email }
     });
@@ -108,6 +273,20 @@ export class AuthService {
       throw new Error('Password is required');
     }
     
+    // Handle referral tracking
+    let referralData = {};
+    if (data.referralCode) {
+      const referringAgent = await this.validateReferralCode(data.referralCode);
+      if (referringAgent) {
+        referralData = {
+          referredBy: referringAgent.id,
+          referralCode: data.referralCode,
+          referredAt: new Date(),
+          referralStatus: 'Pending'
+        };
+      }
+    }
+
     const tourGuideData = data.userType === 'tourguide' ? {
       bio: data.bio,
       experience: data.experience,
@@ -115,14 +294,12 @@ export class AuthService {
       specializations: data.specializations ? JSON.stringify(data.specializations) : undefined,
       licenseNumber: data.licenseNumber,
       certifications: data.certifications ? JSON.stringify(data.certifications) : undefined,
-      // Tour Guide Employment Type fields (without document URLs)
       tourGuideType: data.tourGuideType,
       nationalId: data.nationalId,
       companyTIN: data.companyTIN,
       companyName: data.companyName,
-      // Documents will be uploaded separately from frontend
     } : {};
-    
+
     const user = await prisma.user.create({
       data: {
         email: data.email,
@@ -132,11 +309,15 @@ export class AuthService {
         provider: data.provider || 'manual',
         phone: data.phone,
         phoneCountryCode: data.phoneCountryCode,
-        country: data.country,
-        state: data.state,
-        province: data.province,
-        city: data.city,
+        // Granular address fields
+        district: data.district,
+        sector: data.sector,
         street: data.street,
+        province: data.province,
+        state: data.state,
+        country: data.country,
+        // Legacy fields
+        city: data.city,
         zipCode: data.zipCode,
         postalCode: data.postalCode,
         postcode: data.postcode,
@@ -146,7 +327,9 @@ export class AuthService {
         userType: data.userType || 'guest',
         status: isServiceProvider ? 'pending' : 'active',
         verificationStatus: isServiceProvider ? 'pending' : 'unverified',
-        ...tourGuideData
+        preferredCommunication: data.preferredCommunication || 'both',
+        ...tourGuideData,
+        ...referralData
       }
     });
 
@@ -154,22 +337,8 @@ export class AuthService {
     const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email, user.userType);
     await this.createSession(user.id, refreshToken);
 
-    // Send welcome email
-    try {
-      const mailingContext = this.createMailingContext(user, this.extractSecurityInfo(req));
-      
-      if (isServiceProvider) {
-        // For service providers, send email with setup instructions
-        // You might want to create a separate method for this
-        await this.brevoService.sendWelcomeEmail(mailingContext);
-      } else {
-        // For regular users, send standard welcome email
-        await this.brevoService.sendWelcomeEmail(mailingContext);
-      }
-    } catch (emailError) {
-      console.error('Failed to send welcome email:', emailError);
-      // Don't break registration if email fails
-    }
+    // Send welcome notifications
+    await this.sendNotifications(user, 'welcome', req);
 
     return { 
       user: this.transformToUserInfo(user), 
@@ -179,9 +348,10 @@ export class AuthService {
     };
   }
 
-    async login(data: LoginDto, req?: any): Promise<AuthResponse | TourGuideLoginResponse> {
+  async login(data: LoginDto, req?: any): Promise<AuthResponse | TourGuideLoginResponse> {
     const user = await prisma.user.findUnique({
-      where: { email: data.email }
+      where: { email: data.email },
+      select: this.userSelectFields
     });
 
     if (!user) {
@@ -201,6 +371,33 @@ export class AuthService {
       throw new Error('Invalid credentials');
     }
 
+    // Check if 2FA is required
+    if (user.twoFactorEnabled) {
+      // Generate and send 2FA code
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expires = new Date(Date.now() + 5 * 60 * 1000);
+
+      // Use existing resetPassword fields for 2FA since twoFactorCode doesn't exist
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          resetPasswordOtp: code,
+          resetPasswordExpires: expires
+        }
+      });
+
+      const verification = { code, expiresIn: '5 minutes' };
+      await this.sendNotifications(user, 'two_factor', req, verification);
+
+      return {
+        user: this.transformToUserInfo(user),
+        accessToken: '',
+        refreshToken: '',
+        requiresTwoFactor: true,
+        message: 'Two-factor authentication code sent to your phone'
+      } as any;
+    }
+
     const updatedUser = await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -212,16 +409,8 @@ export class AuthService {
     const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email, user.userType);
     await this.createSession(user.id, refreshToken);
 
-    // Send login notification
-    try {
-      const securityInfo = this.extractSecurityInfo(req);
-      if (securityInfo) {
-        const mailingContext = this.createMailingContext(updatedUser, securityInfo);
-        await this.brevoService.sendLoginNotification(mailingContext);
-      }
-    } catch (emailError) {
-      console.error('Failed to send login notification:', emailError);
-    }
+    // Send login notifications
+    await this.sendNotifications(updatedUser, 'login', req);
 
     const baseResponse = { 
       user: this.transformToUserInfo(updatedUser), 
@@ -243,7 +432,388 @@ export class AuthService {
     return baseResponse;
   }
 
-async updateDocumentUrl(
+  // --- TWO-FACTOR AUTHENTICATION ---
+  async verifyTwoFactorLogin(email: string, code: string, req?: any): Promise<AuthResponse> {
+    const user = await prisma.user.findUnique({
+      where: { email }
+    });
+
+    if (!user || !user.resetPasswordOtp || !user.resetPasswordExpires) {
+      throw new Error('Invalid or expired code');
+    }
+
+    if (user.resetPasswordExpires < new Date()) {
+      throw new Error('Verification code has expired');
+    }
+
+    if (user.resetPasswordOtp !== code) {
+      throw new Error('Invalid verification code');
+    }
+
+    // Clear 2FA code and complete login
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetPasswordOtp: null,
+        resetPasswordExpires: null,
+        lastLogin: new Date(),
+        totalSessions: { increment: 1 }
+      }
+    });
+
+    const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email, user.userType);
+    await this.createSession(user.id, refreshToken);
+
+    return {
+      user: this.transformToUserInfo(updatedUser),
+      accessToken,
+      refreshToken
+    };
+  }
+
+  async sendTwoFactorCode(userId: number, req?: any): Promise<{ message: string }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    if (!user.twoFactorEnabled) {
+      throw new Error('Two-factor authentication is not enabled');
+    }
+
+    if (!user.phone) {
+      throw new Error('No phone number configured for 2FA');
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = new Date(Date.now() + 5 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        resetPasswordOtp: code,
+        resetPasswordExpires: expires
+      }
+    });
+
+    const verification = { code, expiresIn: '5 minutes' };
+    await this.sendNotifications(user, 'two_factor', req, verification);
+
+    return { message: '2FA code sent to your phone' };
+  }
+
+  async enableTwoFactor(userId: number): Promise<{ message: string }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    if (!user.phone) {
+      throw new Error('Please add a phone number first to enable two-factor authentication');
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { twoFactorEnabled: true }
+    });
+
+    return { message: 'Two-factor authentication enabled successfully' };
+  }
+
+  async disableTwoFactor(userId: number): Promise<{ message: string }> {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { 
+        twoFactorEnabled: false,
+        resetPasswordOtp: null,
+        resetPasswordExpires: null
+      }
+    });
+
+    return { message: 'Two-factor authentication disabled' };
+  }
+
+  // --- PHONE VERIFICATION ---
+  async sendPhoneVerificationCode(userId: number, req?: any): Promise<{ message: string; expiresIn: string }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    if (!user.phone) {
+      throw new Error('No phone number associated with this account');
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = new Date(Date.now() + 10 * 60 * 1000);
+
+    // Use existing resetPassword fields since phoneVerification fields don't exist
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        resetPasswordOtp: otp,
+        resetPasswordExpires: expires,
+      }
+    });
+
+    const verification = { code: otp, expiresIn: '10 minutes' };
+    await this.sendNotifications(user, 'phone_verification', req, verification);
+
+    return {
+      message: 'Verification code sent to your phone',
+      expiresIn: '10 minutes'
+    };
+  }
+
+  async verifyPhoneCode(userId: number, code: string): Promise<{ message: string }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user || !user.resetPasswordOtp || !user.resetPasswordExpires) {
+      throw new Error('Invalid verification code');
+    }
+
+    if (user.resetPasswordExpires < new Date()) {
+      throw new Error('Verification code has expired');
+    }
+
+    if (user.resetPasswordOtp !== code) {
+      throw new Error('Invalid verification code');
+    }
+
+    // Use existing verificationStatus field since phoneVerified doesn't exist
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        verificationStatus: 'verified',
+        resetPasswordOtp: null,
+        resetPasswordExpires: null
+      }
+    });
+
+    return { message: 'Phone number verified successfully' };
+  }
+
+  // --- EMAIL VERIFICATION ---
+  async sendEmailVerification(userId: number, req?: any): Promise<{ message: string }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+
+    // Use existing resetPassword fields since emailVerification fields don't exist
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        resetPasswordOtp: code,
+        resetPasswordExpires: expires
+      }
+    });
+
+    const verification = { code, expiresIn: '30 minutes' };
+    await this.sendNotifications(user, 'email_verification', req, verification);
+
+    return { message: 'Verification code sent to your email' };
+  }
+
+  async verifyEmailCode(userId: number, code: string): Promise<{ message: string }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user || !user.resetPasswordOtp || !user.resetPasswordExpires) {
+      throw new Error('Invalid verification code');
+    }
+
+    if (user.resetPasswordExpires < new Date()) {
+      throw new Error('Verification code has expired');
+    }
+
+    if (user.resetPasswordOtp !== code) {
+      throw new Error('Invalid verification code');
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        verificationStatus: 'verified',
+        resetPasswordOtp: null,
+        resetPasswordExpires: null
+      }
+    });
+
+    return { message: 'Email verified successfully' };
+  }
+
+  // Add this method to the AuthService class in src/services/auth.service.ts
+  // Place it in the "--- USER QUERIES ---" section
+
+   // --- PUBLIC USER CHECKS ---
+  async checkEmailStatus(email: string): Promise<{
+    exists: boolean;
+    userType?: string;
+    status?: string;
+    verificationStatus?: any;
+    hasPassword: boolean;
+    message: string;
+    nextAction?: 'login' | 'setup_password' | 'verify_account' | 'signup' | 'contact_support';
+  }> {
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: this.userSelectFields
+    });
+
+    if (!user) {
+      return {
+        exists: false,
+        hasPassword: false,
+        message: 'No account found with this email address',
+        nextAction: 'signup'
+      };
+    }
+
+    const hasPassword = !!(user.password);
+    const userStatus = user.status;
+    const verificationStatus = user.verificationStatus;
+    const userType = user.userType;
+
+    // Determine next action based on user state
+    let nextAction: 'login' | 'setup_password' | 'verify_account' | 'signup' | 'contact_support' = 'login';
+    let message = 'Account found';
+
+    // Check if user is suspended or inactive
+    if (userStatus === 'suspended') {
+      return {
+        exists: true,
+        userType,
+        status: userStatus,
+        verificationStatus,
+        hasPassword,
+        message: 'Your account has been suspended. Please contact support.',
+        nextAction: 'contact_support'
+      };
+    }
+
+    // Check if user needs to set up password (service providers)
+    if (!hasPassword && ['host', 'tourguide', 'agent'].includes(userType)) {
+      return {
+        exists: true,
+        userType,
+        status: userStatus,
+        verificationStatus,
+        hasPassword,
+        message: 'Please set up your password to continue',
+        nextAction: 'setup_password'
+      };
+    }
+
+    // Check if user needs password but is guest (shouldn't happen, but handle it)
+    if (!hasPassword && userType === 'guest') {
+      return {
+        exists: true,
+        userType,
+        status: userStatus,
+        verificationStatus,
+        hasPassword,
+        message: 'Password setup required',
+        nextAction: 'setup_password'
+      };
+    }
+
+    // Check verification status for different user types
+    if (verificationStatus !== 'verified') {
+      if (userType === 'guest') {
+        return {
+          exists: true,
+          userType,
+          status: userStatus,
+          verificationStatus,
+          hasPassword,
+          message: 'Please verify your account to continue',
+          nextAction: 'verify_account'
+        };
+      } else {
+        // Service providers with unverified status
+        return {
+          exists: true,
+          userType,
+          status: userStatus,
+          verificationStatus,
+          hasPassword,
+          message: 'Account verification pending',
+          nextAction: 'verify_account'
+        };
+      }
+    }
+
+    // Check overall status
+    if (userStatus === 'pending') {
+      return {
+        exists: true,
+        userType,
+        status: userStatus,
+        verificationStatus,
+        hasPassword,
+        message: 'Account is pending approval',
+        nextAction: 'contact_support'
+      };
+    }
+
+    if (userStatus === 'inactive') {
+      return {
+        exists: true,
+        userType,
+        status: userStatus,
+        verificationStatus,
+        hasPassword,
+        message: 'Account is inactive. Please contact support.',
+        nextAction: 'contact_support'
+      };
+    }
+
+    // User is active, verified, and has password - ready to login
+    if (userStatus === 'active' && verificationStatus === 'verified' && hasPassword) {
+      return {
+        exists: true,
+        userType,
+        status: userStatus,
+        verificationStatus,
+        hasPassword,
+        message: 'Ready to sign in',
+        nextAction: 'login'
+      };
+    }
+
+    // Default case - something is not right
+    return {
+      exists: true,
+      userType,
+      status: userStatus,
+      verificationStatus,
+      hasPassword,
+      message: 'Account status unclear. Please contact support.',
+      nextAction: 'contact_support'
+    };
+  }
+
+  // --- DOCUMENT MANAGEMENT ---
+  async updateDocumentUrl(
     userId: number, 
     documentType: 'verification' | 'employment',
     documentUrl: string
@@ -276,7 +846,7 @@ async updateDocumentUrl(
     return this.transformToUserInfo(updatedUser);
   }
 
-async getUserDocuments(userId: number): Promise<{
+  async getUserDocuments(userId: number): Promise<{
     verificationDocument?: string;
     employmentContract?: string;
     tourGuideType?: TourGuideType;
@@ -354,7 +924,8 @@ async getUserDocuments(userId: number): Promise<{
           providerId: data.providerId,
           userType: 'guest',
           status: 'active',
-          totalSessions: 1
+          totalSessions: 1,
+          preferredCommunication: 'email'
         }
       });
     } else {
@@ -370,19 +941,8 @@ async getUserDocuments(userId: number): Promise<{
     const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email, user.userType);
     await this.createSession(user.id, refreshToken);
 
-    // Send appropriate email notification
-    try {
-      const securityInfo = this.extractSecurityInfo(req);
-      const mailingContext = this.createMailingContext(user, securityInfo);
-      
-      if (isNewUser) {
-        await this.brevoService.sendWelcomeEmail(mailingContext);
-      } else {
-        await this.brevoService.sendLoginNotification(mailingContext);
-      }
-    } catch (emailError) {
-      console.error('Failed to send OAuth email notification:', emailError);
-    }
+    const notificationType = isNewUser ? 'welcome' : 'login';
+    await this.sendNotifications(user, notificationType, req);
 
     return { 
       user: this.transformToUserInfo(user), 
@@ -472,11 +1032,25 @@ async getUserDocuments(userId: number): Promise<{
     if (!user) {
       throw new Error('User not found');
     }
+    
+    let wallet = await prisma.wallet.findUnique({
+      where: { userId: user.id }
+    });
 
+    if (!wallet) {
+      wallet = await prisma.wallet.create({
+        data: {
+          userId: user.id,
+          balance: 0,
+          currency: config.escrow.defaultCurrency,
+          isActive: true
+        }
+      });
+    }
     return this.transformToUserInfo(user);
   }
 
-async updateUserProfile(userId: number, data: UpdateUserProfileDto, req?: any): Promise<UserInfo> {
+  async updateUserProfile(userId: number, data: UpdateUserProfileDto, req?: any): Promise<UserInfo> {
     const user = await prisma.user.findUnique({
       where: { id: userId }
     });
@@ -485,25 +1059,25 @@ async updateUserProfile(userId: number, data: UpdateUserProfileDto, req?: any): 
       throw new Error('User not found');
     }
 
-    // Prepare update data object
     const updateData: any = {};
 
-    // Handle name fields
+    // Handle basic profile fields
     if (data.firstName !== undefined) updateData.firstName = data.firstName;
     if (data.lastName !== undefined) updateData.lastName = data.lastName;
-
-    // Handle contact information
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.phoneCountryCode !== undefined) updateData.phoneCountryCode = data.phoneCountryCode;
 
-    // Handle location fields
-    if (data.country !== undefined) updateData.country = data.country;
-    if (data.state !== undefined) updateData.state = data.state;
-    if (data.province !== undefined) updateData.province = data.province;
-    if (data.city !== undefined) updateData.city = data.city;
+    // Handle granular address fields
+    if (data.district !== undefined) updateData.district = data.district;
+    if (data.sector !== undefined) updateData.sector = data.sector;
     if (data.street !== undefined) updateData.street = data.street;
+    if (data.province !== undefined) updateData.province = data.province;
+    if (data.state !== undefined) updateData.state = data.state;
+    if (data.country !== undefined) updateData.country = data.country;
+    // Legacy fields
+    if (data.city !== undefined) updateData.city = data.city;
 
-    // Handle all possible address/postal code fields
+    // Handle postal codes
     if (data.zipCode !== undefined) updateData.zipCode = data.zipCode;
     if (data.postalCode !== undefined) updateData.postalCode = data.postalCode;
     if (data.postcode !== undefined) updateData.postcode = data.postcode;
@@ -511,64 +1085,62 @@ async updateUserProfile(userId: number, data: UpdateUserProfileDto, req?: any): 
     if (data.eircode !== undefined) updateData.eircode = data.eircode;
     if (data.cep !== undefined) updateData.cep = data.cep;
 
-    // Handle additional address fields
-    if (data.district !== undefined) updateData.district = data.district;
-    if (data.county !== undefined) updateData.county = data.county;
-    if (data.region !== undefined) updateData.region = data.region;
-
-    // Handle other profile fields
-    if (data.verificationStatus !== undefined) updateData.verificationStatus = data.verificationStatus;
+    // Handle preferences
     if (data.preferredCommunication !== undefined) updateData.preferredCommunication = data.preferredCommunication;
+    if (data.verificationStatus !== undefined) updateData.verificationStatus = data.verificationStatus;
 
-    // Handle tour guide specific fields
-    const tourGuideData: any = {};
-    if (data.bio !== undefined) tourGuideData.bio = data.bio;
-    if (data.experience !== undefined) tourGuideData.experience = data.experience;
+    // Handle tour guide fields
+    if (data.bio !== undefined) updateData.bio = data.bio;
+    if (data.experience !== undefined) updateData.experience = data.experience;
     if (data.languages !== undefined) {
-      tourGuideData.languages = data.languages ? JSON.stringify(data.languages) : null;
+      updateData.languages = data.languages ? JSON.stringify(data.languages) : null;
     }
     if (data.specializations !== undefined) {
-      tourGuideData.specializations = data.specializations ? JSON.stringify(data.specializations) : null;
+      updateData.specializations = data.specializations ? JSON.stringify(data.specializations) : null;
     }
-    if (data.licenseNumber !== undefined) tourGuideData.licenseNumber = data.licenseNumber;
+    if (data.licenseNumber !== undefined) updateData.licenseNumber = data.licenseNumber;
     if (data.certifications !== undefined) {
-      tourGuideData.certifications = data.certifications ? JSON.stringify(data.certifications) : null;
+      updateData.certifications = data.certifications ? JSON.stringify(data.certifications) : null;
     }
-
-    // Handle tour guide employment type fields (but NOT document URLs - those come through updateDocumentUrl)
-    if (data.tourGuideType !== undefined) tourGuideData.tourGuideType = data.tourGuideType;
-    if (data.nationalId !== undefined) tourGuideData.nationalId = data.nationalId;
-    if (data.companyTIN !== undefined) tourGuideData.companyTIN = data.companyTIN;
-    if (data.companyName !== undefined) tourGuideData.companyName = data.companyName;
-
-    // Merge tour guide data
-    Object.assign(updateData, tourGuideData);
+    if (data.tourGuideType !== undefined) updateData.tourGuideType = data.tourGuideType;
+    if (data.nationalId !== undefined) updateData.nationalId = data.nationalId;
+    if (data.companyTIN !== undefined) updateData.companyTIN = data.companyTIN;
+    if (data.companyName !== undefined) updateData.companyName = data.companyName;
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: updateData
     });
 
-    // Send profile update notification
-    try {
-      const securityInfo = this.extractSecurityInfo(req);
-      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
-      await this.brevoService.sendProfileUpdateNotification(mailingContext);
-    } catch (emailError) {
-      console.error('Failed to send profile update notification:', emailError);
-    }
+    await this.sendNotifications(updatedUser, 'profile_update', req);
 
     return this.transformToUserInfo(updatedUser);
   }
 
-// And make sure you have the updateProfileImage method:
-async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
+  async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
     const user = await prisma.user.update({
       where: { id: userId },
       data: { profileImage: imageUrl }
     });
 
     return this.transformToUserInfo(user);
+  }
+
+  // --- COMMUNICATION PREFERENCES ---
+  async updateCommunicationPreferences(
+    userId: number, 
+    preferences: {
+      preferredCommunication?: 'email' | 'sms' | 'both' | 'email_only' | 'sms_only';
+    }
+  ): Promise<UserInfo> {
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        preferredCommunication: preferences.preferredCommunication
+      }
+    });
+
+    return this.transformToUserInfo(updatedUser);
   }
 
   // --- PASSWORD MANAGEMENT ---
@@ -595,32 +1167,21 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
 
     const hashedNewPassword = await bcrypt.hash(data.newPassword, 10);
     
-    await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: { 
-        password: hashedNewPassword
-      }
+      data: { password: hashedNewPassword }
     });
 
-    // Send password changed notification
-    try {
-      const securityInfo = this.extractSecurityInfo(req);
-      const mailingContext = this.createMailingContext(user, securityInfo);
-      await this.brevoService.sendPasswordChangedNotification(mailingContext);
-    } catch (emailError) {
-      console.error('Failed to send password changed notification:', emailError);
-    }
-
+    await this.sendNotifications(updatedUser, 'password_changed', req);
     await this.logoutAllDevices(userId);
   }
 
-  // --- PASSWORD SETUP FOR SERVICE PROVIDERS ---
   async setupPassword(email: string, token: string, newPassword: string, req?: any): Promise<void> {
     const user = await prisma.user.findFirst({
       where: {
         email,
         password: null,
-        userType: { in: ['host', 'tourguide', 'agent'] }
+        userType: { in: ['host', 'tourguide', 'agent', 'guest'] }
       }
     });
 
@@ -632,22 +1193,12 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
 
     const updatedUser = await prisma.user.update({
       where: { id: user.id },
-      data: {
-        password: hashedPassword
-      }
+      data: { password: hashedPassword }
     });
 
-    // Send password setup confirmation
-    try {
-      const securityInfo = this.extractSecurityInfo(req);
-      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
-      await this.brevoService.sendPasswordChangedNotification(mailingContext);
-    } catch (emailError) {
-      console.error('Failed to send password setup notification:', emailError);
-    }
+    await this.sendNotifications(updatedUser, 'password_changed', req);
   }
  
-  // --- FORGOT PASSWORD ---
   async forgotPassword(email: string, req?: any): Promise<{ message: string }> {
     const user = await prisma.user.findUnique({ where: { email } });
 
@@ -666,21 +1217,10 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
       },
     });
 
-    // Send password reset OTP
-    try {
-      const securityInfo = this.extractSecurityInfo(req);
-      const verificationInfo = {
-        code: otp,
-        expiresIn: '10 minutes'
-      };
-      const mailingContext = this.createMailingContext(user, securityInfo, verificationInfo);
-      await this.brevoService.sendPasswordResetOTP(mailingContext);
-    } catch (emailError) {
-      console.error('Failed to send password reset OTP:', emailError);
-      throw new Error('Failed to send reset code. Please try again.');
-    }
+    const verification = { code: otp, expiresIn: '10 minutes' };
+    await this.sendNotifications(user, 'password_reset', req, verification);
     
-    return { message: 'A password reset code has been sent to your email.' };
+    return { message: 'A password reset code has been sent to your email and phone.' };
   }
 
   async verifyOtp(email: string, otp: string): Promise<{ message: string }> {
@@ -719,14 +1259,7 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
       },
     });
 
-    // Send password reset confirmation
-    try {
-      const securityInfo = this.extractSecurityInfo(req);
-      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
-      await this.brevoService.sendPasswordChangedNotification(mailingContext);
-    } catch (emailError) {
-      console.error('Failed to send password reset confirmation:', emailError);
-    }
+    await this.sendNotifications(updatedUser, 'password_changed', req);
   }
 
   // --- USER QUERIES ---
@@ -783,7 +1316,7 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
     }));
   }
 
-  // --- ADMIN CRUD OPERATIONS ---
+  // --- ADMIN OPERATIONS ---
   async adminCreateUser(data: RegisterDto & { status?: string }, req?: any): Promise<UserInfo> {
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email }
@@ -829,11 +1362,15 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
         provider: data.provider || 'manual',
         phone: data.phone,
         phoneCountryCode: data.phoneCountryCode,
-        country: data.country,
-        state: data.state,
-        province: data.province,
-        city: data.city,
+        // Granular address fields
+        district: data.district,
+        sector: data.sector,
         street: data.street,
+        province: data.province,
+        state: data.state,
+        country: data.country,
+        // Legacy fields
+        city: data.city,
         zipCode: data.zipCode,
         postalCode: data.postalCode,
         postcode: data.postcode,
@@ -843,18 +1380,12 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
         userType: data.userType || 'guest',
         status: data.status || 'active',
         verificationStatus: data.status === 'active' ? 'verified' : 'unverified',
+        preferredCommunication: data.preferredCommunication || 'both',
         ...tourGuideData
       }
     });
 
-    // Send welcome email for admin-created users
-    try {
-      const mailingContext = this.createMailingContext(user, this.extractSecurityInfo(req));
-      await this.brevoService.sendWelcomeEmail(mailingContext);
-    } catch (emailError) {
-      console.error('Failed to send welcome email for admin-created user:', emailError);
-    }
-
+    await this.sendNotifications(user, 'welcome', req);
     return this.transformToUserInfo(user);
   }
 
@@ -890,36 +1421,17 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
       if (data.lastName !== undefined) updateData.lastName = data.lastName;
     }
 
-    // Profile fields
+    // Copy all other fields from the profile update method
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.phoneCountryCode !== undefined) updateData.phoneCountryCode = data.phoneCountryCode;
-    if (data.country !== undefined) updateData.country = data.country;
-    if (data.state !== undefined) updateData.state = data.state;
-    if (data.province !== undefined) updateData.province = data.province;
-    if (data.city !== undefined) updateData.city = data.city;
+    // Granular address fields
+    if (data.district !== undefined) updateData.district = data.district;
+    if (data.sector !== undefined) updateData.sector = data.sector;
     if (data.street !== undefined) updateData.street = data.street;
-    if (data.zipCode !== undefined) updateData.zipCode = data.zipCode;
-    if (data.postalCode !== undefined) updateData.postalCode = data.postalCode;
-    if (data.postcode !== undefined) updateData.postcode = data.postcode;
-    if (data.pinCode !== undefined) updateData.pinCode = data.pinCode;
-    if (data.eircode !== undefined) updateData.eircode = data.eircode;
-    if (data.cep !== undefined) updateData.cep = data.cep;
-    if (data.verificationStatus !== undefined) updateData.verificationStatus = data.verificationStatus;
+    if (data.province !== undefined) updateData.province = data.province;
+    if (data.state !== undefined) updateData.state = data.state;
+    if (data.country !== undefined) updateData.country = data.country;
     if (data.preferredCommunication !== undefined) updateData.preferredCommunication = data.preferredCommunication;
-
-    // Tour guide specific fields
-    if (data.bio !== undefined) updateData.bio = data.bio;
-    if (data.experience !== undefined) updateData.experience = data.experience;
-    if (data.languages !== undefined) {
-      updateData.languages = data.languages ? JSON.stringify(data.languages) : Prisma.DbNull;
-    }
-    if (data.specializations !== undefined) {
-      updateData.specializations = data.specializations ? JSON.stringify(data.specializations) : Prisma.DbNull;
-    }
-    if (data.licenseNumber !== undefined) updateData.licenseNumber = data.licenseNumber;
-    if (data.certifications !== undefined) {
-      updateData.certifications = data.certifications ? JSON.stringify(data.certifications) : Prisma.DbNull;
-    }
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },
@@ -985,21 +1497,18 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
       data: { isActive: false }
     });
 
-    // Send account suspension notification
-    try {
-      const securityInfo = this.extractSecurityInfo(req);
-      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
-      await this.brevoService.sendAccountStatusChange(mailingContext, 'suspended');
-    } catch (emailError) {
-      console.error('Failed to send suspension notification:', emailError);
-    }
-
+    await this.sendNotifications(updatedUser, 'account_status', req, undefined, { status: 'suspended' });
     return this.transformToUserInfo(updatedUser);
   }
 
   async adminActivateUser(userId: number, req?: any): Promise<UserInfo> {
     const user = await prisma.user.findUnique({
-      where: { id: userId }
+      where: { id: userId },
+      select: {
+        id: true,
+        referredBy: true,
+        referralStatus: true
+      }
     });
 
     if (!user) {
@@ -1010,19 +1519,13 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
       where: { id: userId },
       data: {
         status: 'active',
-        verificationStatus: 'verified'
+        verificationStatus: 'verified',
+        // Update referral status when user becomes active
+        referralStatus: user.referredBy ? 'Active' : (user.referralStatus || 'Pending')
       }
     });
 
-    // Send account reactivation notification
-    try {
-      const securityInfo = this.extractSecurityInfo(req);
-      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
-      await this.brevoService.sendAccountStatusChange(mailingContext, 'reactivated');
-    } catch (emailError) {
-      console.error('Failed to send reactivation notification:', emailError);
-    }
-
+    await this.sendNotifications(updatedUser, 'account_status', req, undefined, { status: 'reactivated' });
     return this.transformToUserInfo(updatedUser);
   }
 
@@ -1051,89 +1554,289 @@ async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
       data: { isActive: false }
     });
 
-    // Send password reset notification
-    try {
-      const securityInfo = this.extractSecurityInfo(req);
-      const mailingContext = this.createMailingContext(updatedUser, securityInfo);
-      await this.brevoService.sendPasswordChangedNotification(mailingContext);
-    } catch (emailError) {
-      console.error('Failed to send admin password reset notification:', emailError);
-    }
-
+    await this.sendNotifications(updatedUser, 'password_changed', req);
     return { temporaryPassword };
   }
 
   // --- KYC METHODS ---
-async submitKYC(
-  userId: number, 
-  personalDetails: any, 
-  addressDocumentUrl?: string
-): Promise<{ user: UserInfo; requiresDocumentUpload: boolean }> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId }
-  });
+  async submitKYC(
+    userId: number,
+    personalDetails: any,
+    addressDocumentUrl?: string,
+    passportPhotoUrl?: string
+  ): Promise<{ user: UserInfo; requiresDocumentUpload: boolean }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
 
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  // Update user with KYC data
-  const updatedUser = await prisma.user.update({
-    where: { id: userId },
-    data: {
-      // Update name fields
-      firstName: personalDetails.fullName.split(' ')[0] || user.firstName,
-      lastName: personalDetails.fullName.split(' ').slice(1).join(' ') || user.lastName,
-      
-      // Update contact info
-      phone: personalDetails.phoneNumber,
-      email: personalDetails.email,
-      
-      // Update address
-      street: personalDetails.address,
-      country: personalDetails.nationality,
-      
-      // KYC specific fields
-      kycCompleted: true,
-      kycSubmittedAt: new Date(),
-      kycStatus: 'pending',
-      addressDocument: addressDocumentUrl,
-      
-      // Update verification status
-      // verificationStatus: 'pending'
+    if (!user) {
+      throw new Error('User not found');
     }
-  });
 
-  return {
-    user: this.transformToUserInfo(updatedUser),
-    requiresDocumentUpload: !addressDocumentUrl
-  };
-}
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        firstName: personalDetails.fullName.split(' ')[0] || user.firstName,
+        lastName: personalDetails.fullName.split(' ').slice(1).join(' ') || user.lastName,
+        phone: personalDetails.phoneNumber,
+        email: personalDetails.email,
+        // Store new granular address fields
+        district: personalDetails.district,
+        sector: personalDetails.sector,
+        street: personalDetails.street,
+        province: personalDetails.province,
+        state: personalDetails.state,
+        country: personalDetails.country,
+        kycCompleted: true,
+        kycSubmittedAt: new Date(),
+        kycStatus: 'pending',
+        addressDocument: addressDocumentUrl,
+        passportPhotoUrl: passportPhotoUrl,
+      }
+    });
 
-async getKYCStatus(userId: number): Promise<{
-  kycCompleted: boolean;
-  kycStatus: string;
-  kycSubmittedAt?: string;
-  requiresDocumentUpload: boolean;
-}> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId }
-  });
+    if (updatedUser.phone) {
+      try {
+        await this.brevoSMSService.sendKYCStatusSMS(
+          this.createSMSContext(updatedUser),
+          'pending_review'
+        );
+      } catch (error) {
+        console.error('Failed to send KYC SMS notification:', error);
+      }
+    }
 
-  if (!user) {
-    throw new Error('User not found');
+    return {
+      user: this.transformToUserInfo(updatedUser),
+      requiresDocumentUpload: !addressDocumentUrl
+    };
   }
 
-  return {
-    kycCompleted: user.kycCompleted,
-    kycStatus: user.kycStatus || 'pending',
-    kycSubmittedAt: user.kycSubmittedAt?.toISOString(),
-    requiresDocumentUpload: !user.addressDocument
-  };
-}
+  async getKYCStatus(userId: number): Promise<{
+    kycCompleted: boolean;
+    kycStatus: string;
+    kycSubmittedAt?: string;
+    requiresDocumentUpload: boolean;
+  }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
 
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    return {
+      kycCompleted: user.kycCompleted,
+      kycStatus: user.kycStatus || 'pending',
+      kycSubmittedAt: user.kycSubmittedAt?.toISOString(),
+      requiresDocumentUpload: !user.addressDocument
+    };
+  }
+
+  async adminUpdateKYCStatus(
+    userId: number, 
+    status: 'approved' | 'rejected' | 'pending',
+    req?: any
+  ): Promise<UserInfo> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        kycStatus: status,
+        verificationStatus: status === 'approved' ? 'verified' : 'pending'
+      }
+    });
+
+    if (updatedUser.phone && status !== 'pending') {
+      try {
+        await this.brevoSMSService.sendKYCStatusSMS(
+          this.createSMSContext(updatedUser),
+          status
+        );
+      } catch (error) {
+        console.error('Failed to send KYC status SMS:', error);
+      }
+    }
+
+    return this.transformToUserInfo(updatedUser);
+  }
+
+  // --- REFERRAL SYSTEM ---
+  private async validateReferralCode(referralCode: string): Promise<{ id: number } | null> {
+    try {
+      // Extract agent ID from referral code
+      // Format expected: ?ref={agentId} where referralCode would be just the agentId
+      const agentId = parseInt(referralCode);
+
+      if (isNaN(agentId)) {
+        return null;
+      }
+
+      // Validate that the agent exists and is active
+      const agent = await prisma.user.findUnique({
+        where: {
+          id: agentId,
+          userType: 'agent',
+          status: 'active'
+        },
+        select: { id: true }
+      });
+
+      return agent;
+    } catch (error) {
+      console.error('Error validating referral code:', error);
+      return null;
+    }
+  }
+
+  async getAgentReferrals(
+    agentId: number,
+    page: number = 1,
+    limit: number = 10
+  ): Promise<{
+    referrals: Array<{
+      id: number;
+      fullName: string;
+      email: string;
+      phone: string | null;
+      status: string;
+      joinedAt: string;
+      referredBy: number;
+      referralCode: string | null;
+    }>;
+    totalReferrals: number;
+    currentPage: number;
+    totalPages: number;
+  }> {
+    // Validate that the user is an agent
+    const agent = await prisma.user.findUnique({
+      where: { id: agentId },
+      select: { userType: true }
+    });
+
+    if (!agent || agent.userType !== 'agent') {
+      throw new Error('Only agents can access referral data');
+    }
+
+    const offset = (page - 1) * limit;
+
+    // Get total count of referrals
+    const totalReferrals = await prisma.user.count({
+      where: {
+        referredBy: agentId,
+        NOT: { id: agentId } // Prevent self-referrals from being counted
+      }
+    });
+
+    // Get paginated referrals
+    const referrals = await prisma.user.findMany({
+      where: {
+        referredBy: agentId,
+        NOT: { id: agentId } // Prevent self-referrals
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        status: true,
+        createdAt: true,
+        referredBy: true,
+        referralCode: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      skip: offset,
+      take: limit
+    });
+
+    const totalPages = Math.ceil(totalReferrals / limit);
+
+    return {
+      referrals: referrals.map(user => ({
+        id: user.id,
+        fullName: `${user.firstName} ${user.lastName}`.trim(),
+        email: user.email,
+        phone: user.phone,
+        status: this.mapUserStatusToReferralStatus(user.status),
+        joinedAt: user.createdAt.toISOString(),
+        referredBy: user.referredBy!,
+        referralCode: user.referralCode
+      })),
+      totalReferrals,
+      currentPage: page,
+      totalPages
+    };
+  }
+
+  private mapUserStatusToReferralStatus(userStatus: string): string {
+    switch (userStatus) {
+      case 'active':
+        return 'Active';
+      case 'pending':
+        return 'Pending';
+      case 'suspended':
+      case 'inactive':
+        return 'Inactive';
+      default:
+        return 'Pending';
+    }
+  }
+
+  async updateReferralStatus(userId: number, newStatus: 'Active' | 'Inactive'): Promise<void> {
+    // Ensure only valid status transitions
+    if (!['Active', 'Inactive'].includes(newStatus)) {
+      throw new Error('Invalid referral status');
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        referralStatus: newStatus
+      }
+    });
+  }
+
+  async generateAgentReferralCode(agentId: number): Promise<string> {
+    // Validate that the user is an agent
+    const agent = await prisma.user.findUnique({
+      where: { id: agentId },
+      select: { userType: true, status: true }
+    });
+
+    if (!agent || agent.userType !== 'agent') {
+      throw new Error('Only agents can generate referral codes');
+    }
+
+    if (agent.status !== 'active') {
+      throw new Error('Agent must be active to generate referral codes');
+    }
+
+    // For simplicity, the referral code is just the agent ID
+    // This matches the expected format: ?ref={agentId}
+    return agentId.toString();
+  }
+
+  // --- STATISTICS ---
   async getUserStatistics(): Promise<any> {
-    const [totalUsers, usersByType, usersByStatus, recentRegistrations] = await Promise.all([
+    const [
+      totalUsers, 
+      usersByType, 
+      usersByStatus, 
+      recentRegistrations, 
+      kycCompleted,
+      twoFactorEnabled
+    ] = await Promise.all([
       prisma.user.count(),
       
       prisma.user.groupBy({
@@ -1152,6 +1855,14 @@ async getKYCStatus(userId: number): Promise<{
             gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
           }
         }
+      }),
+
+      prisma.user.count({
+        where: { kycCompleted: true }
+      }),
+
+      prisma.user.count({
+        where: { twoFactorEnabled: true }
       })
     ]);
 
@@ -1165,47 +1876,50 @@ async getKYCStatus(userId: number): Promise<{
         status: item.status,
         count: item._count
       })),
-      recentRegistrations
+      recentRegistrations,
+      kycCompleted,
+      twoFactorEnabled,
+      kycCompletionRate: totalUsers > 0 ? (kycCompleted / totalUsers * 100).toFixed(1) : '0',
+      twoFactorAdoptionRate: totalUsers > 0 ? (twoFactorEnabled / totalUsers * 100).toFixed(1) : '0'
     };
   }
 
   // --- UTILITY METHODS ---
-
-private getMissingDocuments(user: any): DocumentType[] {
-  const missing: DocumentType[] = [];
-  
-  if (user.userType === 'tourguide') {
-    if (!user.verificationDocument) {
-      if (user.tourGuideType === 'freelancer') {
-        missing.push('national_id');
-      } else if (user.tourGuideType === 'employed') {
-        missing.push('company_tin');
+  private getMissingDocuments(user: any): DocumentType[] {
+    const missing: DocumentType[] = [];
+    
+    if (user.userType === 'tourguide') {
+      if (!user.verificationDocument) {
+        if (user.tourGuideType === 'freelancer') {
+          missing.push('national_id');
+        } else if (user.tourGuideType === 'employed') {
+          missing.push('company_tin');
+        }
+      }
+      
+      if (user.tourGuideType === 'employed' && !user.employmentContract) {
+        missing.push('employment_contract');
       }
     }
     
-    if (user.tourGuideType === 'employed' && !user.employmentContract) {
-      missing.push('employment_contract');
+    return missing;
+  }
+
+  private getDocumentVerificationStatus(user: any): 'pending' | 'approved' | 'rejected' | 'none' {
+    if (!user.verificationDocument) {
+      return 'none';
     }
+    
+    if (user.verificationStatus === 'verified') {
+      return 'approved';
+    } else if (user.verificationStatus === 'rejected') {
+      return 'rejected';
+    }
+    
+    return 'pending';
   }
-  
-  return missing;
-}
 
-private getDocumentVerificationStatus(user: any): 'pending' | 'approved' | 'rejected' | 'none' {
-  if (!user.verificationDocument) {
-    return 'none';
-  }
-  
-  if (user.verificationStatus === 'verified') {
-    return 'approved';
-  } else if (user.verificationStatus === 'rejected') {
-    return 'rejected';
-  }
-  
-  return 'pending';
-}
-
-private async generateTokens(userId: number, email: string, userType: string) {
+  private async generateTokens(userId: number, email: string, userType: string) {
     const accessToken = jwt.sign(
       { userId: userId.toString(), email, userType } as JwtPayload,
       config.jwtSecret,
@@ -1250,11 +1964,15 @@ private async generateTokens(userId: number, email: string, userType: string) {
       phone: user.phone,
       phoneCountryCode: user.phoneCountryCode,
       profile: user.profileImage,
-      country: user.country,
-      state: user.state,
-      province: user.province,
+      // Granular address fields
+      district: user.district || null,
+      sector: user.sector || null,
+      street: user.street || null,
+      province: user.province || null,
+      state: user.state || null,
+      country: user.country || null,
+      // Legacy fields
       city: user.city,
-      street: user.street,
       zipCode: user.zipCode,
       postalCode: user.postalCode,
       postcode: user.postcode,
@@ -1292,12 +2010,13 @@ private async generateTokens(userId: number, email: string, userType: string) {
       kycCompleted: user.kycCompleted,
       kycStatus: user.kycStatus,
       kycSubmittedAt: user.kycSubmittedAt?.toISOString(),
-      addressDocument: user.addressDocument
+      addressDocument: user.addressDocument,
+      passportPhotoUrl: user.passportPhotoUrl,
+      // Referral system fields
+      referredBy: user.referredBy,
+      referralCode: user.referralCode,
+      referralStatus: user.referralStatus,
+      referredAt: user.referredAt?.toISOString()
     };
-  }
-
-  private sanitizeUser(user: any) {
-    const { password, ...sanitized } = user;
-    return sanitized;
   }
 }

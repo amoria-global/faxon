@@ -9,25 +9,29 @@ export const config = {
   clientUrl: process.env.CLIENT_URL || 'https://jambolush.com',
   supportEmail: process.env.SUPPORT_EMAIL || 'support@jambolush.com',
   companyLogo: 'https://jambolush.com/favicon.ico',
+  companyPhone: process.env.COMPANY_PHONE || '+250788437347',
 
   // Brevo API
   brevoApiKey: process.env.BREVO_API_KEY || '',
   brevoSenderEmail: process.env.BREVO_SENDER_EMAIL || '',
 
-  // PRIMARY: Pesapal Escrow Integration (NEW)
+  brevoAdminSenderEmail: "notification@jambolush.com",
+  // PRIMARY: Pesapal Escrow Integration (NEW) - WITH AUTO IPN REGISTRATION
   pesapal: {
     consumerKey: process.env.PESAPAL_CONSUMER_KEY!,
     consumerSecret: process.env.PESAPAL_CONSUMER_SECRET!,
-    baseUrl: process.env.PESAPAL_BASE_URL || (
-      process.env.NODE_ENV === 'production' 
-        ? 'https://pay.pesapal.com/v3' 
-        : 'https://cybqa.pesapal.com/pesapalv3'
-    ),
+    baseUrl: process.env.PESAPAL_BASE_URL || "https://pay.pesapal.com/v3",
     environment: (process.env.NODE_ENV === 'production' ? 'production' : 'sandbox') as 'production' | 'sandbox',
     webhookSecret: process.env.PESAPAL_WEBHOOK_SECRET!,
-    callbackUrl: process.env.PESAPAL_CALLBACK_URL || 'https://jambolush.com/api/escrow/callback',
-    notificationId: process.env.PESAPAL_NOTIFICATION_ID || '',
+    callbackUrl: process.env.PESAPAL_CALLBACK_URL || 'http://localhost:5000/api/pesapal/callback',
+    ipnUrl: process.env.PESAPAL_IPN_URL || 'http://localhost:5000/api/pesapal/ipn', // IPN endpoint (different from callback)
     merchantAccount: process.env.PESAPAL_MERCHANT_ACCOUNT!,
+    
+    // AUTO IPN REGISTRATION SETTINGS
+    autoRegisterIPN: process.env.PESAPAL_AUTO_REGISTER_IPN !== 'false', // Enabled by default
+    ipnCacheDuration: parseInt(process.env.PESAPAL_IPN_CACHE_DURATION || '86400000'), // 24 hours in milliseconds
+    ipnRetryAttempts: parseInt(process.env.PESAPAL_IPN_RETRY_ATTEMPTS || '3'),
+    ipnRetryDelay: parseInt(process.env.PESAPAL_IPN_RETRY_DELAY || '5000'), // 5 seconds
     
     // Pesapal-specific escrow settings
     timeout: parseInt(process.env.PESAPAL_TIMEOUT || '30000'), // 30 seconds
@@ -41,31 +45,59 @@ export const config = {
     }
   },
 
-  // LEGACY: Jenga API Configuration (Keeping as backup/alternative)
-  jenga: {
-    baseUrl: process.env.JENGA_BASE_URL || 'https://sandbox.jengahq.io',
-    username: process.env.JENGA_USERNAME || '',
-    password: process.env.JENGA_PASSWORD || '',
-    apiKey: process.env.JENGA_API_KEY || '',
-    privateKey: process.env.JENGA_PRIVATE_KEY || '',
-    environment: process.env.JENGA_ENVIRONMENT || 'sandbox',
-    callbackUrl: process.env.JENGA_CALLBACK_URL || 'https://jambolush.com/payments/webhook/jenga',
-    sourceAccount: process.env.JENGA_SOURCE_ACCOUNT || '',
-    enabled: process.env.ENABLE_JENGA === 'true' // Disabled by default, use Pesapal
+  // XentriPay API Configuration (Mobile Money - Rwanda)
+  xentripay: {
+    apiKey: process.env.XENTRIPAY_API_KEY!,
+    baseUrl: process.env.XENTRIPAY_BASE_URL || (process.env.NODE_ENV === 'production' ? 'https://xentripay.com' : 'https://test.xentripay.com'),
+    environment: (process.env.NODE_ENV === 'production' ? 'production' : 'sandbox') as 'production' | 'sandbox',
+    webhookSecret: process.env.XENTRIPAY_WEBHOOK_SECRET || '',
+    callbackUrl: process.env.XENTRIPAY_CALLBACK_URL || 'http://localhost:5000/api/xentripay/callback',
+    merchantAccount: process.env.XENTRIPAY_MERCHANT_ACCOUNT || '',
+    timeout: parseInt(process.env.XENTRIPAY_TIMEOUT || '30000'), // 30 seconds
+
+    // Supported payment methods via XentriPay
+    supportedMethods: ['momo'],
+    supportedProviders: {
+      mobile: ['MTN', 'AIRTEL'],
+      countries: ['RW'] // Rwanda focus
+    }
   },
 
-  // UPDATED: Escrow Configuration (Pesapal-based)
+  // PawaPay API Configuration (Mobile Money - Pan-African)
+  pawapay: {
+    apiKey: process.env.PAWAPAY_API_KEY!,
+    baseUrl: process.env.PAWAPAY_BASE_URL || (process.env.PAWAPAY_ENVIRONMENT === 'production' ? 'https://api.pawapay.io/v2' : 'https://api.sandbox.pawapay.io/v2'),
+    environment: (process.env.PAWAPAY_ENVIRONMENT || 'sandbox') as 'production' | 'sandbox',
+    webhookSecret: process.env.PAWAPAY_WEBHOOK_SECRET || '',
+    callbackUrl: process.env.PAWAPAY_CALLBACK_URL || 'http://localhost:5000/api/pawapay/callback',
+    timeout: parseInt(process.env.PAWAPAY_TIMEOUT || '30000'), // 30 seconds
+
+    // Supported payment methods via PawaPay
+    supportedMethods: ['deposit', 'payout', 'refund'],
+    supportedProviders: {
+      mobile: ['MTN', 'AIRTEL', 'MPESA', 'VODAFONE', 'TIGO', 'ORANGE', 'ZAMTEL'],
+      countries: ['RW', 'KE', 'UG', 'TZ', 'ZM', 'GH', 'NG', 'MW', 'BJ', 'CM', 'CD'] // Pan-African
+    },
+
+    // PawaPay-specific settings
+    enableBulkPayouts: process.env.PAWAPAY_ENABLE_BULK_PAYOUTS !== 'false',
+    bulkPayoutBatchSize: parseInt(process.env.PAWAPAY_BULK_BATCH_SIZE || '100'),
+    retryAttempts: parseInt(process.env.PAWAPAY_RETRY_ATTEMPTS || '3'),
+    retryDelay: parseInt(process.env.PAWAPAY_RETRY_DELAY || '5000'), // 5 seconds
+  },
+
+  // Escrow Configuration (Pesapal-based)
   escrow: {
     // Primary provider is now Pesapal
     primaryProvider: 'pesapal',
     
     // Escrow business logic settings
-    defaultCurrency: process.env.ESCROW_DEFAULT_CURRENCY || 'RWF',
+    defaultCurrency: process.env.ESCROW_DEFAULT_CURRENCY || 'USD',
     supportedCurrencies: (process.env.ESCROW_SUPPORTED_CURRENCIES || 'RWF,USD,UGX,TZS,KES').split(','),
     
     // Transaction limits
     maxTransactionAmount: parseFloat(process.env.ESCROW_MAX_TRANSACTION_AMOUNT || '10000000'), // 10M RWF
-    minTransactionAmount: parseFloat(process.env.ESCROW_MIN_TRANSACTION_AMOUNT || '100'), // 100 RWF
+    minTransactionAmount: parseFloat(process.env.ESCROW_MIN_TRANSACTION_AMOUNT || '10'), // 100 RWF
     
     // Escrow timing settings
     defaultHoldingPeriod: parseInt(process.env.ESCROW_DEFAULT_HOLDING_DAYS || '7'), // 7 days
@@ -75,9 +107,9 @@ export const config = {
     
     // Default split rules for bookings
     defaultSplitRules: {
-      host: parseFloat(process.env.DEFAULT_HOST_SPLIT || '78'), // 70% to service provider
-      agent: parseFloat(process.env.DEFAULT_AGENT_SPLIT || '19.81'), // 20% to agent/affiliate
-      platform: parseFloat(process.env.DEFAULT_PLATFORM_SPLIT || '2.19') // 10% to platform
+      host: parseFloat(process.env.DEFAULT_HOST_SPLIT || '78.95'), // 70% to service provider
+      agent: parseFloat(process.env.DEFAULT_AGENT_SPLIT || '4.38'), // 20% to agent/affiliate
+      platform: parseFloat(process.env.DEFAULT_PLATFORM_SPLIT || '16.67') // 10% to platform
     },
     
     // Escrow fee configuration (charged to payer)
@@ -104,8 +136,8 @@ export const config = {
     // Primary payment mode is now escrow-based
     defaultMode: process.env.PAYMENT_DEFAULT_MODE || 'escrow', // 'escrow' or 'direct'
     defaultCurrency: 'RWF', // Rwanda Franc as primary
-    
-    // Traditional payment limits (for direct payments via Jenga)
+
+    // Traditional payment limits
     limits: {
       daily: {
         deposit: parseFloat(process.env.DAILY_DEPOSIT_LIMIT || '500000'), // 500K RWF
@@ -164,7 +196,7 @@ export const config = {
   currencies: {
     default: 'RWF', // Rwanda Franc primary
     supported: (process.env.SUPPORTED_CURRENCIES || 'RWF,USD,UGX,TZS,KES').split(','),
-    exchangeApiKey: process.env.EXCHANGE_RATE_API_KEY || '',
+    exchangeApiUrl: 'https://hexarate.paikama.co/api/rates/latest',
     
     // Currency-specific settings for East Africa
     rwf: {
@@ -214,16 +246,12 @@ export const config = {
     }
   },
 
-  // UPDATED: Enhanced Webhook Security
+  // Enhanced Webhook Security
   webhooks: {
-    // Pesapal webhook settings (primary)
+    // Pesapal webhook settings
     pesapalSecret: process.env.PESAPAL_WEBHOOK_SECRET || '',
     pesapalAllowedIPs: process.env.PESAPAL_WEBHOOK_IPS?.split(',') || [],
-    
-    // Legacy Jenga webhook settings
-    jengaSecret: process.env.JENGA_WEBHOOK_SECRET || '',
-    jengaAllowedIPs: process.env.JENGA_WEBHOOK_IPS?.split(',') || [],
-    
+
     // General webhook settings
     timeout: parseInt(process.env.WEBHOOK_TIMEOUT || '30000'), // 30 seconds
     retryAttempts: parseInt(process.env.WEBHOOK_RETRY_ATTEMPTS || '3'),
@@ -274,7 +302,7 @@ export const config = {
     // SMS settings (Africa's Talking - popular in East Africa)
     sms: {
       provider: process.env.SMS_PROVIDER || 'africastalking',
-      apiKey: process.env.SMS_API_KEY || '',
+      apiKey: process.env.BREVO_SMS_API_KEY || '',
       username: process.env.SMS_USERNAME || 'jambolush',
       from: process.env.SMS_FROM || 'JAMBOLUSH',
       enabled: process.env.SMS_NOTIFICATIONS_ENABLED === 'true'
@@ -328,15 +356,11 @@ export const config = {
     enableEscrowAnalytics: process.env.ENABLE_ESCROW_ANALYTICS !== 'false',
     enableAutoRelease: process.env.ENABLE_AUTO_RELEASE !== 'false',
     enableEmailNotifications: process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'false',
-    
+
     // Integration features
     enableMobileApp: process.env.ENABLE_MOBILE_APP === 'true',
     enableWebhookLogs: process.env.ENABLE_WEBHOOK_LOGS !== 'false',
-    enableApiDocumentation: process.env.ENABLE_API_DOCS !== 'false',
-    
-    // Legacy features
-    enableJengaPayments: process.env.ENABLE_JENGA_PAYMENTS === 'true', // Disabled by default
-    enableDirectPayments: process.env.ENABLE_DIRECT_PAYMENTS === 'true' // For non-escrow payments
+    enableApiDocumentation: process.env.ENABLE_API_DOCS !== 'false'
   },
 
   // NEW: Background Jobs Configuration (for escrow automation)
@@ -352,7 +376,8 @@ export const config = {
       escrowExpiryCheck: process.env.ESCROW_EXPIRY_CHECK_SCHEDULE || '0 0 0 * * *', // Daily at midnight
       notificationRetry: process.env.NOTIFICATION_RETRY_SCHEDULE || '0 */5 * * * *', // Every 5 minutes
       webhookRetry: process.env.WEBHOOK_RETRY_SCHEDULE || '0 */2 * * * *', // Every 2 minutes
-      analyticsUpdate: process.env.ANALYTICS_UPDATE_SCHEDULE || '0 0 1 * * *' // Daily at 1 AM
+      analyticsUpdate: process.env.ANALYTICS_UPDATE_SCHEDULE || '0 0 1 * * *', // Daily at 1 AM
+      ipnHealthCheck: process.env.IPN_HEALTH_CHECK_SCHEDULE || '0 0 */12 * * *' // Every 12 hours
     }
   },
 
@@ -362,6 +387,7 @@ export const config = {
     enableEscrowLogs: process.env.ENABLE_ESCROW_LOGS !== 'false',
     enablePaymentLogs: process.env.ENABLE_PAYMENT_LOGS !== 'false',
     enableWebhookLogs: process.env.ENABLE_WEBHOOK_LOGS !== 'false',
+    enableIPNLogs: process.env.ENABLE_IPN_LOGS !== 'false', // New: IPN registration logging
     logSensitiveData: process.env.LOG_SENSITIVE_DATA === 'true' && process.env.NODE_ENV !== 'production',
     
     // File logging
@@ -436,10 +462,20 @@ export const config = {
   }
 };
 
-// Enhanced Configuration Validation
+// Enhanced Configuration Validation with IPN Auto-Registration
 export function validateConfig() {
   const errors: string[] = [];
   const warnings: string[] = [];
+
+  // Critical XentriPay configuration validation
+  const requiredXentriPayVars = [
+    'XENTRIPAY_API_KEY'
+  ];
+
+  const missingXentriPayVars = requiredXentriPayVars.filter(varName => !process.env[varName]);
+  if (missingXentriPayVars.length > 0) {
+    warnings.push(`Missing XentriPay environment variables: ${missingXentriPayVars.join(', ')}`);
+  }
 
   // Critical Pesapal configuration validation
   const requiredPesapalVars = [
@@ -451,23 +487,24 @@ export function validateConfig() {
 
   const missingPesapalVars = requiredPesapalVars.filter(varName => !process.env[varName]);
   if (missingPesapalVars.length > 0) {
-    errors.push(`Missing critical Pesapal environment variables: ${missingPesapalVars.join(', ')}`);
+    warnings.push(`Missing Pesapal environment variables: ${missingPesapalVars.join(', ')}`);
   }
 
-  // Optional Jenga validation (only if enabled)
-  if (config.features.enableJengaPayments) {
-    const requiredJengaVars = [
-      'JENGA_USERNAME',
-      'JENGA_PASSWORD', 
-      'JENGA_API_KEY',
-      'JENGA_PRIVATE_KEY',
-      'JENGA_SOURCE_ACCOUNT',
-      'JENGA_WEBHOOK_SECRET'
-    ];
+  // Validate Pesapal URLs for auto-registration
+  if (!config.pesapal.callbackUrl || !config.pesapal.callbackUrl.includes('http')) {
+    errors.push('PESAPAL_CALLBACK_URL must be a valid HTTP/HTTPS URL');
+  }
 
-    const missingJengaVars = requiredJengaVars.filter(varName => !process.env[varName]);
-    if (missingJengaVars.length > 0) {
-      warnings.push(`Jenga payments enabled but missing variables: ${missingJengaVars.join(', ')}`);
+  // Auto-registration specific validation
+  if (config.pesapal.autoRegisterIPN) {
+    if (!config.pesapal.ipnUrl || !config.pesapal.ipnUrl.includes('http')) {
+      warnings.push('Auto IPN registration enabled but IPN URL is invalid. Using callback URL as fallback.');
+    }
+    console.log('✅ Auto IPN registration is enabled');
+  } else {
+    // If auto-registration is disabled, check for manual IPN ID
+    if (!process.env.PESAPAL_IPN_ID) {
+      warnings.push('Auto IPN registration disabled and no manual PESAPAL_IPN_ID provided');
     }
   }
 
@@ -497,6 +534,11 @@ export function validateConfig() {
     if (!config.security.corsOrigins.some(origin => origin.includes('jambolush.com'))) {
       warnings.push('No jambolush.com domain in CORS origins for production');
     }
+
+    // Production should use HTTPS URLs
+    if (!config.pesapal.callbackUrl.startsWith('https://')) {
+      warnings.push('Production environment should use HTTPS for callback URLs');
+    }
   }
 
   // Display results
@@ -512,11 +554,6 @@ export function validateConfig() {
   }
 
   console.log('✅ Configuration validated successfully');
-  console.log(`🌍 Supported currencies: ${config.currencies.supported.join(', ')}`);
-  console.log(`💰 Default currency: ${config.currencies.default}`);
-  console.log(`🔒 Escrow payments: ${config.features.enableEscrowPayments ? 'Enabled (Pesapal)' : 'Disabled'}`);
-  console.log(`🏦 Jenga payments: ${config.features.enableJengaPayments ? 'Enabled' : 'Disabled'}`);
-  console.log(`📧 Email notifications: ${config.features.enableEmailNotifications ? 'Enabled' : 'Disabled'}`);
 }
 
 // Enhanced Configuration Helper Functions
@@ -551,14 +588,14 @@ export const configUtils = {
   // Get webhook URLs
   getWebhookUrls: () => ({
     pesapal: config.pesapal.callbackUrl,
-    jenga: config.jenga.callbackUrl
+    pesapalIpn: config.pesapal.ipnUrl
   }),
 
   // Get payment provider settings
   getPaymentProvider: () => ({
     primary: 'pesapal',
-    secondary: config.features.enableJengaPayments ? 'jenga' : null,
-    escrowEnabled: config.features.enableEscrowPayments
+    escrowEnabled: config.features.enableEscrowPayments,
+    autoIPNRegistration: config.pesapal.autoRegisterIPN
   }),
 
   // Format currency amount based on currency config
@@ -626,7 +663,26 @@ export const configUtils = {
       businessHours: `${startTime} - ${endTime}`,
       workingDays: config.regional.businessHours.workingDays.join(', ')
     };
-  }
+  },
+
+  // IPN configuration helpers
+  getIPNConfiguration: () => ({
+    autoRegister: config.pesapal.autoRegisterIPN,
+    ipnUrl: config.pesapal.ipnUrl,
+    callbackUrl: config.pesapal.callbackUrl,
+    cacheDuration: config.pesapal.ipnCacheDuration,
+    retryAttempts: config.pesapal.ipnRetryAttempts,
+    retryDelay: config.pesapal.ipnRetryDelay
+  }),
+
+  // Get all environment URLs for debugging
+  getAllUrls: () => ({
+    callback: config.pesapal.callbackUrl,
+    ipn: config.pesapal.ipnUrl,
+    webhook: config.pesapal.callbackUrl,
+    client: config.clientUrl,
+    base: config.pesapal.baseUrl
+  })
 };
 
 export default config;

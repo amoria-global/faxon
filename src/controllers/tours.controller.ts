@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { TourService } from '../services/tours.service';
-import { 
-  CreateTourDto, 
-  UpdateTourDto, 
+import { logger } from '../utils/logger';
+import {
+  CreateTourDto,
+  UpdateTourDto,
   TourSearchFilters,
   TourBookingRequest,
   CreateTourReviewDto,
@@ -71,7 +72,7 @@ export class TourController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error searching tours:', error);
+      logger.error('Failed to search tours', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to search tours'
@@ -107,7 +108,7 @@ export class TourController {
         data: tour
       });
     } catch (error: any) {
-      console.error('Error fetching tour:', error);
+      logger.error('Failed to fetch tour', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve tour'
@@ -126,7 +127,7 @@ export class TourController {
         data: tours
       });
     } catch (error: any) {
-      console.error('Error fetching featured tours:', error);
+      logger.error('Failed to fetch featured tours', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve featured tours'
@@ -156,7 +157,7 @@ export class TourController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching tour reviews:', error);
+      logger.error('Failed to fetch tour reviews', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve reviews'
@@ -174,7 +175,7 @@ export class TourController {
         data: categories
       });
     } catch (error: any) {
-      console.error('Error fetching tour categories:', error);
+      logger.error('Failed to fetch tour categories', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve categories'
@@ -202,7 +203,7 @@ export class TourController {
         data: suggestions
       });
     } catch (error: any) {
-      console.error('Error fetching location suggestions:', error);
+      logger.error('Failed to fetch location suggestions', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve location suggestions'
@@ -242,7 +243,7 @@ export class TourController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error searching tour guides:', error);
+      logger.error('Failed to search tour guides', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to search tour guides'
@@ -294,7 +295,7 @@ export class TourController {
         data: booking
       });
     } catch (error: any) {
-      console.error('Error creating tour booking:', error);
+      logger.error('Failed to create tour booking', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to create tour booking'
@@ -342,7 +343,7 @@ export class TourController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching user tour bookings:', error);
+      logger.error('Failed to fetch user tour bookings', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve tour bookings'
@@ -387,7 +388,7 @@ export class TourController {
         data: booking
       });
     } catch (error: any) {
-      console.error('Error fetching tour booking by ID:', error);
+      logger.error('Failed to fetch tour booking by ID', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve tour booking'
@@ -432,7 +433,7 @@ export class TourController {
         data: review
       });
     } catch (error: any) {
-      console.error('Error creating tour review:', error);
+      logger.error('Failed to create tour review', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to create review'
@@ -460,7 +461,7 @@ export class TourController {
         data: dashboard
       });
     } catch (error: any) {
-      console.error('Error fetching tour guide dashboard:', error);
+      logger.error('Failed to fetch tour guide dashboard', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve dashboard'
@@ -487,7 +488,7 @@ export class TourController {
         data: dashboard
       });
     } catch (error: any) {
-      console.error('Error fetching enhanced dashboard:', error);
+      logger.error('Failed to fetch enhanced tour guide dashboard', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve enhanced dashboard'
@@ -529,7 +530,7 @@ export class TourController {
         data: tour
       });
     } catch (error: any) {
-      console.error('Error creating tour:', error);
+      logger.error('Failed to create tour', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to create tour'
@@ -567,7 +568,7 @@ export class TourController {
         data: tour
       });
     } catch (error: any) {
-      console.error('Error updating tour:', error);
+      logger.error('Failed to update tour', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to update tour'
@@ -603,7 +604,7 @@ export class TourController {
         message: 'Tour deleted successfully'
       });
     } catch (error: any) {
-      console.error('Error deleting tour:', error);
+      logger.error('Failed to delete tour', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to delete tour'
@@ -648,7 +649,7 @@ export class TourController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching guide tours:', error);
+      logger.error('Failed to fetch guide tours', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve tours'
@@ -687,7 +688,7 @@ export class TourController {
         data: schedule
       });
     } catch (error: any) {
-      console.error('Error creating tour schedule:', error);
+      logger.error('Failed to create tour schedule', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to create tour schedule'
@@ -725,7 +726,7 @@ export class TourController {
         data: schedule
       });
     } catch (error: any) {
-      console.error('Error updating tour schedule:', error);
+      logger.error('Failed to update tour schedule', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to update tour schedule'
@@ -761,7 +762,7 @@ export class TourController {
         message: 'Tour schedule deleted successfully'
       });
     } catch (error: any) {
-      console.error('Error deleting tour schedule:', error);
+      logger.error('Failed to delete tour schedule', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to delete tour schedule'
@@ -798,7 +799,7 @@ export class TourController {
         data: schedules
       });
     } catch (error: any) {
-      console.error('Error fetching tour schedules:', error);
+      logger.error('Failed to fetch tour schedules', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to retrieve tour schedules'
@@ -847,7 +848,7 @@ export class TourController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching tour guide bookings:', error);
+      logger.error('Failed to fetch tour guide bookings', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve tour bookings'
@@ -885,7 +886,7 @@ export class TourController {
         data: booking
       });
     } catch (error: any) {
-      console.error('Error updating tour booking:', error);
+      logger.error('Failed to update tour booking', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to update tour booking'
@@ -923,7 +924,7 @@ export class TourController {
         data: calendar
       });
     } catch (error: any) {
-      console.error('Error fetching tour booking calendar:', error);
+      logger.error('Failed to fetch tour booking calendar', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve tour booking calendar'
@@ -975,7 +976,7 @@ export class TourController {
         data: tour
       });
     } catch (error: any) {
-      console.error('Error uploading tour images:', error);
+      logger.error('Failed to upload tour images', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to upload images'
@@ -1026,7 +1027,7 @@ export class TourController {
         data: tour
       });
     } catch (error: any) {
-      console.error('Error removing tour image:', error);
+      logger.error('Failed to remove tour image', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to remove image'
@@ -1056,7 +1057,7 @@ export class TourController {
         data: earnings
       });
     } catch (error: any) {
-      console.error('Error fetching tour guide earnings:', error);
+      logger.error('Failed to fetch tour guide earnings', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve earnings'
@@ -1083,7 +1084,7 @@ export class TourController {
         data: breakdown
       });
     } catch (error: any) {
-      console.error('Error fetching earnings breakdown:', error);
+      logger.error('Failed to fetch tour guide earnings breakdown', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve earnings breakdown'
@@ -1113,7 +1114,7 @@ export class TourController {
         data: analytics
       });
     } catch (error: any) {
-      console.error('Error fetching tour guide analytics:', error);
+      logger.error('Failed to fetch tour guide analytics', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve analytics'
@@ -1151,7 +1152,7 @@ export class TourController {
         data: analytics
       });
     } catch (error: any) {
-      console.error('Error fetching tour analytics:', error);
+      logger.error('Failed to fetch tour analytics', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to retrieve tour analytics'
@@ -1190,7 +1191,7 @@ export class TourController {
         data: message
       });
     } catch (error: any) {
-      console.error('Error sending tour message:', error);
+      logger.error('Failed to send tour message', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to send message'
@@ -1221,7 +1222,7 @@ export class TourController {
         data: messages
       });
     } catch (error: any) {
-      console.error('Error fetching tour messages:', error);
+      logger.error('Failed to fetch tour messages', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve messages'
@@ -1259,7 +1260,7 @@ export class TourController {
         data: tour
       });
     } catch (error: any) {
-      console.error('Error activating tour:', error);
+      logger.error('Failed to activate tour', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to activate tour'
@@ -1296,7 +1297,7 @@ export class TourController {
         data: tour
       });
     } catch (error: any) {
-      console.error('Error deactivating tour:', error);
+      logger.error('Failed to deactivate tour', 'TourController', error);
       res.status(400).json({
         success: false,
         message: error.message || 'Failed to deactivate tour'
@@ -1342,7 +1343,7 @@ export class TourController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching all tours:', error);
+      logger.error('Failed to fetch all tours', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve tours'
@@ -1391,7 +1392,7 @@ export class TourController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error fetching all tour bookings:', error);
+      logger.error('Failed to fetch all tour bookings', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve tour bookings'
@@ -1418,7 +1419,7 @@ export class TourController {
         data: analytics
       });
     } catch (error: any) {
-      console.error('Error fetching system analytics:', error);
+      logger.error('Failed to fetch tour system analytics', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve system analytics'
@@ -1463,7 +1464,7 @@ export class TourController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error in bulk update:', error);
+      logger.error('Failed to perform bulk tour update', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to perform bulk update'
@@ -1507,7 +1508,7 @@ export class TourController {
         data: result
       });
     } catch (error: any) {
-      console.error('Error in bulk booking update:', error);
+      logger.error('Failed to perform bulk tour booking update', 'TourController', error);
       res.status(500).json({
         success: false,
         message: 'Failed to perform bulk booking update'

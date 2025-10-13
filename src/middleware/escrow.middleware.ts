@@ -66,7 +66,7 @@ export const validateDeposit = (req: AuthenticatedRequest, res: Response, next: 
       errors.push('Amount is required');
     } else if (typeof data.amount !== 'number' || data.amount <= 0) {
       errors.push('Amount must be a positive number');
-    } else if (data.amount < 100) {
+    } else if (data.amount < 100 && data.currency != 'USD') {
       errors.push('Minimum deposit amount is 100 RWF');
     } else if (data.amount > 10000000) {
       errors.push('Maximum deposit amount is 10,000,000 RWF');
@@ -79,44 +79,27 @@ export const validateDeposit = (req: AuthenticatedRequest, res: Response, next: 
       errors.push('Unsupported currency. Use RWF, USD, UGX, TZS, or KES');
     }
 
-    // Reference validation
-    if (!data.reference) {
-      errors.push('Reference is required');
-    } else if (typeof data.reference !== 'string' || data.reference.length < 3) {
-      errors.push('Reference must be at least 3 characters long');
-    } else if (data.reference.length > 50) {
-      errors.push('Reference must be less than 50 characters');
-    } else if (!/^[a-zA-Z0-9-_\s]+$/.test(data.reference)) {
-      errors.push('Reference can only contain letters, numbers, hyphens, underscores, and spaces');
+    // Reference validation (optional - will be auto-generated if not provided)
+    if (data.reference) {
+      if (typeof data.reference !== 'string' || data.reference.length < 3) {
+        errors.push('Reference must be at least 3 characters long');
+      } else if (data.reference.length > 50) {
+        errors.push('Reference must be less than 50 characters');
+      } else if (!/^[a-zA-Z0-9-_\s]+$/.test(data.reference)) {
+        errors.push('Reference can only contain letters, numbers, hyphens, underscores, and spaces');
+      }
     }
 
-    // Host ID validation
-    if (!data.hostId) {
-      errors.push('Host ID is required');
-    } else if (typeof data.hostId !== 'number' || data.hostId <= 0) {
-      errors.push('Host ID must be a positive number');
-    }
+    
 
     // Agent ID validation (optional)
     if (data.agentId && (typeof data.agentId !== 'number' || data.agentId <= 0)) {
       errors.push('Agent ID must be a positive number');
     }
 
-    // Split rules validation
-    if (!data.splitRules) {
-      errors.push('Split rules are required');
-    } else {
-      const splitErrors = validateSplitRules(data.splitRules);
-      errors.push(...splitErrors);
-    }
+   
 
-    // Billing info validation
-    if (!data.billingInfo) {
-      errors.push('Billing information is required');
-    } else {
-      const billingErrors = validateBillingInfo(data.billingInfo);
-      errors.push(...billingErrors);
-    }
+    
 
     // Description validation (optional)
     if (data.description && (typeof data.description !== 'string' || data.description.length > 200)) {
@@ -488,15 +471,15 @@ export const logEscrowRequest = (req: AuthenticatedRequest, res: Response, next:
 function validateSplitRules(rules: SplitRules): string[] {
   const errors: string[] = [];
 
-  if (!rules.host || typeof rules.host !== 'number' || rules.host < 0 || rules.host > 100) {
+  if (typeof rules.host !== 'number' || rules.host < 0 || rules.host > 100) {
     errors.push('Host split percentage must be between 0 and 100');
   }
 
-  if (!rules.agent || typeof rules.agent !== 'number' || rules.agent < 0 || rules.agent > 100) {
+  if (typeof rules.agent !== 'number' || rules.agent < 0 || rules.agent > 100) {
     errors.push('Agent split percentage must be between 0 and 100');
   }
 
-  if (!rules.platform || typeof rules.platform !== 'number' || rules.platform < 0 || rules.platform > 100) {
+  if (typeof rules.platform !== 'number' || rules.platform < 0 || rules.platform > 100) {
     errors.push('Platform split percentage must be between 0 and 100');
   }
 
@@ -601,9 +584,11 @@ function isValidPhoneNumber(phone: string): boolean {
   return phoneRegex.test(cleanPhone);
 }
 
-// === TRANSACTION ID VALIDATION ===
-
-export const validateTransactionId = (req: Request, res: Response, next: NextFunction): void => {
+export const validateTransactionId = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
   try {
     const { transactionId } = req.params;
 
@@ -611,39 +596,47 @@ export const validateTransactionId = (req: Request, res: Response, next: NextFun
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_FAILED',
-          message: 'Transaction ID is required',
-          timestamp: new Date().toISOString()
-        }
+          code: "VALIDATION_FAILED",
+          message: "Transaction ID is required",
+          timestamp: new Date().toISOString(),
+        },
       });
       return;
     }
 
-    // Basic UUID validation (assuming UUIDs are used for transaction IDs)
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    
-    if (!uuidRegex.test(transactionId)) {
+    // Regex for Pesapal UUID (orderTrackingId)
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    // Regex for internal DB IDs (cuid/nanoid style: alphanumeric, underscores, hyphens, 10+ chars)
+    const customIdRegex = /^[a-zA-Z0-9_-]{10,}$/;
+
+    const isValid =
+      uuidRegex.test(transactionId) || customIdRegex.test(transactionId);
+
+    if (!isValid) {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_FAILED',
-          message: 'Invalid transaction ID format',
-          timestamp: new Date().toISOString()
-        }
+          code: "VALIDATION_FAILED",
+          message: "Invalid transaction ID format",
+          timestamp: new Date().toISOString(),
+        },
       });
       return;
     }
 
+    // Passed validation
     next();
   } catch (error: any) {
-    console.error('Transaction ID validation error:', error);
+    console.error("Transaction ID validation error:", error);
     res.status(500).json({
       success: false,
       error: {
-        code: 'VALIDATION_ERROR',
-        message: 'Validation error occurred',
-        timestamp: new Date().toISOString()
-      }
+        code: "VALIDATION_ERROR",
+        message: "Validation error occurred",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
-};
+}

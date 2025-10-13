@@ -6,10 +6,15 @@ node_modules
 
 /src/generated/prisma
 
-.env.example
+.env.local
 
 /src/services/payment.service.ts
 /src/routes/payment.routes.ts
 /src/middleware/payment.middleware.ts
 /src/controllers/payment.controller.ts
 /src/types/payment.types.ts
+
+/dist
+
+/.claude
+.claude

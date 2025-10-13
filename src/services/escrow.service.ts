@@ -1,7 +1,9 @@
 // services/escrow.service.ts
-
 import { PrismaClient } from '@prisma/client';
 import { PesapalService } from './pesapal.service';
+import { PhoneUtils } from '../utils/phone.utils';
+import { logger } from '../utils/logger';
+import { currencyExchangeService } from './currency-exchange.service';
 import {
   CreateDepositDto,
   ReleaseEscrowDto,
@@ -17,10 +19,10 @@ import {
   PesapalWebhookData,
   SplitRules,
   EscrowParticipant,
-  PayoutMethod,
-  EscrowLimits
+  PayoutMethod
 } from '../types/pesapal.types';
 import { EmailService } from './email.service';
+import config from '../config/config';
 
 const prisma = new PrismaClient();
 
@@ -33,51 +35,363 @@ export class EscrowService {
     this.emailService = emailService;
   }
 
-  // === DEPOSIT OPERATIONS ===
+  // ==================== HELPER METHOD FOR TYPE CONVERSION ====================
+  
+  private parseUserId(userId: number | string | any): number {
+    const idNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    
+    if (isNaN(idNum) || idNum <= 0) {
+      throw new Error('Invalid user ID format '+userId);
+    }
+    
+    return idNum;
+  }
 
-  async createDeposit(guestId: number, depositData: CreateDepositDto): Promise<{
+  // ==================== BOOKING PAYMENT OPERATIONS (SECURE SERVER-SIDE) ====================
+
+  /**
+   * Create a secure Pesapal payment for a booking
+   * All sensitive data is calculated and validated server-side
+   * Client only provides bookingId
+   * @param bookingId - The booking ID
+   * @param userId - Authenticated user ID from session
+   * @returns Payment transaction, checkout URL, and booking details
+   */
+  async createBookingPayment(bookingId: string, userId: number | string): Promise<{
+    transaction: EscrowTransaction;
+    checkoutUrl: string;
+    bookingDetails: any;
+    splitBreakdown: any;
+  }> {
+    try {
+      const userIdNum = this.parseUserId(userId);
+
+      logger.info('Creating booking payment (server-side)', 'EscrowService', { bookingId, userId: userIdNum });
+
+      // 1. Fetch booking with all related data (server-side validation)
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        include: {
+          property: {
+            include: {
+              host: {
+                select: {
+                  id: true,
+                  email: true,
+                  firstName: true,
+                  lastName: true,
+                  phone: true
+                }
+              },
+              agent: {
+                select: {
+                  id: true,
+                  email: true,
+                  firstName: true,
+                  lastName: true
+                }
+              }
+            }
+          },
+          guest: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+              country: true
+            }
+          }
+        }
+      });
+
+      // 2. Validate booking exists
+      if (!booking) {
+        throw new Error(`Booking not found: ${bookingId}`);
+      }
+
+      // 3. Validate user is the booking guest (authorization check)
+      if (booking.guestId !== userIdNum) {
+        throw new Error('Unauthorized: You are not the guest for this booking');
+      }
+
+      // 4. Validate property has a host
+      if (!booking.property.host) {
+        throw new Error('Property does not have a host assigned');
+      }
+
+      // 5. Validate booking status
+      if (booking.status === 'cancelled') {
+        throw new Error('Cannot pay for a cancelled booking');
+      }
+
+      if (booking.paymentStatus === 'completed') {
+        throw new Error('Booking has already been paid');
+      }
+
+      // 6. Convert USD amount to RWF (booking prices are in USD)
+      const usdAmount = booking.totalPrice;
+      const { rwfAmount, rate: depositRate } = await currencyExchangeService.convertUSDToRWF_Deposit(usdAmount);
+
+      logger.info('Currency conversion for booking payment', 'EscrowService', {
+        bookingId,
+        usdAmount,
+        rwfAmount,
+        exchangeRate: depositRate
+      });
+
+      // 7. Calculate split rules (server-controlled, based on agent existence)
+      const hasAgent = booking.property.agent !== null;
+      const splitRules = this.calculateBookingSplitRules(hasAgent);
+
+      // 8. Validate platform commission is exactly 14%
+      this.validatePlatformCommission(splitRules);
+
+      // 9. Calculate split amounts in RWF (not USD)
+      const splitAmounts = this.calculateSplitAmounts(rwfAmount, splitRules);
+
+      // 10. Build billing info from authenticated user session (not from client)
+      const billingInfo = {
+        email: booking.guest.email,
+        phone: booking.guest.phone || '+250788000000',
+        firstName: booking.guest.firstName || 'Guest',
+        lastName: booking.guest.lastName || 'User',
+        countryCode: booking.guest.country || 'RW'
+      };
+
+      // 11. Create deposit payload (all values are server-controlled, amount in RWF)
+      const depositData: CreateDepositDto = {
+        amount: rwfAmount, // Use converted RWF amount
+        currency: 'RWF',
+        reference: `BOOKING-${booking.id}-${Date.now()}`,
+        description: `Payment for ${booking.property.name} (${new Date(booking.checkIn).toLocaleDateString()} - ${new Date(booking.checkOut).toLocaleDateString()}) - Original: $${usdAmount.toFixed(2)} USD @ ${depositRate.toFixed(2)} RWF/USD`,
+        hostId: booking.property.host.id,
+        agentId: booking.property.agent?.id,
+        splitRules,
+        billingInfo
+      };
+
+      logger.info('Booking payment payload prepared', 'EscrowService', {
+        bookingId,
+        amount: depositData.amount,
+        splitRules,
+        splitAmounts,
+        hostId: depositData.hostId,
+        agentId: depositData.agentId
+      });
+
+      // 11. Create escrow deposit using existing method
+      const result = await this.createDeposit(userIdNum, depositData);
+
+      // 12. Update booking with transaction reference
+      await prisma.booking.update({
+        where: { id: bookingId },
+        data: {
+          transactionId: result.transaction.reference,
+          paymentMethod: 'pesapal',
+          paymentStatus: 'pending'
+        }
+      });
+
+      logger.info('Booking payment created successfully', 'EscrowService', {
+        bookingId,
+        transactionId: result.transaction.id,
+        reference: result.transaction.reference
+      });
+
+      return {
+        transaction: result.transaction,
+        checkoutUrl: result.checkoutUrl,
+        bookingDetails: {
+          id: booking.id,
+          propertyName: booking.property.name,
+          totalPrice: booking.totalPrice,
+          totalPriceUSD: usdAmount,
+          totalPriceRWF: rwfAmount,
+          exchangeRate: depositRate,
+          checkIn: booking.checkIn,
+          checkOut: booking.checkOut
+        },
+        splitBreakdown: splitAmounts
+      };
+
+    } catch (error: any) {
+      logger.error('Booking payment creation failed', 'EscrowService', error);
+      throw this.handleError(error, 'BOOKING_PAYMENT_FAILED');
+    }
+  }
+
+  /**
+   * Calculate split rules for booking payments
+   * Platform always gets 14% commission
+   * @param hasAgent - Whether the property has an agent
+   * @returns Split rules object
+   */
+  private calculateBookingSplitRules(hasAgent: boolean): SplitRules {
+    const PLATFORM_COMMISSION = 14; // Fixed at 14%
+
+    if (hasAgent) {
+      // With agent: Platform 14%, Agent 7%, Host 79%
+      return {
+        platform: PLATFORM_COMMISSION,
+        agent: 7,
+        host: 79
+      };
+    } else {
+      // Without agent: Platform 14%, Agent 0%, Host 86%
+      return {
+        platform: PLATFORM_COMMISSION,
+        agent: 0,
+        host: 86
+      };
+    }
+  }
+
+  /**
+   * Validates that platform commission is exactly 14%
+   * Throws error if validation fails
+   * @param splitRules - The split rules to validate
+   */
+  private validatePlatformCommission(splitRules: SplitRules): void {
+    const REQUIRED_PLATFORM_COMMISSION = 14;
+
+    if (splitRules.platform !== REQUIRED_PLATFORM_COMMISSION) {
+      const errorMsg = `CRITICAL: Platform commission must be exactly ${REQUIRED_PLATFORM_COMMISSION}%. Current: ${splitRules.platform}%`;
+      logger.error('Platform commission validation failed', 'EscrowService', {
+        required: REQUIRED_PLATFORM_COMMISSION,
+        actual: splitRules.platform,
+        splitRules
+      });
+      throw new Error(errorMsg);
+    }
+
+    logger.info('Platform commission validated ✓', 'EscrowService', {
+      platformCommission: splitRules.platform,
+      splitRules
+    });
+  }
+
+  /**
+   * Get booking payment status
+   * @param bookingId - The booking ID
+   * @param userId - Authenticated user ID
+   * @returns Payment status information
+   */
+  async getBookingPaymentStatus(bookingId: string, userId: number | string) {
+    try {
+      const userIdNum = this.parseUserId(userId);
+
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        include: {
+          guest: {
+            select: { id: true }
+          }
+        }
+      });
+
+      if (!booking) {
+        throw new Error(`Booking not found: ${bookingId}`);
+      }
+
+      if (booking.guestId !== userIdNum) {
+        throw new Error('Unauthorized: You are not the guest for this booking');
+      }
+
+      if (!booking.transactionId) {
+        return {
+          bookingId,
+          paymentStatus: booking.paymentStatus,
+          hasTransaction: false
+        };
+      }
+
+      // Fetch escrow transaction
+      const transaction = await prisma.escrowTransaction.findFirst({
+        where: { reference: booking.transactionId }
+      });
+
+      return {
+        bookingId,
+        paymentStatus: booking.paymentStatus,
+        hasTransaction: true,
+        transaction: transaction ? {
+          id: transaction.id,
+          reference: transaction.reference,
+          status: transaction.status,
+          amount: transaction.amount,
+          currency: transaction.currency,
+          createdAt: transaction.createdAt,
+          fundedAt: transaction.fundedAt
+        } : null
+      };
+
+    } catch (error: any) {
+      logger.error('Failed to get booking payment status', 'EscrowService', error);
+      throw this.handleError(error, 'GET_BOOKING_STATUS_FAILED');
+    }
+  }
+
+  // ==================== DEPOSIT OPERATIONS ====================
+
+  async createDeposit(guestId: number | string, depositData: CreateDepositDto): Promise<{
     transaction: EscrowTransaction;
     checkoutUrl: string;
   }> {
     try {
-      // Validate deposit amount and limits
-      await this.validateEscrowLimits(guestId, 'DEPOSIT', depositData.amount);
+      const guestIdNum = this.parseUserId(guestId);
+      
+      logger.info('Creating deposit', 'EscrowService', { userId: guestIdNum, amount: depositData.amount });
 
-      // Validate split rules
-      this.validateSplitRules(depositData.splitRules);
-
-      // Get participants
+      // Validate users exist
       const [guest, host, agent] = await Promise.all([
-        this.getUserById(guestId),
+        this.getUserById(guestIdNum),
         this.getUserById(depositData.hostId),
         depositData.agentId ? this.getUserById(depositData.agentId) : null
       ]);
 
-      // Create escrow transaction
-      const merchantReference = this.pesapalService.generateMerchantReference('DEP');
+      // Validate deposit amount
+      this.validateAmount(depositData.amount, depositData.currency);
+
+      // Validate split rules
+      this.validateSplitRules(depositData.splitRules);
+
+      // Create escrow transaction in database
+      // Use provided reference or generate a new one
+      const merchantReference = depositData.reference || this.pesapalService.generateMerchantReference('DEP');
       
-      const escrowTransaction = await this.createEscrowTransaction({
-        guestId,
-        hostId: depositData.hostId,
-        agentId: depositData.agentId,
-        type: 'DEPOSIT',
-        status: 'PENDING',
-        amount: depositData.amount,
-        currency: depositData.currency,
-        reference: merchantReference,
-        description: depositData.description,
-        splitRules: depositData.splitRules,
-        billingInfo: depositData.billingInfo
+      const escrowTransaction = await prisma.escrowTransaction.create({
+        data: {
+          userId: guestIdNum,
+          recipientId: depositData.hostId,
+          type: 'DEPOSIT',
+          status: 'PENDING',
+          amount: depositData.amount,
+          currency: depositData.currency,
+          reference: merchantReference,
+          description: depositData.description || `Deposit ${merchantReference}`,
+          isP2P: false,
+          metadata: JSON.stringify({
+            splitRules: depositData.splitRules,
+            agentId: depositData.agentId,
+            billingInfo: depositData.billingInfo
+          })
+        },
+        include: {
+          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+        }
       });
 
-      // Create Pesapal checkout request
+
+      // Create Pesapal checkout
       const checkoutRequest: PesapalCheckoutRequest = {
         id: merchantReference,
         currency: depositData.currency,
-        amount: this.pesapalService.formatAmount(depositData.amount),
-        description: depositData.description || `Payment for booking ${merchantReference}`,
-        callback_url: `${process.env.BASE_URL}/api/payments/callback`,
-        notification_id: process.env.PESAPAL_NOTIFICATION_ID!,
+        amount: depositData.amount,
+        description: depositData.description || `Payment for ${merchantReference}`,
+        callback_url: config.pesapal.callbackUrl,
         billing_address: {
           email_address: depositData.billingInfo.email,
           phone_number: depositData.billingInfo.phone,
@@ -89,176 +403,328 @@ export class EscrowService {
 
       const checkoutResponse = await this.pesapalService.createCheckout(checkoutRequest);
 
-      // Update transaction with Pesapal order details
-      await this.updateEscrowTransaction(escrowTransaction.id, {
-        pesapalOrderId: checkoutResponse.merchant_reference,
-        pesapalTrackingId: checkoutResponse.order_tracking_id
+      // Update transaction with Pesapal details
+      await prisma.escrowTransaction.update({
+        where: { id: escrowTransaction.id },
+        data: {
+          escrowId: checkoutResponse.merchant_reference,
+          externalId: checkoutResponse.order_tracking_id,
+          paymentUrl: checkoutResponse.redirect_url
+        }
       });
 
-      // Send deposit notification
-      await this.sendDepositNotification(escrowTransaction, checkoutResponse.redirect_url);
+      logger.info('Deposit created successfully', 'EscrowService', {
+        transactionId: escrowTransaction.id,
+        reference: merchantReference
+      });
+
+      // Send notification
+      await this.sendDepositNotification(
+        this.transformToEscrowTransaction(escrowTransaction),
+        checkoutResponse.redirect_url
+      );
 
       return {
-        transaction: await this.getEscrowTransactionById(escrowTransaction.id),
+        transaction: this.transformToEscrowTransaction({
+          ...escrowTransaction,
+          escrowId: checkoutResponse.merchant_reference,
+          externalId: checkoutResponse.order_tracking_id,
+          paymentUrl: checkoutResponse.redirect_url
+        }),
         checkoutUrl: checkoutResponse.redirect_url
       };
 
     } catch (error: any) {
-      console.error('Create deposit failed:', error);
-      throw new Error(error.message || 'Failed to create deposit');
+      logger.error('Deposit creation failed', 'EscrowService', error);
+      throw this.handleError(error, 'CREATE_DEPOSIT_FAILED');
     }
   }
 
-  // === WEBHOOK HANDLING ===
+  // ==================== WEBHOOK HANDLING ====================
 
   async handlePesapalWebhook(webhookData: PesapalWebhookData): Promise<void> {
     try {
-      console.log('Processing Pesapal webhook:', webhookData);
+      logger.debug('Processing webhook', 'EscrowService', { trackingId: webhookData.OrderTrackingId });
 
-      // Find transaction by tracking ID
-      const transaction = await this.findTransactionByTrackingId(webhookData.OrderTrackingId);
+      // Find transaction by tracking ID OR by reference
+      let transaction = await prisma.escrowTransaction.findFirst({
+        where: { externalId: webhookData.OrderTrackingId },
+        include: {
+          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+        }
+      });
+
+      // If not found by tracking ID, try by merchant reference
+      if (!transaction) {
+        console.log('[ESCROW] Transaction not found by tracking ID, trying by reference...');
+        transaction = await prisma.escrowTransaction.findFirst({
+          where: { reference: webhookData.OrderMerchantReference },
+          include: {
+            user: { select: { id: true, email: true, firstName: true, lastName: true } },
+            recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+          }
+        });
+      }
       
       if (!transaction) {
-        console.error('Transaction not found for tracking ID:', webhookData.OrderTrackingId);
-        return;
+        const error = `Transaction not found for tracking ID: ${webhookData.OrderTrackingId} or reference: ${webhookData.OrderMerchantReference}`;
+        logger.error('Transaction not found', 'EscrowService', error);
+        throw new Error(error);
       }
 
       // Get current status from Pesapal
-      const statusResponse = await this.pesapalService.getTransactionStatus(webhookData.OrderTrackingId);
-      
-      const newStatus = this.pesapalService.mapPesapalStatusToEscrowStatus(statusResponse.status);
+      const statusResponse: any = await this.pesapalService.getTransactionStatus(
+        webhookData.OrderTrackingId
+      );
 
-      // Update transaction status
-      const updates: any = {
-        status: newStatus as EscrowTransactionStatus
-      };
+      // Map Pesapal status to escrow status using the FIXED mapper
+      const newStatus = this.pesapalService.mapPesapalStatusToEscrowStatus(
+        statusResponse
+      ) as EscrowTransactionStatus;
 
-      if (newStatus === 'HELD') {
-        updates.heldAt = new Date();
-        updates.readyAt = new Date(); // Ready for release
-      } else if (newStatus === 'FAILED') {
-        updates.failedAt = new Date();
-        updates.failureReason = statusResponse.message || 'Payment failed';
+      console.log(`[ESCROW] Status mapping: ${transaction.status} → ${newStatus}`);
+
+      // Only update if status has actually changed
+      if (newStatus === transaction.status) {
+        console.log('[ESCROW] Status unchanged, skipping update');
+        return;
       }
 
-      await this.updateEscrowTransaction(transaction.id, updates);
+      // Prepare update data
+      const updates: any = {
+        status: newStatus,
+        updatedAt: new Date()
+      };
 
-      // Send status notification
-      await this.sendStatusUpdateNotification(transaction, newStatus as EscrowTransactionStatus);
+      // Update specific timestamp fields based on new status
+      if (newStatus === 'HELD') {
+        updates.fundedAt = new Date();
+        console.log('[ESCROW] ✅ Payment completed - funds now in escrow');
+      } else if (newStatus === 'FAILED') {
+        updates.cancelledAt = new Date();
+        updates.cancellationReason = statusResponse.description || 
+                                      statusResponse.payment_status_description || 
+                                      'Payment failed';
+        console.log('[ESCROW] ❌ Payment failed:', updates.cancellationReason);
+      } else if (newStatus === 'REFUNDED') {
+        updates.refundedAt = new Date();
+        updates.cancellationReason = statusResponse.description || 'Payment refunded';
+        console.log('[ESCROW] 💰 Payment refunded');
+      }
 
-      console.log(`Transaction ${transaction.id} updated to status: ${newStatus}`);
+      // Ensure we have the tracking ID stored
+      if (!transaction.externalId && webhookData.OrderTrackingId) {
+        updates.externalId = webhookData.OrderTrackingId;
+        console.log('[ESCROW] Setting tracking ID:', webhookData.OrderTrackingId);
+      }
+
+      // Update transaction status in database
+      console.log('[ESCROW] Updating transaction in database...');
+      await prisma.escrowTransaction.update({
+        where: { id: transaction.id },
+        data: updates
+      });
+
+      // Transaction updated
+
+      // Update booking status if this is a booking payment
+      await this.updateBookingPaymentStatus(transaction.reference, newStatus);
+
+      // Send status notification (non-blocking)
+      this.sendStatusUpdateNotification(
+        this.transformToEscrowTransaction({ ...transaction, ...updates }),
+        newStatus
+      ).catch(err => {
+        logger.error('Failed to send notification', 'EscrowService', err);
+      });
 
     } catch (error: any) {
-      console.error('Webhook processing failed:', error);
+      logger.error('Webhook processing failed', 'EscrowService', {
+        message: error.message,
+        trackingId: webhookData.OrderTrackingId
+      });
       throw error;
     }
   }
 
-  // === RELEASE OPERATIONS ===
+  // ==================== RELEASE OPERATIONS ====================
 
-  async releaseEscrow(transactionId: string, releaseData: ReleaseEscrowDto): Promise<EscrowTransaction> {
+  async releaseEscrow(
+    transactionId: string, 
+    releaseData: ReleaseEscrowDto,
+    releasedBy?: number | string
+  ): Promise<EscrowTransaction> {
     try {
-      const transaction = await this.getEscrowTransactionById(transactionId);
+      console.log(`[ESCROW] Releasing escrow: ${transactionId}`);
+
+      const transaction: any = await prisma.escrowTransaction.findUnique({
+        where: { id: transactionId },
+        include: {
+          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+        }
+      });
 
       if (!transaction) {
         throw new Error('Transaction not found');
       }
 
-      if (transaction.status !== 'READY' && transaction.status !== 'HELD') {
-        throw new Error(`Cannot release transaction with status: ${transaction.status}`);
+      if (transaction.status !== 'HELD') {
+        throw new Error(
+          `Cannot release transaction with status: ${transaction.status}. Transaction must be in HELD status.`
+        );
       }
 
+      const metadata = JSON.parse(transaction.metadata || '{}');
+      const splitRules = metadata.splitRules || config.escrow.defaultSplitRules;
+
       // Calculate split amounts
-      const splitAmounts = this.calculateSplitAmounts(transaction.amount, transaction.splitRules);
+      const splitAmounts = this.calculateSplitAmounts(transaction.amount, splitRules);
+
+      console.log('[ESCROW] Split amounts:', splitAmounts);
 
       // Update wallets
       await this.updateWalletsOnRelease(transaction, splitAmounts);
 
-      // Update transaction status
-      const updatedTransaction = await this.updateEscrowTransaction(transactionId, {
-        status: 'RELEASED',
-        releasedAt: new Date(),
-        splitAmounts
+      // Convert releasedBy to number if provided
+      const releasedByNum = releasedBy ? this.parseUserId(releasedBy) : transaction.userId;
+
+      // Update transaction
+      const updatedTransaction = await prisma.escrowTransaction.update({
+        where: { id: transactionId },
+        data: {
+          status: 'RELEASED',
+          releasedAt: new Date(),
+          releasedBy: releasedByNum,
+          releaseReason: releaseData.releaseReason,
+          metadata: JSON.stringify({
+            ...metadata,
+            splitAmounts
+          })
+        },
+        include: {
+          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+        }
       });
 
-      // Send release notifications
-      await this.sendReleaseNotification(updatedTransaction);
+      console.log(`[ESCROW] ✅ Escrow released successfully: ${transactionId}`);
 
-      return updatedTransaction;
+      // Send notification
+      await this.sendReleaseNotification(
+        this.transformToEscrowTransaction(updatedTransaction)
+      );
+
+      return this.transformToEscrowTransaction(updatedTransaction);
 
     } catch (error: any) {
-      console.error('Release escrow failed:', error);
-      throw new Error(error.message || 'Failed to release escrow');
+      logger.error('Release failed', 'EscrowService', error);
+      throw this.handleError(error, 'RELEASE_FAILED');
     }
   }
 
-  // === WITHDRAWAL OPERATIONS ===
+  // ==================== WITHDRAWAL OPERATIONS ====================
 
-  async createWithdrawal(userId: number, withdrawData: WithdrawDto): Promise<WithdrawalRequest> {
+  async createWithdrawal(userId: number | string, withdrawData: WithdrawDto): Promise<WithdrawalRequest> {
     try {
-      // Check user wallet balance
-      const wallet = await this.getUserWallet(userId);
+      const userIdNum = this.parseUserId(userId);
+      
+      console.log(`[ESCROW] Creating withdrawal for user ${userIdNum}`, {
+        amount: withdrawData.amount,
+        method: withdrawData.method
+      });
+
+      // Check wallet balance
+      const wallet = await this.getUserWallet(userIdNum);
       
       if (wallet.balance < withdrawData.amount) {
-        throw new Error('Insufficient wallet balance');
+        throw new Error(
+          `Insufficient balance. Available: ${wallet.balance} ${wallet.currency}, Requested: ${withdrawData.amount}`
+        );
       }
-
-      // Validate withdrawal limits
-      await this.validateEscrowLimits(userId, 'WITHDRAWAL', withdrawData.amount);
 
       // Validate destination
       await this.validateWithdrawalDestination(withdrawData);
 
+      // ✅ Generate unique reference server-side
+      const withdrawalReference = this.pesapalService.generateMerchantReference('WTD');
+
       // Create withdrawal request
-      const withdrawalRequest = await this.createWithdrawalRequest({
-        userId,
-        amount: withdrawData.amount,
-        currency: wallet.currency,
-        method: withdrawData.method,
-        destination: withdrawData.destination,
-        reference: withdrawData.reference,
-        status: 'PENDING'
+      const withdrawal = await prisma.withdrawalRequest.create({
+        data: {
+          userId: userIdNum,
+          amount: withdrawData.amount,
+          currency: wallet.currency,
+          method: withdrawData.method,
+          destination: JSON.stringify(withdrawData.destination),
+          status: 'PENDING',
+          reference: withdrawalReference  // ✅ Use generated reference
+        }
       });
 
-      // Deduct from wallet (hold the amount)
-      await this.updateWalletBalance(userId, -withdrawData.amount, 'WITHDRAWAL_HOLD', withdrawalRequest.id);
 
-      // Create Pesapal payout request
-      const payoutRequest = this.buildPayoutRequest(withdrawalRequest, withdrawData);
+      // Deduct from wallet (hold amount)
+      await this.updateWalletBalance(
+        userIdNum,
+        -withdrawData.amount,
+        'WITHDRAWAL_HOLD',
+        withdrawal.id
+      );
+
+      // Create Pesapal payout
+      const payoutRequest = this.buildPayoutRequest(withdrawal, withdrawData);
       const payoutResponse = await this.pesapalService.createPayout(payoutRequest);
 
       // Update withdrawal with Pesapal details
-      const updatedWithdrawal = await this.updateWithdrawalRequest(withdrawalRequest.id, {
-        status: 'PROCESSING',
-        pesapalPayoutId: payoutResponse.requestId
+      const updatedWithdrawal = await prisma.withdrawalRequest.update({
+        where: { id: withdrawal.id },
+        data: {
+          status: 'PROCESSING',
+          pesapalPayoutId: payoutResponse.requestId
+        }
       });
 
-      // Send withdrawal notification
-      await this.sendWithdrawalNotification(updatedWithdrawal);
+      console.log(`[ESCROW] ✅ Withdrawal created: ${withdrawal.id}`);
 
-      return updatedWithdrawal;
+      // Send notification
+      await this.sendWithdrawalNotification(
+        this.transformWithdrawalRequest(updatedWithdrawal)
+      );
+
+      return this.transformWithdrawalRequest(updatedWithdrawal);
 
     } catch (error: any) {
-      console.error('Create withdrawal failed:', error);
-      throw new Error(error.message || 'Failed to create withdrawal');
+      logger.error('Withdrawal creation failed', 'EscrowService', error);
+      throw this.handleError(error, 'WITHDRAWAL_FAILED');
     }
   }
 
-  // === REFUND OPERATIONS ===
+  // ==================== REFUND OPERATIONS ====================
 
   async processRefund(refundData: RefundDto): Promise<EscrowTransaction> {
     try {
-      const transaction = await this.getEscrowTransactionById(refundData.transactionId);
+      console.log(`[ESCROW] Processing refund for: ${refundData.transactionId}`);
+
+      const transaction = await prisma.escrowTransaction.findUnique({
+        where: { id: refundData.transactionId },
+        include: {
+          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+        }
+      });
 
       if (!transaction) {
         throw new Error('Transaction not found');
       }
 
-      if (!['HELD', 'READY'].includes(transaction.status)) {
-        throw new Error(`Cannot refund transaction with status: ${transaction.status}`);
+      if (!['HELD', 'PENDING'].includes(transaction.status)) {
+        throw new Error(
+          `Cannot refund transaction with status: ${transaction.status}. Only HELD or PENDING transactions can be refunded.`
+        );
       }
 
-      if (!transaction.pesapalTrackingId) {
+      if (!transaction.externalId) {
         throw new Error('No Pesapal tracking ID found for refund');
       }
 
@@ -266,84 +732,95 @@ export class EscrowService {
 
       // Process refund with Pesapal
       await this.pesapalService.processRefund(
-        transaction.pesapalTrackingId, 
+        transaction.externalId,
         refundAmount
       );
 
       // Update transaction
-      const updatedTransaction = await this.updateEscrowTransaction(refundData.transactionId, {
-        status: 'REFUNDED',
-        refundedAt: new Date(),
-        failureReason: refundData.reason
+      const updatedTransaction = await prisma.escrowTransaction.update({
+        where: { id: refundData.transactionId },
+        data: {
+          status: 'REFUNDED',
+          refundedAt: new Date(),
+          cancellationReason: refundData.reason
+        },
+        include: {
+          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+        }
       });
 
-      // Send refund notification
-      await this.sendRefundNotification(updatedTransaction, refundAmount);
+      console.log(`[ESCROW] ✅ Refund processed: ${refundData.transactionId}`);
 
-      return updatedTransaction;
+      // Send notification
+      await this.sendRefundNotification(
+        this.transformToEscrowTransaction(updatedTransaction),
+        refundAmount
+      );
+
+      return this.transformToEscrowTransaction(updatedTransaction);
 
     } catch (error: any) {
-      console.error('Process refund failed:', error);
-      throw new Error(error.message || 'Failed to process refund');
+      logger.error('Refund processing failed', 'EscrowService', error);
+      throw this.handleError(error, 'REFUND_FAILED');
     }
   }
 
-  // === QUERY OPERATIONS ===
+  // ==================== QUERY OPERATIONS ====================
 
   async getEscrowTransactionById(id: string): Promise<EscrowTransaction> {
     const transaction = await prisma.escrowTransaction.findUnique({
       where: { id },
       include: {
-        user: {
-          select: { id: true, email: true, firstName: true, lastName: true }
-        },
-        recipient: {
-          select: { id: true, email: true, firstName: true, lastName: true }
-        }
+        user: { select: { id: true, email: true, firstName: true, lastName: true } },
+        recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
       }
     });
 
     if (!transaction) {
-      throw new Error('Transaction not found');
+      throw new Error(`Transaction not found: ${id}`);
     }
 
     return this.transformToEscrowTransaction(transaction);
   }
 
   async getUserEscrowTransactions(
-    userId: number,
-    status?: EscrowTransactionStatus,
-    type?: EscrowTransactionType,
-    page: number = 1,
-    limit: number = 20
+    userId: number | string,
+    options: {
+      status?: EscrowTransactionStatus;
+      type?: EscrowTransactionType;
+      page?: number;
+      limit?: number;
+      startDate?: Date;
+      endDate?: Date;
+    } = {}
   ) {
+    const userIdNum = this.parseUserId(userId);
+    const { status, type, page = 1, limit = 20, startDate, endDate } = options;
     const skip = (page - 1) * limit;
     
     const whereClause: any = {
       OR: [
-        { userId },
-        { recipientId: userId }
+        { userId: userIdNum },
+        { recipientId: userIdNum }
       ]
     };
 
-    if (status) {
-      whereClause.status = status;
-    }
-
-    if (type) {
-      whereClause.type = type;
+    if (status) whereClause.status = status;
+    if (type) whereClause.type = type;
+    
+    if (startDate || endDate) {
+      whereClause.createdAt = {};
+      if (startDate) whereClause.createdAt.gte = startDate;
+      if (endDate) whereClause.createdAt.lte = endDate;
     }
 
     const [transactions, total] = await Promise.all([
       prisma.escrowTransaction.findMany({
         where: whereClause,
         include: {
-          user: {
-            select: { id: true, email: true, firstName: true, lastName: true }
-          },
-          recipient: {
-            select: { id: true, email: true, firstName: true, lastName: true }
-          }
+          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -363,17 +840,19 @@ export class EscrowService {
     };
   }
 
-  async getUserWallet(userId: number): Promise<UserWallet> {
+  async getUserWallet(userId: number | string): Promise<UserWallet> {
+    const userIdNum = this.parseUserId(userId);
+    
     let wallet = await prisma.wallet.findUnique({
-      where: { userId }
+      where: { userId: userIdNum }
     });
 
     if (!wallet) {
       wallet = await prisma.wallet.create({
         data: {
-          userId,
+          userId: userIdNum,
           balance: 0,
-          currency: 'RWF', // Default currency
+          currency: config.escrow.defaultCurrency,
           isActive: true
         }
       });
@@ -390,72 +869,228 @@ export class EscrowService {
     };
   }
 
-  // === HELPER METHODS ===
+  // ==================== ADMIN OPERATIONS ====================
 
-  private async createEscrowTransaction(data: {
-    guestId: number;
-    hostId: number;
-    agentId?: number;
-    type: EscrowTransactionType;
-    status: EscrowTransactionStatus;
-    amount: number;
-    currency: string;
-    reference: string;
-    description?: string;
-    splitRules: SplitRules;
-    billingInfo?: any;
-  }): Promise<EscrowTransaction> {
-    const transaction = await prisma.escrowTransaction.create({
-      data: {
-        userId: data.guestId,
-        recipientId: data.hostId,
-        type: data.type,
-        status: data.status,
-        amount: data.amount,
-        currency: data.currency,
-        reference: data.reference,
-        description: data.description,
-        isP2P: false,
-        metadata: JSON.stringify({
-          splitRules: data.splitRules,
-          agentId: data.agentId,
-          billingInfo: data.billingInfo
-        })
-      }
-    });
+  async getAllTransactions(options: {
+    status?: EscrowTransactionStatus;
+    type?: EscrowTransactionType;
+    page?: number;
+    limit?: number;
+    search?: string;
+  } = {}) {
+    const { status, type, page = 1, limit = 50, search } = options;
+    const skip = (page - 1) * limit;
+    
+    const whereClause: any = {};
+    if (status) whereClause.status = status;
+    if (type) whereClause.type = type;
+    
+    if (search) {
+      whereClause.OR = [
+        { reference: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { user: { email: { contains: search, mode: 'insensitive' } } }
+      ];
+    }
 
-    return this.transformToEscrowTransaction(transaction);
+    const [transactions, total] = await Promise.all([
+      prisma.escrowTransaction.findMany({
+        where: whereClause,
+        include: {
+          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit
+      }),
+      prisma.escrowTransaction.count({ where: whereClause })
+    ]);
+
+    return {
+      transactions: transactions.map(t => this.transformToEscrowTransaction(t)),
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) }
+    };
   }
 
-  private async updateEscrowTransaction(id: string, updates: any): Promise<EscrowTransaction> {
-    const transaction = await prisma.escrowTransaction.update({
-      where: { id },
-      data: {
-        ...updates,
-        updatedAt: new Date()
-      },
-      include: {
-        user: {
-          select: { id: true, email: true, firstName: true, lastName: true }
-        },
-        recipient: {
-          select: { id: true, email: true, firstName: true, lastName: true }
-        }
-      }
-    });
+  async getTransactionStats(userId?: number | string) {
+    const whereClause: any = userId ? {
+      OR: [
+        { userId: this.parseUserId(userId) }, 
+        { recipientId: this.parseUserId(userId) }
+      ]
+    } : {};
 
-    return this.transformToEscrowTransaction(transaction);
+    const [totalTransactions, totalVolume, statusBreakdown] = await Promise.all([
+      prisma.escrowTransaction.count({ where: whereClause }),
+      prisma.escrowTransaction.aggregate({
+        where: whereClause,
+        _sum: { amount: true }
+      }),
+      prisma.escrowTransaction.groupBy({
+        by: ['status'],
+        where: whereClause,
+        _count: true
+      })
+    ]);
+
+    return {
+      totalTransactions,
+      totalVolume: totalVolume._sum.amount || 0,
+      byStatus: statusBreakdown.reduce((acc, item) => {
+        acc[item.status] = item._count;
+        return acc;
+      }, {} as Record<string, number>)
+    };
+  }
+
+  // ==================== HELPER METHODS ====================
+
+  /**
+   * Update booking payment status when escrow transaction status changes
+   * @param transactionReference - The transaction reference (links to booking.transactionId)
+   * @param escrowStatus - The new escrow transaction status
+   */
+  private async updateBookingPaymentStatus(
+    transactionReference: string,
+    escrowStatus: EscrowTransactionStatus
+  ): Promise<void> {
+    try {
+      // Check if this is a booking payment (reference starts with "BOOKING-")
+      if (!transactionReference.startsWith('BOOKING-')) {
+        return; // Not a booking payment, skip
+      }
+
+      // Find booking by transaction reference
+      const booking = await prisma.booking.findFirst({
+        where: { transactionId: transactionReference }
+      });
+
+      if (!booking) {
+        logger.warn('Booking not found for transaction', 'EscrowService', { transactionReference });
+        return;
+      }
+
+      // Fetch full booking details with property and guest info for notifications
+      const fullBooking = await prisma.booking.findUnique({
+        where: { id: booking.id },
+        include: {
+          property: { select: { name: true } },
+          guest: { select: { email: true, firstName: true, lastName: true } }
+        }
+      });
+
+      if (!fullBooking) return;
+
+      // Map escrow status to booking payment status
+      let bookingPaymentStatus = booking.paymentStatus;
+      let bookingStatus = booking.status;
+
+      if (escrowStatus === 'HELD') {
+        bookingPaymentStatus = 'completed';
+        // Also confirm booking if it was pending
+        if (bookingStatus === 'pending') {
+          bookingStatus = 'confirmed';
+        }
+        logger.info('Payment completed - booking confirmed', 'EscrowService', {
+          bookingId: booking.id,
+          transactionReference
+        });
+
+        // Send booking confirmation email (show USD amount as that's what bookings are stored in)
+        this.emailService.sendBookingPaymentConfirmationEmail({
+          userEmail: fullBooking.guest.email,
+          userName: fullBooking.guest.firstName || 'Guest',
+          bookingId: booking.id,
+          propertyName: fullBooking.property.name,
+          amount: booking.totalPrice,
+          currency: 'USD', // Bookings are stored in USD
+          checkIn: fullBooking.checkIn,
+          checkOut: fullBooking.checkOut,
+          reference: transactionReference
+        }).catch(err => logger.error('Failed to send booking confirmation email', 'EscrowService', err));
+
+      } else if (escrowStatus === 'FAILED') {
+        bookingPaymentStatus = 'failed';
+        logger.info('Payment failed - booking payment marked as failed', 'EscrowService', {
+          bookingId: booking.id
+        });
+
+        // Send payment failed email
+        this.emailService.sendBookingPaymentStatusEmail({
+          userEmail: fullBooking.guest.email,
+          userName: fullBooking.guest.firstName || 'Guest',
+          bookingId: booking.id,
+          propertyName: fullBooking.property.name,
+          amount: booking.totalPrice,
+          status: 'failed',
+          reference: transactionReference
+        }).catch(err => logger.error('Failed to send payment failed email', 'EscrowService', err));
+
+      } else if (escrowStatus === 'REFUNDED') {
+        bookingPaymentStatus = 'refunded';
+        logger.info('Payment refunded', 'EscrowService', {
+          bookingId: booking.id
+        });
+
+        // Send refund notification
+        this.emailService.sendBookingPaymentStatusEmail({
+          userEmail: fullBooking.guest.email,
+          userName: fullBooking.guest.firstName || 'Guest',
+          bookingId: booking.id,
+          propertyName: fullBooking.property.name,
+          amount: booking.totalPrice,
+          status: 'refunded',
+          reference: transactionReference
+        }).catch(err => logger.error('Failed to send refund email', 'EscrowService', err));
+
+      } else if (escrowStatus === 'PENDING') {
+        bookingPaymentStatus = 'pending';
+      }
+
+      // Update booking
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: {
+          paymentStatus: bookingPaymentStatus,
+          status: bookingStatus
+        }
+      });
+
+      logger.info('Booking status updated', 'EscrowService', {
+        bookingId: booking.id,
+        paymentStatus: bookingPaymentStatus,
+        bookingStatus
+      });
+
+    } catch (error: any) {
+      logger.error('Failed to update booking payment status', 'EscrowService', error);
+      // Don't throw - this is a non-critical operation
+    }
+  }
+
+  private validateAmount(amount: number, currency: string): void {
+    const min = config.escrow.minTransactionAmount;
+    const max = config.escrow.maxTransactionAmount;
+
+    if (amount < min) {
+      throw new Error(`Amount must be at least ${min} ${currency}`);
+    }
+
+    if (amount > max) {
+      throw new Error(`Amount cannot exceed ${max} ${currency}`);
+    }
   }
 
   private validateSplitRules(rules: SplitRules): void {
     const total = rules.host + rules.agent + rules.platform;
     
     if (Math.abs(total - 100) > 0.01) {
-      throw new Error('Split rules must total 100%');
+      throw new Error(`Split rules must total 100%. Current total: ${total}%`);
     }
 
     if (rules.host < 0 || rules.agent < 0 || rules.platform < 0) {
-      throw new Error('Split percentages must be positive');
+      throw new Error('Split percentages cannot be negative');
     }
   }
 
@@ -467,53 +1102,53 @@ export class EscrowService {
     };
   }
 
-  private async updateWalletsOnRelease(transaction: EscrowTransaction, splitAmounts: any): Promise<void> {
+  private async updateWalletsOnRelease(transaction: any, splitAmounts: any): Promise<void> {
     const metadata = JSON.parse(transaction.metadata || '{}');
     
-    // Update host wallet
+    // Host wallet
     await this.updateWalletBalance(
-      transaction.hostId, 
-      splitAmounts.host, 
-      'ESCROW_RELEASE', 
+      transaction.recipientId,
+      splitAmounts.host,
+      'ESCROW_RELEASE',
       transaction.reference
     );
 
-    // Update agent wallet if exists
+    // Agent wallet (if exists)
     if (metadata.agentId && splitAmounts.agent > 0) {
       await this.updateWalletBalance(
-        metadata.agentId, 
-        splitAmounts.agent, 
-        'ESCROW_RELEASE', 
+        metadata.agentId,
+        splitAmounts.agent,
+        'ESCROW_RELEASE',
         transaction.reference
       );
     }
 
-    // Platform fee goes to platform wallet (user ID 1 or dedicated platform account)
+    // Platform fee
     if (splitAmounts.platform > 0) {
       await this.updateWalletBalance(
-        1, // Platform user ID
-        splitAmounts.platform, 
-        'PLATFORM_FEE', 
+        1, // Platform account
+        splitAmounts.platform,
+        'PLATFORM_FEE',
         transaction.reference
       );
     }
   }
 
   private async updateWalletBalance(
-    userId: number, 
-    amount: number, 
-    type: string, 
+    userId: number | string,
+    amount: number,
+    type: string,
     reference: string
   ): Promise<void> {
-    const wallet = await this.getUserWallet(userId);
+    const userIdNum = this.parseUserId(userId);
+    const wallet = await this.getUserWallet(userIdNum);
     const newBalance = wallet.balance + amount;
 
     await prisma.wallet.update({
-      where: { userId },
+      where: { userId: userIdNum },
       data: { balance: newBalance }
     });
 
-    // Create wallet transaction record
     await prisma.walletTransaction.create({
       data: {
         walletId: wallet.id,
@@ -527,58 +1162,44 @@ export class EscrowService {
     });
   }
 
-  private async validateEscrowLimits(
-    userId: number, 
-    type: EscrowTransactionType, 
-    amount: number
-  ): Promise<void> {
-    // Implementation would check user-specific limits
-    // For now, basic validation
-    if (amount < 100) { // Min 100 RWF
-      throw new Error('Minimum amount is 100 RWF');
-    }
-
-    if (amount > 1000000) { // Max 1M RWF
-      throw new Error('Maximum amount is 1,000,000 RWF');
-    }
-  }
-
   private async validateWithdrawalDestination(withdrawData: WithdrawDto): Promise<void> {
     if (withdrawData.method === 'MOBILE') {
-      const validation = this.pesapalService.validateMobileNumber(
-        withdrawData.destination.accountNumber,
-        withdrawData.destination.countryCode
+      const validation = PhoneUtils.validateRwandaPhone(
+        withdrawData.destination.accountNumber
       );
-      
+
       if (!validation.isValid) {
-        throw new Error(validation.errors?.[0] || 'Invalid mobile number');
+        throw new Error(validation.error || 'Invalid mobile number');
       }
     } else if (withdrawData.method === 'BANK') {
       const validation = this.pesapalService.validateBankAccount(
         withdrawData.destination.accountNumber,
         withdrawData.destination.bankCode || ''
       );
-      
+
       if (!validation.isValid) {
         throw new Error(validation.errors?.[0] || 'Invalid bank account');
       }
     }
   }
 
-  private buildPayoutRequest(withdrawal: WithdrawalRequest, withdrawData: WithdrawDto): PesapalPayoutRequest {
-    const destinationType = withdrawData.method;
-    
-    const request: PesapalPayoutRequest = {
+  private buildPayoutRequest(
+    withdrawal: any,
+    withdrawData: WithdrawDto
+  ): PesapalPayoutRequest {
+    return {
       source_type: 'MERCHANT',
       source: {
-        account_number: process.env.PESAPAL_MERCHANT_ACCOUNT!
+        account_number: config.pesapal.merchantAccount
       },
-      destination_type: destinationType,
+      destination_type: withdrawData.method,
       destination: {
-        type: destinationType,
+        type: withdrawData.method,
         country_code: withdrawData.destination.countryCode || 'RW',
         holder_name: withdrawData.destination.holderName,
-        account_number: withdrawData.destination.accountNumber
+        account_number: withdrawData.destination.accountNumber,
+        mobile_provider: withdrawData.destination.mobileProvider,
+        bank_code: withdrawData.destination.bankCode
       },
       transfer_details: {
         amount: this.pesapalService.formatAmount(withdrawData.amount),
@@ -588,77 +1209,13 @@ export class EscrowService {
         reference: withdrawData.reference
       }
     };
-
-    if (destinationType === 'MOBILE' && withdrawData.destination.mobileProvider) {
-      request.destination.mobile_provider = withdrawData.destination.mobileProvider;
-    }
-
-    if (destinationType === 'BANK' && withdrawData.destination.bankCode) {
-      request.destination.bank_code = withdrawData.destination.bankCode;
-    }
-
-    return request;
   }
 
-  private async createWithdrawalRequest(data: any): Promise<WithdrawalRequest | any> {
-    const withdrawal: any = await prisma.withdrawalRequest.create({
-      data: {
-        userId: data.userId,
-        amount: data.amount,
-        currency: data.currency,
-        method: data.method,
-        destination: JSON.stringify(data.destination),
-        status: data.status,
-        reference: data.reference
-      }
-    });
+  private async getUserById(id: number | string): Promise<EscrowParticipant> {
+    const idNum = this.parseUserId(id);
 
-    return {
-      id: withdrawal.id,
-      userId: withdrawal.userId,
-      amount: withdrawal.amount,
-      currency: withdrawal.currency,
-      method: withdrawal.method as PayoutMethod,
-      destination: JSON.parse(withdrawal.destination),
-      status: withdrawal.status as any,
-      pesapalPayoutId: withdrawal.pesapalPayoutId,
-      reference: withdrawal.reference,
-      failureReason: withdrawal.failureReason,
-      createdAt: withdrawal.createdAt,
-      updatedAt: withdrawal.updatedAt,
-      completedAt: withdrawal.completedAt
-    };
-  }
-
-  private async updateWithdrawalRequest(id: string, updates: any): Promise<WithdrawalRequest> {
-    const withdrawal: any = await prisma.withdrawalRequest.update({
-      where: { id },
-      data: {
-        ...updates,
-        updatedAt: new Date()
-      }
-    });
-
-    return {
-      id: withdrawal.id,
-      userId: withdrawal.userId,
-      amount: withdrawal.amount,
-      currency: withdrawal.currency,
-      method: withdrawal.method as PayoutMethod,
-      destination: JSON.parse(withdrawal.destination),
-      status: withdrawal.status as any,
-      pesapalPayoutId: withdrawal.pesapalPayoutId,
-      reference: withdrawal.reference,
-      failureReason: withdrawal.failureReason,
-      createdAt: withdrawal.createdAt,
-      updatedAt: withdrawal.updatedAt,
-      completedAt: withdrawal.completedAt
-    };
-  }
-
-  private async getUserById(id: number): Promise<EscrowParticipant> {
-    const user: any = await prisma.user.findUnique({
-      where: { id },
+    const user = await prisma.user.findUnique({
+      where: { id: idNum },
       select: {
         id: true,
         email: true,
@@ -674,28 +1231,12 @@ export class EscrowService {
 
     return {
       id: user.id,
-      role: 'GUEST', // Default role, would be determined by context
+      role: 'GUEST',
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
       phone: user.phone
     };
-  }
-
-  private async findTransactionByTrackingId(trackingId: string): Promise<EscrowTransaction | null> {
-    const transaction = await prisma.escrowTransaction.findFirst({
-      where: { externalId: trackingId },
-      include: {
-        user: {
-          select: { id: true, email: true, firstName: true, lastName: true }
-        },
-        recipient: {
-          select: { id: true, email: true, firstName: true, lastName: true }
-        }
-      }
-    });
-
-    return transaction ? this.transformToEscrowTransaction(transaction) : null;
   }
 
   private transformToEscrowTransaction(transaction: any): EscrowTransaction {
@@ -714,16 +1255,15 @@ export class EscrowService {
       description: transaction.description,
       pesapalOrderId: transaction.escrowId,
       pesapalTrackingId: transaction.externalId,
-      pesapalPayoutId: transaction.jengaTransactionId, // Reusing field
-      splitRules: metadata.splitRules || { host: 70, agent: 20, platform: 10 },
+      splitRules: metadata.splitRules || config.escrow.defaultSplitRules,
       splitAmounts: metadata.splitAmounts,
       heldAt: transaction.fundedAt,
       readyAt: transaction.fundedAt,
       releasedAt: transaction.releasedAt,
       refundedAt: transaction.refundedAt,
-      failedAt: transaction.resolvedAt, // Reusing field
+      failedAt: transaction.cancelledAt,
       billingInfo: metadata.billingInfo,
-      failureReason: transaction.disputeReason,
+      failureReason: transaction.cancellationReason,
       createdAt: transaction.createdAt,
       updatedAt: transaction.updatedAt,
       guest: transaction.user ? {
@@ -743,9 +1283,38 @@ export class EscrowService {
     };
   }
 
-  // === NOTIFICATION METHODS ===
+  private transformWithdrawalRequest(withdrawal: any): WithdrawalRequest {
+    return {
+      id: withdrawal.id,
+      userId: withdrawal.userId,
+      amount: withdrawal.amount,
+      currency: withdrawal.currency,
+      method: withdrawal.method as PayoutMethod,
+      destination: JSON.parse(withdrawal.destination),
+      status: withdrawal.status,
+      pesapalPayoutId: withdrawal.pesapalPayoutId,
+      reference: withdrawal.reference,
+      failureReason: withdrawal.failureReason,
+      createdAt: withdrawal.createdAt,
+      updatedAt: withdrawal.updatedAt,
+      completedAt: withdrawal.completedAt
+    };
+  }
 
-  private async sendDepositNotification(transaction: EscrowTransaction, checkoutUrl: string): Promise<void> {
+  private handleError(error: any, code: string): Error {
+    const message = error.message || 'An unexpected error occurred';
+    const enhancedError = new Error(message);
+    (enhancedError as any).code = code;
+    (enhancedError as any).originalError = error;
+    return enhancedError;
+  }
+
+  // ==================== NOTIFICATION METHODS ====================
+
+  private async sendDepositNotification(
+    transaction: EscrowTransaction,
+    checkoutUrl: string
+  ): Promise<void> {
     try {
       if (transaction.guest) {
         await this.emailService.sendDepositCreatedEmail({
@@ -755,11 +1324,14 @@ export class EscrowService {
         });
       }
     } catch (error) {
-      console.error('Failed to send deposit notification:', error);
+      logger.error('Notification failed', 'EscrowService', error);
     }
   }
 
-  private async sendStatusUpdateNotification(transaction: EscrowTransaction, status: EscrowTransactionStatus): Promise<void> {
+  private async sendStatusUpdateNotification(
+    transaction: EscrowTransaction,
+    status: EscrowTransactionStatus
+  ): Promise<void> {
     try {
       if (transaction.guest) {
         await this.emailService.sendTransactionStatusEmail({
@@ -769,13 +1341,12 @@ export class EscrowService {
         });
       }
     } catch (error) {
-      console.error('Failed to send status update notification:', error);
+      logger.error('Notification failed', 'EscrowService', error);
     }
   }
 
   private async sendReleaseNotification(transaction: EscrowTransaction): Promise<void> {
     try {
-      // Notify host
       if (transaction.host) {
         await this.emailService.sendFundsReleasedEmail({
           user: transaction.host,
@@ -783,7 +1354,7 @@ export class EscrowService {
         });
       }
     } catch (error) {
-      console.error('Failed to send release notification:', error);
+      logger.error('Notification failed', 'EscrowService', error);
     }
   }
 
@@ -795,11 +1366,14 @@ export class EscrowService {
         withdrawal
       });
     } catch (error) {
-      console.error('Failed to send withdrawal notification:', error);
+      logger.error('Notification failed', 'EscrowService', error);
     }
   }
 
-  private async sendRefundNotification(transaction: EscrowTransaction, amount: number): Promise<void> {
+  private async sendRefundNotification(
+    transaction: EscrowTransaction,
+    amount: number
+  ): Promise<void> {
     try {
       if (transaction.guest) {
         await this.emailService.sendRefundProcessedEmail({
@@ -809,7 +1383,47 @@ export class EscrowService {
         });
       }
     } catch (error) {
-      console.error('Failed to send refund notification:', error);
+      logger.error('Notification failed', 'EscrowService', error);
+    }
+  }
+
+  // ==================== HEALTH CHECK ====================
+
+  async checkPaymentSystemHealth(): Promise<{
+    healthy: boolean;
+    pesapalStatus: string;
+    databaseStatus: string;
+    message?: string;
+  }> {
+    try {
+      // Check Pesapal connection
+      const pesapalHealthy = await this.pesapalService.healthCheck();
+      
+      // Check database connection
+      let databaseHealthy = false;
+      try {
+        await prisma.$queryRaw`SELECT 1`;
+        databaseHealthy = true;
+      } catch (dbError) {
+        logger.error('Database health check failed', 'EscrowService', dbError);
+      }
+
+      const healthy = pesapalHealthy && databaseHealthy;
+
+      return {
+        healthy,
+        pesapalStatus: pesapalHealthy ? 'connected' : 'disconnected',
+        databaseStatus: databaseHealthy ? 'connected' : 'disconnected',
+        message: healthy ? 'All systems operational' : 'Some systems are experiencing issues'
+      };
+    } catch (error: any) {
+      logger.error('Health check error', 'EscrowService', error);
+      return {
+        healthy: false,
+        pesapalStatus: 'unknown',
+        databaseStatus: 'unknown',
+        message: error.message
+      };
     }
   }
 }

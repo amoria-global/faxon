@@ -1,18 +1,21 @@
+// Enhanced Property Routes with Transaction Monitoring
 import { Router } from 'express';
 import { PropertyController } from '../controllers/property.controller';
+import { EnhancedPropertyController } from '../controllers/enhanced-property.controller';
 import { authenticate } from '../middleware/auth.middleware';
-import { 
-  validateProperty, 
-  validateBookingUpdate, 
+import {
+  validateProperty,
+  validateBookingUpdate,
   validateHost,
   validateAgent,
   validateAgentPropertyAccess,
-  validateAgentPropertyEdit, 
-  validateAgentAsHost
+  validateAgentPropertyEdit
+  // validateAgentAsHost - REMOVED: Agents can no longer own properties
 } from '../middleware/property.middleware';
 
 const router = Router();
 const propertyController = new PropertyController();
+const enhancedPropertyController = new EnhancedPropertyController();
 
 // --- PUBLIC PROPERTY ROUTES ---
 // Search and browse properties
@@ -49,9 +52,43 @@ router.post('/:id/block-dates', validateHost, propertyController.blockPropertyDa
 // Host property pricing management
 router.patch('/:id/pricing', validateHost, propertyController.updatePropertyPricing);
 
-// --- AGENT PROPERTY MANAGEMENT (Limited Access) ---
-// Agent dashboard and overview
-router.get('/agent/dashboard', validateAgent, propertyController.getAgentDashboard);
+// --- ENHANCED AGENT DASHBOARD WITH TRANSACTION MONITORING ---
+// Enhanced agent dashboard with transaction data
+router.get('/agent/dashboard', validateAgent, enhancedPropertyController.getAgentDashboard);
+router.get('/agent/dashboard/enhanced', validateAgent, enhancedPropertyController.getAgentDashboard);
+
+// --- AGENT TRANSACTION MONITORING ROUTES ---
+// Transaction monitoring dashboard
+router.get('/agent/transactions/monitoring', validateAgent, enhancedPropertyController.getTransactionMonitoringDashboard);
+
+// Escrow transaction routes
+router.get('/agent/transactions/escrow', validateAgent, enhancedPropertyController.getAgentEscrowTransactions);
+router.get('/agent/transactions/escrow/summary', validateAgent, enhancedPropertyController.getAgentTransactionSummary);
+
+// Payment transaction routes
+router.get('/agent/transactions/payment', validateAgent, enhancedPropertyController.getAgentPaymentTransactions);
+
+// Combined transaction routes
+router.get('/agent/transactions/summary', validateAgent, enhancedPropertyController.getAgentTransactionSummary);
+router.get('/agent/transactions/analytics', validateAgent, enhancedPropertyController.getTransactionAnalytics);
+router.get('/agent/transactions/status/:transactionId', validateAgent, enhancedPropertyController.getTransactionStatus);
+
+// Commission and earnings with transaction breakdown
+router.get('/agent/earnings', validateAgent, enhancedPropertyController.getAgentEarningsWithTransactions);
+router.get('/agent/earnings/breakdown', validateAgent, propertyController.getAgentEarningsBreakdown);
+router.get('/agent/commissions/states', validateAgent, enhancedPropertyController.getAgentCommissionStates);
+router.get('/agent/commissions/monthly', validateAgent, enhancedPropertyController.getMonthlyCommissionsWithTransactions);
+
+// Withdrawal requests
+router.get('/agent/withdrawals', validateAgent, enhancedPropertyController.getAgentWithdrawalRequests);
+
+// Booking transaction data
+router.get('/agent/bookings/:bookingId/transactions', validateAgent, enhancedPropertyController.getBookingTransactionData);
+
+// Transaction export
+router.get('/agent/transactions/export', validateAgent, enhancedPropertyController.exportTransactions);
+
+// --- LEGACY AGENT PROPERTY MANAGEMENT (Enhanced with Transaction Support) ---
 router.get('/agent/properties', validateAgent, propertyController.getAgentProperties);
 router.get('/agent/properties/performance', validateAgent, propertyController.getAgentPropertyPerformance);
 
@@ -67,9 +104,12 @@ router.post('/agent/properties/:id/bookings', validateAgent, validateAgentProper
 router.get('/agent/properties/:id/analytics', validateAgent, validateAgentPropertyAccess, propertyController.getAgentPropertyAnalytics);
 router.get('/agent/properties/analytics/summary', validateAgent, propertyController.getAgentPropertiesAnalyticsSummary);
 
-// Agent earnings from client properties
-router.get('/agent/earnings', validateAgent, propertyController.getAgentEarnings);
-router.get('/agent/earnings/breakdown', validateAgent, propertyController.getAgentEarningsBreakdown);
+// Agent client relationship management
+router.post('/agent/clients/:clientId/relationship', validateAgent, propertyController.establishClientRelationship);
+router.get('/agent/clients', validateAgent, propertyController.getAgentClients);
+
+// Agent property fix endpoint (for migration)
+router.post('/agent/properties/fix-agent-id', validateAgent, propertyController.fixAgentPropertiesAgentId);
 
 // Agent client property management
 router.get('/agent/clients/:clientId/properties', validateAgent, propertyController.getClientProperties);
@@ -115,13 +155,9 @@ router.get('/agent/clients/:clientId/guests', validateAgent, propertyController.
 router.get('/host/earnings', validateHost, propertyController.getEarningsOverview);
 router.get('/host/earnings/breakdown', validateHost, propertyController.getEarningsBreakdown);
 
-// Agent earnings already defined above
-
 // --- ANALYTICS ---
 // Host analytics
 router.get('/host/analytics', validateHost, propertyController.getHostAnalytics);
-
-// Agent analytics already defined above
 
 // --- REVIEW MANAGEMENT ---
 router.post('/:id/reviews', propertyController.createReview);
@@ -129,22 +165,70 @@ router.post('/:id/reviews', propertyController.createReview);
 // Agent review management
 router.get('/agent/properties/:id/reviews', validateAgent, validateAgentPropertyAccess, propertyController.getAgentPropertyReviews);
 router.get('/agent/reviews/summary', validateAgent, propertyController.getAgentReviewsSummary);
-// Add these routes to your existing router
 
 // --- AGENT AS HOST ROUTES ---
-// Agent's own property management
-router.post('/agent/own/properties', validateAgent, validateAgentAsHost, validateProperty, propertyController.createAgentOwnProperty);
-router.get('/agent/own/properties', validateAgent, propertyController.getAgentOwnProperties);
-router.get('/agent/own/properties/:id/bookings', validateAgent, propertyController.getAgentOwnPropertyBookings);
-router.get('/agent/own/guests', validateAgent, propertyController.getAgentOwnPropertyGuests);
+// DISABLED: Agents cannot own properties, they can only manage client properties
+// router.post('/agent/own/properties', validateAgent, validateAgentAsHost, validateProperty, propertyController.createAgentOwnProperty);
+// router.get('/agent/own/properties', validateAgent, propertyController.getAgentOwnProperties);
+// router.get('/agent/own/properties/:id/bookings', validateAgent, propertyController.getAgentOwnPropertyBookings);
+// router.get('/agent/own/guests', validateAgent, propertyController.getAgentOwnPropertyGuests);
 
-// Unified agent property management
+// Unified agent property management (now only returns managed properties)
 router.get('/agent/all-properties', validateAgent, propertyController.getAllAgentProperties);
-router.get('/agent/dashboard/enhanced', validateAgent, propertyController.getEnhancedAgentDashboard);
 
-// Agent's own property editing (full access like a host)
-router.put('/agent/own/properties/:id', validateAgent, propertyController.updateProperty);
-router.delete('/agent/own/properties/:id', validateAgent, propertyController.deleteProperty);
-router.post('/agent/own/properties/:id/images', validateAgent, propertyController.uploadPropertyImages);
+// DISABLED: Agent's own property editing (agents cannot own properties)
+// router.put('/agent/own/properties/:id', validateAgent, propertyController.updateProperty);
+// router.delete('/agent/own/properties/:id', validateAgent, propertyController.deleteProperty);
+// router.post('/agent/own/properties/:id/images', validateAgent, propertyController.uploadPropertyImages);
+
+// --- ENHANCED AGENT KPI ROUTES ---
+router.get('/agent/dashboard/enhanced', validateAgent, propertyController.getEnhancedAgentDashboard);
+router.get('/agent/kpis/additional', validateAgent, propertyController.getAdditionalAgentKPIs);
+router.get('/agent/performance/trends', validateAgent, propertyController.getAgentPerformanceTrends);
+router.get('/agent/competitive/metrics', validateAgent, propertyController.getAgentCompetitiveMetrics);
+router.get('/agent/clients/segmentation', validateAgent, propertyController.getAgentClientSegmentation);
+router.get('/agent/kpis/individual/:kpi', validateAgent, propertyController.getIndividualAgentKPI);
+
+// --- REAL-TIME TRANSACTION MONITORING ROUTES ---
+// WebSocket endpoints would be handled separately, but these HTTP endpoints support real-time features
+router.get('/agent/transactions/realtime/status', validateAgent, enhancedPropertyController.getTransactionStatus);
+router.get('/agent/transactions/realtime/updates', validateAgent, enhancedPropertyController.getTransactionMonitoringDashboard);
+
+// --- TRANSACTION WEBHOOK ENDPOINTS (for Pesapal integration) ---
+// These would typically be handled by a separate webhook controller
+router.post('/webhooks/pesapal/escrow', handlePesapalEscrowWebhook);
+router.post('/webhooks/pesapal/payment', handlePesapalPaymentWebhook);
+
+// --- BULK TRANSACTION OPERATIONS ---
+router.post('/agent/transactions/bulk/export', validateAgent, enhancedPropertyController.exportTransactions);
+
+// Webhook handlers (these would be implemented separately)
+async function handlePesapalEscrowWebhook(req: any, res: any) {
+  try {
+    const { order_id, tracking_id, status, amount, currency } = req.body;
+    
+    // Update escrow transaction status
+    // This would be implemented in the enhanced property service
+    
+    res.json({ success: true, message: 'Webhook processed successfully' });
+  } catch (error) {
+    console.error('Pesapal escrow webhook error:', error);
+    res.status(500).json({ success: false, message: 'Webhook processing failed' });
+  }
+}
+
+async function handlePesapalPaymentWebhook(req: any, res: any) {
+  try {
+    const { order_id, tracking_id, status, amount, currency } = req.body;
+    
+    // Update payment transaction status
+    // This would be implemented in the enhanced property service
+    
+    res.json({ success: true, message: 'Webhook processed successfully' });
+  } catch (error) {
+    console.error('Pesapal payment webhook error:', error);
+    res.status(500).json({ success: false, message: 'Webhook processing failed' });
+  }
+}
 
 export default router;

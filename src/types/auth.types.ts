@@ -4,15 +4,19 @@ export interface RegisterDto {
   email: string;
   firstName?: string;
   lastName?: string;
-  names?: string; 
-  password?: string; 
+  names?: string;
+  password?: string;
   phone?: string;
   phoneCountryCode?: string;
-  country?: string;
-  state?: string;
-  province?: string;
+  // Granular address fields for KYC
+  district?: string;  // required for KYC
+  sector?: string;    // required for KYC
+  street?: string;    // required for KYC
+  province?: string;  // required for KYC
+  state?: string;     // required for KYC
+  country?: string;   // required for KYC
+  // Legacy city field (still available for other use cases)
   city?: string;
-  street?: string;
   zipCode?: string;
   postalCode?: string;
   postcode?: string;
@@ -35,6 +39,10 @@ export interface RegisterDto {
   verificationDocument?: string; // URL to uploaded document
   companyName?: string; // For employed tour guides
   employmentContract?: string;
+  preferredCommunication?: string; // 'email' | 'sms' | 'phone' | 'whatsapp' | 'all'
+
+  // Referral system fields
+  referralCode?: string; // Agent referral code from URL parameter
 }
 
 export interface LoginDto {
@@ -85,11 +93,15 @@ export interface UserInfo {
   phone?: string;
   phoneCountryCode?: string;
   profile?: string; // Profile image URL (profileImage in DB)
-  country?: string;
-  state?: string;
-  province?: string;
+  // Granular address fields for KYC
+  district?: string;  // required for KYC
+  sector?: string;    // required for KYC
+  street?: string;    // required for KYC
+  province?: string;  // required for KYC
+  state?: string;     // required for KYC
+  country?: string;   // required for KYC
+  // Legacy city field (still available for other use cases)
   city?: string;
-  street?: string;
   zipCode?: string;
   postalCode?: string;
   postcode?: string;
@@ -133,6 +145,13 @@ export interface UserInfo {
   kycStatus?: string;
   kycSubmittedAt?: string;
   addressDocument?: string;
+  passportPhotoUrl?: string;
+
+  // Referral system fields
+  referredBy?: number;
+  referralCode?: string;
+  referralStatus?: string;
+  referredAt?: string;
 }
 
 export interface UpdateUserProfileDto {
@@ -141,11 +160,15 @@ export interface UpdateUserProfileDto {
   lastName?: string;
   phone?: string;
   phoneCountryCode?: string;
-  country?: string;
-  state?: string;
-  province?: string;
+  // Granular address fields for KYC
+  district?: string;  // required for KYC
+  sector?: string;    // required for KYC
+  street?: string;    // required for KYC
+  province?: string;  // required for KYC
+  state?: string;     // required for KYC
+  country?: string;   // required for KYC
+  // Legacy city field (still available for other use cases)
   city?: string;
-  street?: string;
   
   // All postal code field variations
   zipCode?: string;
@@ -154,9 +177,8 @@ export interface UpdateUserProfileDto {
   pinCode?: string;
   eircode?: string;
   cep?: string;
-  
-  // ADD THESE MISSING FIELDS:
-  district?: string;
+
+  // Additional legacy fields:
   county?: string;
   region?: string;
   
@@ -343,7 +365,30 @@ export type UserStatus = string; // 'active' | 'inactive' | 'pending' | 'suspend
 export type UserType = string; // 'guest' | 'host' | 'tourguide' | 'agent' | 'admin'
 export type TourGuideType = 'freelancer' | 'employed';
 export type DocumentType = 'national_id' | 'company_tin' | 'employment_contract';
-export type AddressField = 'street' | 'city' | 'state' | 'province' | 'zipCode' | 'postalCode' | 'postcode' | 'pinCode' | 'eircode' | 'cep';
+export type AddressField = 'district' | 'sector' | 'street' | 'province' | 'state' | 'country' | 'city' | 'zipCode' | 'postalCode' | 'postcode' | 'pinCode' | 'eircode' | 'cep';
+
+// --- KYC TYPES ---
+export interface KYCPersonalDetails {
+  fullName: string;
+  dateOfBirth: string;
+  nationality: string;
+  // New granular address structure
+  district: string;    // required
+  sector: string;      // required
+  street: string;      // required
+  province: string;    // required
+  state: string;       // required
+  country: string;     // required
+  phoneNumber: string;
+  email: string;
+  documentType: string;
+}
+
+export interface KYCSubmissionDto {
+  personalDetails: KYCPersonalDetails;
+  addressDocumentUrl?: string;
+  passportPhotoUrl?: string;
+}
 
 // --- FORM STATE TYPES ---
 export interface PasswordFormState {

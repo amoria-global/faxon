@@ -42,12 +42,18 @@ export class TourService {
     this.emailService = new BrevoTourMailingService();
   }
   // --- PUBLIC TOUR OPERATIONS ---
-  
+
   async searchTours(filters: TourSearchFilters, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
-    
+
     const whereConditions: any = {
-      isActive: true
+      isActive: true,
+      // Only show tours with at least one upcoming schedule
+      schedules: {
+        some: {
+          startDate: { gte: new Date() }
+        }
+      }
     };
 
     // Build where conditions based on filters
@@ -265,7 +271,13 @@ export class TourService {
     const tours = await prisma.tour.findMany({
       where: {
         isActive: true,
-        rating: { gte: 4.0 }
+        rating: { gte: 4.0 },
+        // Only show tours with at least one upcoming schedule
+        schedules: {
+          some: {
+            startDate: { gte: new Date() }
+          }
+        }
       },
       include: {
         tourGuide: {
@@ -417,7 +429,7 @@ export class TourService {
     });
 
     const uniqueLocations = new Set<string>();
-    
+
     suggestions.forEach(tour => {
       if (tour.locationCity) {
         uniqueLocations.add(`${tour.locationCity}, ${tour.locationCountry}`);
@@ -433,7 +445,7 @@ export class TourService {
 
   async searchTourGuides(filters: TourGuideFilters, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
-    
+
     const whereConditions: any = {
       userType: 'tourguide'
     };
@@ -556,28 +568,28 @@ export class TourService {
     const scheduleExists = await prisma.tourSchedule.findUnique({
       where: { id: bookingData.scheduleId }
     });
-    
+
     console.log('Schedule exists:', scheduleExists);
-    
+
     if (!scheduleExists) {
       throw new Error(`Schedule with ID ${bookingData.scheduleId} not found`);
     }
-    
+
     // Check if it belongs to the correct tour
     if (scheduleExists.tourId !== bookingData.tourId) {
       throw new Error(`Schedule ${bookingData.scheduleId} doesn't belong to tour ${bookingData.tourId}`);
     }
-    
+
     // Check availability
     if (!scheduleExists.isAvailable) {
       throw new Error(`Schedule ${bookingData.scheduleId} is not available`);
     }
-    
+
     // Check if it's in the future
     if (scheduleExists.startDate < new Date()) {
       throw new Error(`Schedule ${bookingData.scheduleId} is in the past`);
     }
-    
+
     // Now proceed with the original query
     const schedule = await prisma.tourSchedule.findFirst({
       where: {
@@ -679,36 +691,36 @@ export class TourService {
     });
 
     try {
-    if (booking.user && booking.tour.tourGuide) {
-      const emailContext: TourMailingContext = {
-        recipient: {
-          firstName: booking.tour.tourGuide.firstName,
-          lastName: booking.tour.tourGuide.lastName,
-          email: booking.tour.tourGuide.email,
-          id: booking.tour.tourGuide.id
-        },
-        company: {
-          name: 'Jambolush Tours',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/logo.png'
-        },
-        tour: this.formatTourInfo(booking.tour), 
-        booking: this.formatTourBookingInfo(booking)
-      };
+      if (booking.user && booking.tour.tourGuide) {
+        const emailContext: TourMailingContext = {
+          recipient: {
+            firstName: booking.tour.tourGuide.firstName,
+            lastName: booking.tour.tourGuide.lastName,
+            email: booking.tour.tourGuide.email,
+            id: booking.tour.tourGuide.id
+          },
+          company: {
+            name: 'Jambolush Tours',
+            website: 'https://jambolush.com',
+            supportEmail: 'support@jambolush.com',
+            logo: 'https://jambolush.com/favicon.ico'
+          },
+          tour: this.formatTourInfo(booking.tour),
+          booking: this.formatTourBookingInfo(booking)
+        };
 
-      await this.emailService.sendNewBookingRequestEmail(emailContext);
+        await this.emailService.sendNewBookingRequestEmail(emailContext);
+      }
+    } catch (emailError) {
+      console.error('Failed to send booking request email:', emailError);
     }
-  } catch (emailError) {
-    console.error('Failed to send booking request email:', emailError);
-  }
 
     return this.formatTourBookingInfo(booking);
   }
 
   async getUserTourBookings(userId: number, filters: TourBookingFilters, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
-    
+
     const whereConditions: any = {
       userId
     };
@@ -920,7 +932,7 @@ export class TourService {
       bookingId: review.bookingId,
       userId: review.userId,
       userName: `${review.user.firstName} ${review.user.lastName}`,
-      userProfileImage: review.user.profileImage  ?? undefined,
+      userProfileImage: review.user.profileImage ?? undefined,
       tourId: review.tourId,
       tourTitle: booking.tour.title,
       tourGuideId: review.tourGuideId,
@@ -934,7 +946,7 @@ export class TourService {
       isVerified: review.isVerified,
       isVisible: review.isVisible,
       helpfulCount: review.helpfulCount,
-      response: review.response  ?? undefined,
+      response: review.response ?? undefined,
       responseDate: review.responseDate?.toISOString(),
       createdAt: review.createdAt.toISOString(),
       updatedAt: review.updatedAt.toISOString()
@@ -1006,7 +1018,7 @@ export class TourService {
 
   async getEnhancedTourGuideDashboard(tourGuideId: number): Promise<EnhancedTourGuideDashboard> {
     const baseDashboard = await this.getTourGuideDashboard(tourGuideId);
-    
+
     const [quickStats, recentActivity, alerts] = await Promise.all([
       this.getTourGuideQuickStats(tourGuideId),
       this.getTourGuideRecentActivity(tourGuideId),
@@ -1040,7 +1052,7 @@ export class TourService {
         minGroupSize: tourData.minGroupSize || 1,
         price: tourData.price,
         currency: tourData.currency || 'USD',
-        images: JSON.stringify(tourData.images),
+        images: tourData.images,
         itinerary: JSON.stringify(tourData.itinerary),
         inclusions: tourData.inclusions,
         exclusions: tourData.exclusions,
@@ -1124,7 +1136,7 @@ export class TourService {
             name: 'Jambolush Tours',
             website: 'https://jambolush.com', // Replace with your domain
             supportEmail: 'support@jambolush.com', // Replace with your email
-            logo: 'https://jambolush.com/logo.png' // Replace with your logo
+            logo: 'https://jambolush.com/favicon.ico' // Replace with your logo
           },
           tour: this.formatTourInfo(tour)
         };
@@ -1154,8 +1166,8 @@ export class TourService {
       where: { id: tourId },
       data: {
         ...updateData,
-        itinerary: updateData.itinerary ? JSON.stringify(updateData.itinerary) : undefined,
-      },
+        tourGuideId: tourGuideId,
+        itinerary: updateData.itinerary ? JSON.stringify(updateData.itinerary) : undefined},
       include: {
         tourGuide: {
           select: {
@@ -1221,7 +1233,7 @@ export class TourService {
 
   async getToursByGuide(tourGuideId: number, filters: TourSearchFilters, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
-    
+
     const whereConditions: any = {
       tourGuideId
     };
@@ -1448,7 +1460,7 @@ export class TourService {
 
   async getTourGuideBookings(tourGuideId: number, filters: TourBookingFilters, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
-    
+
     const whereConditions: any = {
       tourGuideId
     };
@@ -1603,7 +1615,7 @@ export class TourService {
 
     for (let day = 1; day <= daysInMonth; day++) {
       const currentDate = new Date(year, month - 1, day);
-      const dayBookings = bookings.filter(booking => 
+      const dayBookings = bookings.filter(booking =>
         booking.schedule.startDate.toDateString() === currentDate.toDateString()
       );
 
@@ -1617,9 +1629,9 @@ export class TourService {
           endTime: booking.schedule.endTime,
           bookedSlots: booking.numberOfParticipants,
           totalSlots: booking.schedule.availableSlots,
-          status: booking.status === 'completed' ? 'completed' as const : 
-                   booking.status === 'cancelled' ? 'cancelled' as const : 
-                   booking.schedule.bookedSlots >= booking.schedule.availableSlots ? 'fully_booked' as const : 'available' as const
+          status: booking.status === 'completed' ? 'completed' as const :
+            booking.status === 'cancelled' ? 'cancelled' as const :
+              booking.schedule.bookedSlots >= booking.schedule.availableSlots ? 'fully_booked' as const : 'available' as const
         })),
         totalBookings: dayBookings.length,
         totalRevenue: dayBookings.reduce((sum, booking) => sum + booking.totalAmount, 0),
@@ -1870,7 +1882,7 @@ export class TourService {
       totalEarnings: tour.earnings.reduce((sum, earning) => sum + earning.netAmount, 0),
       monthlyEarnings: 0, // Would calculate for current month
       bookingsCount: tour.bookings.length,
-      averageBookingValue: tour.bookings.length > 0 ? 
+      averageBookingValue: tour.bookings.length > 0 ?
         tour.bookings.reduce((sum, booking) => sum + booking.totalAmount, 0) / tour.bookings.length : 0,
       conversionRate: 0, // Would calculate
       lastBooking: tour.bookings[tour.bookings.length - 1]?.createdAt.toISOString()
@@ -1993,7 +2005,7 @@ export class TourService {
       receiverName: `${message.receiver.firstName} ${message.receiver.lastName}`,
       bookingId: message.bookingId ?? undefined,
       tourId: message.tourId ?? undefined,
-      subject: message.subject  ?? undefined,
+      subject: message.subject ?? undefined,
       message: message.message,
       attachments: message.attachments as string[],
       messageType: message.messageType as any,
@@ -2070,7 +2082,7 @@ export class TourService {
   async getAllTours(filters: TourSearchFilters, page: number = 1, limit: number = 20) {
     // Similar to searchTours but without isActive filter for admin
     const skip = (page - 1) * limit;
-    
+
     const whereConditions: any = {};
 
     // Build where conditions (similar to searchTours but include inactive tours)
@@ -2125,7 +2137,7 @@ export class TourService {
 
   async getAllTourBookings(filters: TourBookingFilters, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
-    
+
     const whereConditions: any = {};
 
     if (filters.status && filters.status.length > 0) {
@@ -2411,7 +2423,7 @@ export class TourService {
       userName: `${booking.user.firstName} ${booking.user.lastName}`,
       userEmail: booking.user.email,
       tourGuideId: booking.tourGuideId,
-      tourGuideName: `${booking.tourGuide}`,
+      tourGuideName: booking.tour.tourGuide ? `${booking.tour.tourGuide.firstName} ${booking.tour.tourGuide.lastName}` : '',
       numberOfParticipants: booking.numberOfParticipants,
       participants: booking.participants as any[],
       specialRequests: booking.specialRequests,
@@ -2442,7 +2454,7 @@ export class TourService {
 
     if (reviews.length > 0) {
       const averageRating = reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
-      
+
       await prisma.tour.update({
         where: { id: tourId },
         data: {
@@ -2461,7 +2473,7 @@ export class TourService {
 
     if (reviews.length > 0) {
       const averageRating = reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
-      
+
       await prisma.user.update({
         where: { id: tourGuideId },
         data: { rating: parseFloat(averageRating.toFixed(2)) }
@@ -2473,8 +2485,8 @@ export class TourService {
     const bookings = await prisma.tourBooking.findMany({
       where: { tourGuideId },
       include: {
-        tour: { 
-          select: { 
+        tour: {
+          select: {
             title: true,
             // FIX: Include tourGuide data
             tourGuide: {
@@ -2484,7 +2496,7 @@ export class TourService {
                 lastName: true
               }
             }
-          } 
+          }
         },
         user: { select: { firstName: true, lastName: true, email: true } },
         schedule: { select: { startDate: true, startTime: true } }
@@ -2494,7 +2506,7 @@ export class TourService {
     });
 
     return bookings.map(booking => this.formatTourBookingInfo(booking));
-}
+  }
 
   private async getUpcomingTourSchedules(tourGuideId: number, limit: number = 5): Promise<TourScheduleInfo[]> {
     const schedules = await prisma.tourSchedule.findMany({

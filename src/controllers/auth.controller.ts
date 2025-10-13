@@ -57,7 +57,13 @@ export class AuthController {
         }
       }
 
-      const result = await authService.register(req.body, req);
+      // Extract referral code from query parameters if not in body
+      const registrationData = {
+        ...req.body,
+        referralCode: req.body.referralCode || req.query.ref
+      };
+
+      const result = await authService.register(registrationData, req);
       res.status(201).json(result);
     } catch (error: any) {
       if (error.message === 'User already exists') {
@@ -320,7 +326,56 @@ export class AuthController {
     }
   }
 
-async updateProfileImage(req: Request, res: Response, next: NextFunction) {
+// --- ENHANCED PROFILE ENDPOINTS FOR SETTINGS ---
+  async updateMe(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'User not authenticated'
+        });
+      }
+
+      const user = await authService.updateUserProfile(parseInt(req.user.userId), req.body, req);
+
+      res.json({
+        success: true,
+        data: user,
+        message: 'Profile updated successfully'
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
+
+  async getMe(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'User not authenticated'
+        });
+      }
+
+      const user = await authService.getUserProfile(parseInt(req.user.userId));
+
+      res.json({
+        success: true,
+        data: user,
+        message: 'Profile retrieved successfully'
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
+
+  async updateProfileImage(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.user?.userId) {
         return res.status(401).json({ message: 'User not authenticated' });
@@ -361,22 +416,142 @@ async updateProfileImage(req: Request, res: Response, next: NextFunction) {
   async changePassword(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.user?.userId) {
-        return res.status(401).json({ message: 'User not authenticated' });
+        return res.status(401).json({
+          success: false,
+          message: 'User not authenticated'
+        });
       }
 
       const { currentPassword, newPassword, confirmPassword } = req.body;
-      if (!newPassword || !confirmPassword) {
-        return res.status(400).json({ 
-          message: 'New password and confirm password are required' 
+
+      // Enhanced validation
+      const validationErrors: string[] = [];
+
+      if (!currentPassword) validationErrors.push('Current password is required');
+      if (!newPassword) validationErrors.push('New password is required');
+      if (!confirmPassword) validationErrors.push('Confirm password is required');
+
+      if (newPassword && newPassword.length < 8) {
+        validationErrors.push('Password must be at least 8 characters long');
+      }
+
+      if (newPassword && !/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(newPassword)) {
+        validationErrors.push('Password validation failed: must contain at least one uppercase letter, one lowercase letter, and one number');
+      }
+
+      if (newPassword && confirmPassword && newPassword !== confirmPassword) {
+        validationErrors.push('New passwords do not match');
+      }
+
+      if (validationErrors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password must contain at least one uppercase letter, one lowercase letter, and one number',
+          errors: validationErrors
         });
       }
 
       await authService.changePassword(parseInt(req.user.userId), req.body, req);
-      res.json({ message: 'Password changed successfully' });
+
+      res.json({
+        success: true,
+        message: 'Password changed successfully',
+        data: { passwordChanged: true }
+      });
     } catch (error: any) {
-      res.status(400).json({ message: error.message });
+      let statusCode = 400;
+
+      if (error.message.includes('Current password is incorrect')) {
+        statusCode = 401;
+      } else if (error.message.includes('rate limit')) {
+        statusCode = 429;
+      }
+
+      res.status(statusCode).json({
+        success: false,
+        message: error.message,
+        errors: [error.message]
+      });
     }
   }
+
+// Profile-specific password change for settings page
+async changePasswordFromProfile(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated',
+        errors: ['Authentication required']
+      });
+    }
+
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+
+    // Enhanced validation specific to profile context
+    const validationErrors: string[] = [];
+
+    if (!currentPassword) validationErrors.push('Current password is required');
+    if (!newPassword) validationErrors.push('New password is required');
+    if (!confirmPassword) validationErrors.push('Confirm password is required');
+
+    // Password strength validation
+    if (newPassword) {
+      if (newPassword.length < 8) {
+        validationErrors.push('Password must be at least 8 characters long');
+      }
+
+      if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(newPassword)) {
+        validationErrors.push('Password must contain at least one uppercase letter, one lowercase letter, and one number');
+      }
+
+      // Check password confirmation
+      if (confirmPassword && newPassword !== confirmPassword) {
+        validationErrors.push('New passwords do not match');
+      }
+    }
+
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password validation failed. Please check the requirements below.',
+        errors: validationErrors
+      });
+    }
+
+    await authService.changePassword(parseInt(req.user.userId), req.body, req);
+
+    // Get updated user data for frontend
+    const updatedUser = await authService.getUserProfile(parseInt(req.user.userId));
+
+    res.json({
+      success: true,
+      message: 'Password changed successfully. You have been logged out of other devices for security.',
+      data: {
+        passwordChanged: true,
+        user: updatedUser
+      }
+    });
+  } catch (error: any) {
+    let statusCode = 400;
+    let errorCode: string | undefined;
+
+    if (error.message.includes('Current password is incorrect')) {
+      statusCode = 401;
+      errorCode = 'INVALID_CURRENT_PASSWORD';
+    } else if (error.message.includes('rate limit') || error.message.includes('too many')) {
+      statusCode = 429;
+      errorCode = 'RATE_LIMITED';
+    }
+
+    res.status(statusCode).json({
+      success: false,
+      message: error.message,
+      errors: [error.message],
+      code: errorCode
+    });
+  }
+}
 
   // --- SETUP PASSWORD (for service providers) ---
   async setupPassword(req: Request, res: Response) {
@@ -502,6 +677,48 @@ async updateProfileImage(req: Request, res: Response, next: NextFunction) {
       res.json(user);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  }
+
+  // --- PUBLIC EMAIL STATUS CHECK ---
+  async checkEmailStatus(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { email } = req.params;
+      
+      if (!email) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Email is required' 
+        });
+      }
+
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Invalid email format' 
+        });
+      }
+
+      const result = await authService.checkEmailStatus(email);
+      
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error: any) {
+      console.error('Error checking email status:', error);
+      res.status(500).json({ 
+        success: false,
+        message: 'Server error while checking email status',
+        data: {
+          exists: false,
+          hasPassword: false,
+          message: 'Server error occurred',
+          nextAction: 'signup'
+        }
+      });
     }
   }
 
@@ -746,26 +963,87 @@ async submitKYC(req: Request, res: Response, next: NextFunction) {
       return res.status(401).json({ message: 'User not authenticated' });
     }
 
-    const { personalDetails, addressDocumentUrl } = req.body;
-    
+    const { personalDetails, addressDocumentUrl, passportPhotoUrl } = req.body;
+
     if (!personalDetails) {
-      return res.status(400).json({ 
-        message: 'Personal details are required' 
+      return res.status(400).json({
+        message: 'Personal details are required'
       });
     }
 
-    // Validate required fields
-    const { fullName, dateOfBirth, nationality, address, phoneNumber, email } = personalDetails;
-    if (!fullName || !dateOfBirth || !nationality || !address || !phoneNumber || !email) {
-      return res.status(400).json({ 
-        message: 'All personal details fields are required' 
+    // Validate required fields with new granular address structure
+    const {
+      fullName,
+      dateOfBirth,
+      nationality,
+      district,
+      sector,
+      street,
+      province,
+      state,
+      country,
+      phoneNumber,
+      email,
+      documentType
+    } = personalDetails;
+
+    // Validate all required fields
+    const missingFields = [];
+    if (!fullName) missingFields.push('fullName');
+    if (!dateOfBirth) missingFields.push('dateOfBirth');
+    if (!nationality) missingFields.push('nationality');
+    if (!district) missingFields.push('district');
+    if (!sector) missingFields.push('sector');
+    if (!street) missingFields.push('street');
+    if (!province) missingFields.push('province');
+    if (!country) missingFields.push('country');
+    if (!phoneNumber) missingFields.push('phoneNumber');
+    if (!email) missingFields.push('email');
+    if (!documentType) missingFields.push('documentType');
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        message: `The following fields are required: ${missingFields.join(', ')}`
       });
+    }
+
+    // Validate field lengths
+    const validationErrors = [];
+    if (district.length < 2) validationErrors.push('District must be at least 2 characters long');
+    if (sector.length < 2) validationErrors.push('Sector must be at least 2 characters long');
+    if (street.length < 2) validationErrors.push('Street must be at least 2 characters long');
+    if (province.length < 2) validationErrors.push('Province must be at least 2 characters long');
+    if (state.length < 2) validationErrors.push('State must be at least 2 characters long');
+    if (country.length < 2) validationErrors.push('Country must be at least 2 characters long');
+
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+
+    // Validate passport photo URL if provided
+    if (passportPhotoUrl) {
+      try {
+        const url = new URL(passportPhotoUrl);
+        if (!url.hostname.includes('supabase.co')) {
+          return res.status(400).json({
+            message: 'Invalid passport photo URL. Must be a valid Supabase storage URL.'
+          });
+        }
+      } catch (error) {
+        return res.status(400).json({
+          message: 'Invalid passport photo URL format'
+        });
+      }
     }
 
     const result = await authService.submitKYC(
       parseInt(req.user.userId),
       personalDetails,
-      addressDocumentUrl
+      addressDocumentUrl,
+      passportPhotoUrl
     );
 
     res.json({
@@ -807,6 +1085,45 @@ async getKYCStatus(req: Request, res: Response, next: NextFunction) {
       res.json(stats);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  }
+
+  async getAgentReferrals(req: Request, res: Response, next: NextFunction) {
+    try {
+      const agentId = parseInt((req as any).user.userId);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+
+      const result = await authService.getAgentReferrals(agentId, page, limit);
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
+
+  async getAgentReferralCode(req: Request, res: Response, next: NextFunction) {
+    try {
+      const agentId = parseInt((req as any).user.userId);
+      const referralCode = await authService.generateAgentReferralCode(agentId);
+
+      res.json({
+        success: true,
+        data: {
+          referralCode,
+          referralLink: `https://jambolush.com/all/become-host?ref=${referralCode}`
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
     }
   }
 }
