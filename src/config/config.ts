@@ -97,7 +97,7 @@ export const config = {
     
     // Transaction limits
     maxTransactionAmount: parseFloat(process.env.ESCROW_MAX_TRANSACTION_AMOUNT || '10000000'), // 10M RWF
-    minTransactionAmount: parseFloat(process.env.ESCROW_MIN_TRANSACTION_AMOUNT || '100'), // 100 RWF
+    minTransactionAmount: parseFloat(process.env.ESCROW_MIN_TRANSACTION_AMOUNT || '10'), // 100 RWF
     
     // Escrow timing settings
     defaultHoldingPeriod: parseInt(process.env.ESCROW_DEFAULT_HOLDING_DAYS || '7'), // 7 days
