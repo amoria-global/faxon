@@ -288,7 +288,7 @@ export class BrevoSMSService {
       content,
       type: 'transactional',
       tag: 'welcome',
-      webUrl: `${context.company.website}/dashboard`
+      webUrl: `https://app.jambolush.com`
     };
 
     await this.sendTransactionalSMS(smsData);
@@ -325,7 +325,7 @@ export class BrevoSMSService {
       content,
       type: 'transactional',
       tag: 'password_reset',
-      webUrl: `${context.company.website}/reset-password`
+      webUrl: `https://jambolush.com/all/forgotpw`
     };
 
     await this.sendTransactionalSMS(smsData);
@@ -344,7 +344,7 @@ export class BrevoSMSService {
       content,
       type: 'transactional',
       tag: 'password_changed',
-      webUrl: `${context.company.website}/security`
+      webUrl: `https://app.jambolush.com`
     };
 
     await this.sendTransactionalSMS(smsData);
@@ -363,7 +363,7 @@ export class BrevoSMSService {
       content,
       type: 'transactional',
       tag: 'login_notification',
-      webUrl: `${context.company.website}/security/sessions`
+      webUrl: `https://app.jambolush.com`
     };
 
     await this.sendTransactionalSMS(smsData);
@@ -382,7 +382,7 @@ export class BrevoSMSService {
       content,
       type: 'transactional',
       tag: 'security_alert',
-      webUrl: `${context.company.website}/security`
+      webUrl: `https://app.jambolush.com`
     };
 
     await this.sendTransactionalSMS(smsData);
@@ -401,7 +401,7 @@ export class BrevoSMSService {
       content,
       type: 'transactional',
       tag: `account_${status}`,
-      webUrl: status === 'suspended' ? `${context.company.website}/appeal` : `${context.company.website}/login`
+      webUrl: status === 'suspended' ? `https://jambolush.com/all/contact-us` : `https://jambolush.com/all/login`
     };
 
     await this.sendTransactionalSMS(smsData);
@@ -438,7 +438,7 @@ export class BrevoSMSService {
       content,
       type: 'transactional',
       tag: `kyc_${kycStatus}`,
-      webUrl: `${context.company.website}/kyc`
+      webUrl: `https://app.jambolush.com`
     };
 
     await this.sendTransactionalSMS(smsData);
@@ -448,7 +448,7 @@ export class BrevoSMSService {
   // --- SMS CONTENT TEMPLATES ---
 
   private getWelcomeSMSContent(context: SMSContext): string {
-    return `Welcome to ${context.company.name}, ${context.user.firstName}! Your account is ready. Start exploring: ${context.company.website}`;
+    return `Welcome to ${context.company.name}, ${context.user.firstName}! Your account is ready. Start exploring: https://jambolush.com`;
   }
 
   private getPhoneVerificationSMSContent(context: SMSContext): string {
@@ -471,7 +471,7 @@ export class BrevoSMSService {
   }
 
   private getSuspiciousActivitySMSContent(context: SMSContext): string {
-    return `${context.company.name} SECURITY ALERT: Suspicious activity detected on your account. Change your password immediately: ${context.company.website}/security`;
+    return `${context.company.name} SECURITY ALERT: Suspicious activity detected on your account. Change your password immediately: https://jambolush.com/all/forgotpw`;
   }
 
   private getAccountStatusSMSContent(context: SMSContext, status: 'suspended' | 'reactivated'): string {

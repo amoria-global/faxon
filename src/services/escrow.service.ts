@@ -224,39 +224,40 @@ export class EscrowService {
 
   /**
    * Calculate split rules for booking payments
-   * Platform always gets 14% commission
+   * Uses configuration from config.escrow.defaultSplitRules
    * @param hasAgent - Whether the property has an agent
    * @returns Split rules object
    */
   private calculateBookingSplitRules(hasAgent: boolean): SplitRules {
-    const PLATFORM_COMMISSION = 14; // Fixed at 14%
+    // Use split rules from config
+    const configRules = config.escrow.defaultSplitRules;
 
     if (hasAgent) {
-      // With agent: Platform 14%, Agent 7%, Host 79%
+      // With agent: Use configured splits
       return {
-        platform: PLATFORM_COMMISSION,
-        agent: 7,
-        host: 79
+        platform: configRules.platform,
+        agent: configRules.agent,
+        host: configRules.host
       };
     } else {
-      // Without agent: Platform 14%, Agent 0%, Host 86%
+      // Without agent: Platform stays same, agent portion goes to host
       return {
-        platform: PLATFORM_COMMISSION,
+        platform: configRules.platform,
         agent: 0,
-        host: 86
+        host: configRules.host + configRules.agent
       };
     }
   }
 
   /**
-   * Validates that platform commission is exactly 14%
+   * Validates that platform commission matches configuration
    * Throws error if validation fails
    * @param splitRules - The split rules to validate
    */
   private validatePlatformCommission(splitRules: SplitRules): void {
-    const REQUIRED_PLATFORM_COMMISSION = 14;
+    const REQUIRED_PLATFORM_COMMISSION = config.escrow.defaultSplitRules.platform;
 
-    if (splitRules.platform !== REQUIRED_PLATFORM_COMMISSION) {
+    if (Math.abs(splitRules.platform - REQUIRED_PLATFORM_COMMISSION) > 0.01) {
       const errorMsg = `CRITICAL: Platform commission must be exactly ${REQUIRED_PLATFORM_COMMISSION}%. Current: ${splitRules.platform}%`;
       logger.error('Platform commission validation failed', 'EscrowService', {
         required: REQUIRED_PLATFORM_COMMISSION,
@@ -963,24 +964,28 @@ export class EscrowService {
 
       // Find booking by transaction reference
       const booking = await prisma.booking.findFirst({
-        where: { transactionId: transactionReference }
+        where: { transactionId: transactionReference },
+        include: {
+          property: {
+            include: {
+              host: {
+                select: { id: true, email: true, firstName: true, lastName: true }
+              },
+              agent: {
+                select: { id: true, email: true, firstName: true, lastName: true }
+              }
+            }
+          },
+          guest: {
+            select: { id: true, email: true, firstName: true, lastName: true }
+          }
+        }
       });
 
       if (!booking) {
         logger.warn('Booking not found for transaction', 'EscrowService', { transactionReference });
         return;
       }
-
-      // Fetch full booking details with property and guest info for notifications
-      const fullBooking = await prisma.booking.findUnique({
-        where: { id: booking.id },
-        include: {
-          property: { select: { name: true } },
-          guest: { select: { email: true, firstName: true, lastName: true } }
-        }
-      });
-
-      if (!fullBooking) return;
 
       // Map escrow status to booking payment status
       let bookingPaymentStatus = booking.paymentStatus;
@@ -997,18 +1002,165 @@ export class EscrowService {
           transactionReference
         });
 
+        // Update booking first
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            paymentStatus: bookingPaymentStatus,
+            status: bookingStatus
+          }
+        });
+
+        // Calculate split amounts (platform gets 14%)
+        const hasAgent = booking.property.agent !== null;
+        const splitRules = this.calculateBookingSplitRules(hasAgent);
+        const splitAmounts = this.calculateSplitAmounts(booking.totalPrice, splitRules);
+
+        // Create owner payment record
+        if (booking.property.host) {
+          await prisma.ownerPayment.create({
+            data: {
+              ownerId: booking.property.host.id,
+              propertyId: booking.propertyId,
+              bookingId: booking.id,
+              amount: booking.totalPrice,
+              platformFee: splitAmounts.platform,
+              netAmount: splitAmounts.host,
+              currency: 'USD',
+              status: 'pending', // Requires check-in validation
+              checkInRequired: true,
+              checkInValidated: false
+            }
+          }).catch(err => logger.error('Failed to create owner payment record', 'EscrowService', err));
+        }
+
+        // Create agent commission record if agent exists
+        if (booking.property.agent && splitAmounts.agent > 0) {
+          await prisma.agentCommission.create({
+            data: {
+              agentId: booking.property.agent.id,
+              propertyId: booking.propertyId,
+              bookingId: booking.id,
+              amount: splitAmounts.agent,
+              commissionRate: splitRules.agent,
+              status: 'pending'
+            }
+          }).catch(err => logger.error('Failed to create agent commission record', 'EscrowService', err));
+        }
+
+        // ✅ UPDATE WALLET BALANCES IMMEDIATELY ON PAYMENT COMPLETION
+        logger.info('Updating wallet balances for payment completion', 'EscrowService', {
+          bookingId: booking.id,
+          splitAmounts
+        });
+
+        // Update host wallet
+        if (booking.property.host) {
+          await this.updateWalletBalance(
+            booking.property.host.id,
+            splitAmounts.host,
+            'PAYMENT_RECEIVED',
+            transactionReference
+          ).catch(err => logger.error('Failed to update host wallet', 'EscrowService', err));
+        }
+
+        // Update agent wallet (if exists)
+        if (booking.property.agent && splitAmounts.agent > 0) {
+          await this.updateWalletBalance(
+            booking.property.agent.id,
+            splitAmounts.agent,
+            'COMMISSION_EARNED',
+            transactionReference
+          ).catch(err => logger.error('Failed to update agent wallet', 'EscrowService', err));
+        }
+
+        // Update platform wallet
+        if (splitAmounts.platform > 0) {
+          await this.updateWalletBalance(
+            1, // Platform account (user ID 1)
+            splitAmounts.platform,
+            'PLATFORM_FEE',
+            transactionReference
+          ).catch(err => logger.error('Failed to update platform wallet', 'EscrowService', err));
+        }
+
+        logger.info('Wallet balances updated successfully', 'EscrowService', {
+          bookingId: booking.id
+        });
+
+        // Mark booking as wallet distributed
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            walletDistributed: true,
+            walletDistributedAt: new Date()
+          }
+        }).catch(err => logger.error('Failed to mark booking as wallet distributed', 'EscrowService', err));
+
+        // Log activity for all parties
+        await this.logActivity(booking.guestId, 'PAYMENT_COMPLETED', 'booking', booking.id, {
+          amount: booking.totalPrice,
+          currency: 'USD',
+          reference: transactionReference
+        });
+
+        if (booking.property.host) {
+          await this.logActivity(booking.property.host.id, 'BOOKING_PAYMENT_RECEIVED', 'booking', booking.id, {
+            amount: booking.totalPrice,
+            netAmount: splitAmounts.host,
+            platformFee: splitAmounts.platform
+          });
+        }
+
+        if (booking.property.agent) {
+          await this.logActivity(booking.property.agent.id, 'AGENT_COMMISSION_EARNED', 'booking', booking.id, {
+            amount: splitAmounts.agent,
+            commissionRate: splitRules.agent
+          });
+        }
+
         // Send booking confirmation email (show USD amount as that's what bookings are stored in)
         this.emailService.sendBookingPaymentConfirmationEmail({
-          userEmail: fullBooking.guest.email,
-          userName: fullBooking.guest.firstName || 'Guest',
+          userEmail: booking.guest.email,
+          userName: booking.guest.firstName || 'Guest',
           bookingId: booking.id,
-          propertyName: fullBooking.property.name,
+          propertyName: booking.property.name,
           amount: booking.totalPrice,
           currency: 'USD', // Bookings are stored in USD
-          checkIn: fullBooking.checkIn,
-          checkOut: fullBooking.checkOut,
+          checkIn: booking.checkIn,
+          checkOut: booking.checkOut,
           reference: transactionReference
         }).catch(err => logger.error('Failed to send booking confirmation email', 'EscrowService', err));
+
+        // Send notification to host
+        if (booking.property.host) {
+          this.emailService.sendBookingPaymentConfirmationEmail({
+            userEmail: booking.property.host.email,
+            userName: booking.property.host.firstName || 'Host',
+            bookingId: booking.id,
+            propertyName: booking.property.name,
+            amount: booking.totalPrice,
+            currency: 'USD',
+            checkIn: booking.checkIn,
+            checkOut: booking.checkOut,
+            reference: transactionReference
+          }).catch(err => logger.error('Failed to send host notification email', 'EscrowService', err));
+        }
+
+        // Send notification to agent
+        if (booking.property.agent) {
+          this.emailService.sendBookingPaymentConfirmationEmail({
+            userEmail: booking.property.agent.email,
+            userName: booking.property.agent.firstName || 'Agent',
+            bookingId: booking.id,
+            propertyName: booking.property.name,
+            amount: splitAmounts.agent,
+            currency: 'USD',
+            checkIn: booking.checkIn,
+            checkOut: booking.checkOut,
+            reference: transactionReference
+          }).catch(err => logger.error('Failed to send agent notification email', 'EscrowService', err));
+        }
 
       } else if (escrowStatus === 'FAILED') {
         bookingPaymentStatus = 'failed';
@@ -1016,12 +1168,24 @@ export class EscrowService {
           bookingId: booking.id
         });
 
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            paymentStatus: bookingPaymentStatus,
+            status: bookingStatus
+          }
+        });
+
+        await this.logActivity(booking.guestId, 'PAYMENT_FAILED', 'booking', booking.id, {
+          reference: transactionReference
+        });
+
         // Send payment failed email
         this.emailService.sendBookingPaymentStatusEmail({
-          userEmail: fullBooking.guest.email,
-          userName: fullBooking.guest.firstName || 'Guest',
+          userEmail: booking.guest.email,
+          userName: booking.guest.firstName || 'Guest',
           bookingId: booking.id,
-          propertyName: fullBooking.property.name,
+          propertyName: booking.property.name,
           amount: booking.totalPrice,
           status: 'failed',
           reference: transactionReference
@@ -1033,12 +1197,25 @@ export class EscrowService {
           bookingId: booking.id
         });
 
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            paymentStatus: bookingPaymentStatus,
+            status: bookingStatus
+          }
+        });
+
+        await this.logActivity(booking.guestId, 'PAYMENT_REFUNDED', 'booking', booking.id, {
+          amount: booking.totalPrice,
+          reference: transactionReference
+        });
+
         // Send refund notification
         this.emailService.sendBookingPaymentStatusEmail({
-          userEmail: fullBooking.guest.email,
-          userName: fullBooking.guest.firstName || 'Guest',
+          userEmail: booking.guest.email,
+          userName: booking.guest.firstName || 'Guest',
           bookingId: booking.id,
-          propertyName: fullBooking.property.name,
+          propertyName: booking.property.name,
           amount: booking.totalPrice,
           status: 'refunded',
           reference: transactionReference
@@ -1046,16 +1223,15 @@ export class EscrowService {
 
       } else if (escrowStatus === 'PENDING') {
         bookingPaymentStatus = 'pending';
-      }
 
-      // Update booking
-      await prisma.booking.update({
-        where: { id: booking.id },
-        data: {
-          paymentStatus: bookingPaymentStatus,
-          status: bookingStatus
-        }
-      });
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            paymentStatus: bookingPaymentStatus,
+            status: bookingStatus
+          }
+        });
+      }
 
       logger.info('Booking status updated', 'EscrowService', {
         bookingId: booking.id,
@@ -1066,6 +1242,33 @@ export class EscrowService {
     } catch (error: any) {
       logger.error('Failed to update booking payment status', 'EscrowService', error);
       // Don't throw - this is a non-critical operation
+    }
+  }
+
+  /**
+   * Log activity for a user
+   */
+  private async logActivity(
+    userId: number,
+    action: string,
+    resourceType: string,
+    resourceId: string,
+    details?: any
+  ): Promise<void> {
+    try {
+      await prisma.activityLog.create({
+        data: {
+          userId,
+          action,
+          resourceType,
+          resourceId,
+          details: details || undefined,
+          status: 'success'
+        }
+      });
+    } catch (error) {
+      logger.error('Failed to log activity', 'EscrowService', error);
+      // Don't throw - logging is non-critical
     }
   }
 

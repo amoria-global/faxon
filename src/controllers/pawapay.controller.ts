@@ -4,6 +4,7 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { pawaPayService } from '../services/pawapay.service';
 import { currencyExchangeService } from '../services/currency-exchange.service';
+import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
 import {
   DepositRequest,
   PayoutRequest,
@@ -13,6 +14,7 @@ import {
 } from '../types/pawapay.types';
 
 const prisma = new PrismaClient();
+const paymentEmailService = new BrevoPaymentStatusMailingService();
 
 export class PawaPayController {
   // ==================== HELPER METHOD ====================
@@ -92,9 +94,19 @@ export class PawaPayController {
       const amountInSmallestUnit = rwfAmount.toString();
       const depositId = pawaPayService.generateTransactionId();
 
+      // Fetch user email for metadata
+      const user = userId ? await prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true, firstName: true, lastName: true, phone: true }
+      }) : null;
+
       const metadataArray: any = this._buildMetadataArray(metadata, {
         clientReferenceId: internalReference,
-        userId: userId
+        userId: userId,
+        userEmail: user?.email,
+        userFirstName: user?.firstName,
+        userLastName: user?.lastName,
+        userPhone: user?.phone
       });
 
       const depositRequest: DepositRequest = {
@@ -138,7 +150,12 @@ export class PawaPayController {
             depositRate: exchangeRate.depositRate,
             payoutRate: exchangeRate.payoutRate,
             spread: exchangeRate.spread,
-            amountRWF: rwfAmount
+            amountRWF: rwfAmount,
+            userEmail: user?.email,
+            userFirstName: user?.firstName,
+            userLastName: user?.lastName,
+            userPhone: user?.phone,
+            internalReference
           },
           internalReference,
           receivedByPawaPay: response.receivedByPawaPay ? new Date(response.receivedByPawaPay) : undefined,
@@ -193,24 +210,73 @@ export class PawaPayController {
         return;
       }
 
-      const response = await pawaPayService.getDepositStatus(depositId);
+      // Fetch current transaction from database to compare status
+      const currentTransaction = await prisma.pawaPayTransaction.findUnique({
+        where: { transactionId: depositId }
+      });
 
+      if (!currentTransaction) {
+        res.status(404).json({
+          success: false,
+          message: 'Transaction not found'
+        });
+        return;
+      }
+
+      const previousStatus = currentTransaction.status;
+
+      // Fetch latest status from PawaPay
+      const response = await pawaPayService.getDepositStatus(depositId);
+      const newStatus = response.status;
+
+      // Update transaction in database
       await prisma.pawaPayTransaction.update({
         where: { transactionId: depositId },
         data: {
-          status: response.status,
+          status: newStatus,
           depositedAmount: response.requestedAmount,
           providerTransactionId: response.correspondentIds?.PROVIDER_TRANSACTION_ID,
           financialTransactionId: response.correspondentIds?.FINANCIAL_TRANSACTION_ID,
           failureCode: response.failureReason?.failureCode,
           failureMessage: response.failureReason?.failureMessage,
-          completedAt: response.status === 'COMPLETED' ? new Date() : undefined
+          completedAt: newStatus === 'COMPLETED' ? new Date() : undefined
         }
       });
 
+      // If status has changed, handle the change
+      if (newStatus !== previousStatus) {
+        console.log(`[PAWAPAY_STATUS_CHECK] Status changed for ${depositId}: ${previousStatus} → ${newStatus}`);
+
+        const internalRef = currentTransaction.internalReference || (currentTransaction.metadata as any)?.internalReference;
+
+        console.log(`[PAWAPAY_STATUS_CHECK] Internal reference: ${internalRef || 'NOT FOUND'}`);
+        console.log(`[PAWAPAY_STATUS_CHECK] Transaction internalReference field: ${currentTransaction.internalReference || 'null'}`);
+        console.log(`[PAWAPAY_STATUS_CHECK] Transaction metadata: ${JSON.stringify(currentTransaction.metadata)}`);
+
+        if (internalRef) {
+          if (newStatus === 'COMPLETED') {
+            // Update related booking and send completion emails
+            await this.handleDepositCompletion(internalRef).catch(err => {
+              console.error(`[PAWAPAY_STATUS_CHECK] Failed to handle completion for ${internalRef}:`, err);
+            });
+          } else if (newStatus === 'FAILED') {
+            // Send failure emails
+            const failureReason = response.failureReason?.failureMessage || 'Payment could not be processed';
+            await this.handleDepositFailure(internalRef, failureReason).catch(err => {
+              console.error(`[PAWAPAY_STATUS_CHECK] Failed to handle failure for ${internalRef}:`, err);
+            });
+          }
+        } else {
+          console.log(`[PAWAPAY_STATUS_CHECK] ⚠️ No internal reference found - cannot send emails for ${depositId}`);
+        }
+      }
+
       res.status(200).json({
         success: true,
-        data: response
+        data: response,
+        statusChanged: newStatus !== previousStatus,
+        previousStatus,
+        newStatus
       });
     } catch (error) {
       res.status(500).json({
@@ -267,10 +333,20 @@ export class PawaPayController {
         .substring(0, 22)
         .padEnd(4, ' ');
 
+      // Fetch user email for metadata
+      const user = userId ? await prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true, firstName: true, lastName: true, phone: true }
+      }) : null;
+
       // Use the centralized helper for consistent metadata handling
       const metadataArray: any = this._buildMetadataArray(metadata, {
         clientReferenceId: internalReference,
-        userId: userId
+        userId: userId,
+        userEmail: user?.email,
+        userFirstName: user?.firstName,
+        userLastName: user?.lastName,
+        userPhone: user?.phone
       });
 
       const payoutRequest: PayoutRequest = {
@@ -316,7 +392,12 @@ export class PawaPayController {
             depositRate: exchangeRate.depositRate,
             payoutRate: exchangeRate.payoutRate,
             spread: exchangeRate.spread,
-            amountRWF: rwfAmount
+            amountRWF: rwfAmount,
+            userEmail: user?.email,
+            userFirstName: user?.firstName,
+            userLastName: user?.lastName,
+            userPhone: user?.phone,
+            internalReference
           },
           internalReference,
           receivedByPawaPay: response.receivedByPawaPay ? new Date(response.receivedByPawaPay) : undefined,
@@ -843,6 +924,417 @@ export class PawaPayController {
         message: 'Failed to get transaction statistics',
         error: error instanceof Error ? error.message : 'Unknown error'
       });
+    }
+  }
+
+  // ==================== HELPER METHODS FOR STATUS CHECK ====================
+
+  /**
+   * Handle deposit completion - update booking and send emails
+   */
+  private async handleDepositCompletion(internalRef: string): Promise<void> {
+    try {
+      // Check property bookings first (they use both id and transactionId)
+      const propertyBooking = await prisma.booking.findFirst({
+        where: {
+          OR: [{ id: internalRef }, { transactionId: internalRef }]
+        }
+      });
+
+      if (propertyBooking) {
+        console.log(`[PAWAPAY_STATUS_CHECK] Found property booking ${propertyBooking.id}`);
+
+        // Update booking status to completed
+        await prisma.booking.update({
+          where: { id: propertyBooking.id },
+          data: {
+            paymentStatus: 'completed',
+            status: 'confirmed'
+          }
+        });
+
+        console.log(`[PAWAPAY_STATUS_CHECK] Updated property booking ${propertyBooking.id} to completed`);
+
+        // Send emails
+        await this.sendPropertyBookingPaymentEmails(internalRef, 'completed');
+        return;
+      }
+
+      // Check if this is a tour booking
+      const tourBooking = await prisma.tourBooking.findFirst({
+        where: { id: internalRef }
+      });
+
+      if (tourBooking) {
+        console.log(`[PAWAPAY_STATUS_CHECK] Found tour booking ${tourBooking.id}`);
+
+        // Update tour booking status to completed
+        await prisma.tourBooking.update({
+          where: { id: tourBooking.id },
+          data: {
+            paymentStatus: 'completed',
+            status: 'confirmed'
+          }
+        });
+
+        console.log(`[PAWAPAY_STATUS_CHECK] Updated tour booking ${tourBooking.id} to completed`);
+
+        // Send emails
+        await this.sendTourBookingPaymentEmails(internalRef, 'completed');
+        return;
+      }
+
+      console.log(`[PAWAPAY_STATUS_CHECK] ⚠️ No booking found for reference ${internalRef}`);
+    } catch (error) {
+      console.error('[PAWAPAY_STATUS_CHECK] Error handling deposit completion:', error);
+    }
+  }
+
+  /**
+   * Handle deposit failure - send failure emails
+   */
+  private async handleDepositFailure(internalRef: string, failureReason: string): Promise<void> {
+    try {
+      console.log(`[PAWAPAY_STATUS_CHECK] Handling deposit failure for ${internalRef}: ${failureReason}`);
+
+      // Check property bookings first (they use both id and transactionId)
+      const propertyBooking = await prisma.booking.findFirst({
+        where: {
+          OR: [{ id: internalRef }, { transactionId: internalRef }]
+        }
+      });
+
+      if (propertyBooking) {
+        console.log(`[PAWAPAY_STATUS_CHECK] Found property booking ${propertyBooking.id}`);
+
+        // Update booking status to failed
+        await prisma.booking.update({
+          where: { id: propertyBooking.id },
+          data: { paymentStatus: 'failed' }
+        });
+
+        console.log(`[PAWAPAY_STATUS_CHECK] Updated property booking ${propertyBooking.id} to failed`);
+
+        // Send failure email
+        await this.sendPropertyBookingPaymentEmails(internalRef, 'failed', failureReason).catch(err => {
+          console.error(`[PAWAPAY_STATUS_CHECK] Failed to send property booking failure email:`, err);
+        });
+
+        console.log(`[PAWAPAY_STATUS_CHECK] Payment failure email sent for property booking ${propertyBooking.id}`);
+        return;
+      }
+
+      // Check if this is a tour booking
+      const tourBooking = await prisma.tourBooking.findFirst({
+        where: { id: internalRef }
+      });
+
+      if (tourBooking) {
+        console.log(`[PAWAPAY_STATUS_CHECK] Found tour booking ${tourBooking.id}`);
+
+        // Update tour booking status to failed
+        await prisma.tourBooking.update({
+          where: { id: tourBooking.id },
+          data: { paymentStatus: 'failed' }
+        });
+
+        console.log(`[PAWAPAY_STATUS_CHECK] Updated tour booking ${tourBooking.id} to failed`);
+
+        // Send failure email
+        await this.sendTourBookingPaymentEmails(internalRef, 'failed', failureReason).catch(err => {
+          console.error(`[PAWAPAY_STATUS_CHECK] Failed to send tour booking failure email:`, err);
+        });
+
+        console.log(`[PAWAPAY_STATUS_CHECK] Payment failure email sent for tour booking ${tourBooking.id}`);
+        return;
+      }
+
+      console.log(`[PAWAPAY_STATUS_CHECK] ⚠️ No booking found for reference ${internalRef}`);
+    } catch (error) {
+      console.error('[PAWAPAY_STATUS_CHECK] Error handling deposit failure:', error);
+    }
+  }
+
+  /**
+   * Send payment status emails for property bookings
+   */
+  private async sendPropertyBookingPaymentEmails(
+    bookingId: string,
+    status: 'completed' | 'failed',
+    failureReason?: string
+  ): Promise<void> {
+    try {
+      const booking = await prisma.booking.findFirst({
+        where: {
+          OR: [{ id: bookingId }, { transactionId: bookingId }]
+        },
+        include: {
+          property: {
+            include: {
+              host: true,
+              agent: { select: { id: true, email: true, firstName: true, lastName: true } }
+            }
+          },
+          guest: true
+        }
+      });
+
+      if (!booking || !booking.guest || !booking.property.host) return;
+
+      const bookingInfo: any = {
+        id: booking.id,
+        propertyId: booking.propertyId,
+        property: {
+          name: booking.property.name,
+          location: booking.property.location,
+          images: typeof booking.property.images === 'string' ? JSON.parse(booking.property.images) : booking.property.images || {},
+          pricePerNight: booking.property.pricePerNight,
+          hostName: `${booking.property.host.firstName} ${booking.property.host.lastName}`,
+          hostEmail: booking.property.host.email,
+          hostPhone: booking.property.host.phone || undefined
+        },
+        guestId: booking.guestId,
+        guest: {
+          firstName: booking.guest.firstName,
+          lastName: booking.guest.lastName,
+          email: booking.guest.email,
+          phone: booking.guest.phone || undefined,
+          profileImage: booking.guest.profileImage || undefined
+        },
+        checkIn: booking.checkIn.toISOString(),
+        checkOut: booking.checkOut.toISOString(),
+        guests: booking.guests,
+        nights: Math.ceil((booking.checkOut.getTime() - booking.checkIn.getTime()) / (1000 * 60 * 60 * 24)),
+        totalPrice: booking.totalPrice,
+        status: booking.status,
+        paymentStatus: booking.paymentStatus,
+        message: booking.message || undefined,
+        specialRequests: booking.specialRequests || undefined,
+        checkInInstructions: booking.checkInInstructions || undefined,
+        checkOutInstructions: booking.checkOutInstructions || undefined,
+        createdAt: booking.createdAt.toISOString(),
+        updatedAt: booking.updatedAt.toISOString()
+      };
+
+      const company = {
+        name: 'Jambolush',
+        website: 'https://jambolush.com',
+        supportEmail: 'support@jambolush.com',
+        logo: 'https://jambolush.com/favicon.ico'
+      };
+
+      if (status === 'completed') {
+        // Send confirmation to guest
+        await paymentEmailService.sendPaymentCompletedEmail({
+          user: {
+            firstName: booking.guest.firstName,
+            lastName: booking.guest.lastName,
+            email: booking.guest.email,
+            id: booking.guestId
+          },
+          company,
+          booking: bookingInfo,
+          recipientType: 'guest',
+          paymentStatus: 'completed',
+          paymentAmount: booking.totalPrice,
+          paymentCurrency: 'USD'
+        });
+
+        // Send notification to host
+        await paymentEmailService.sendPaymentConfirmedToHost({
+          user: {
+            firstName: booking.property.host.firstName,
+            lastName: booking.property.host.lastName,
+            email: booking.property.host.email,
+            id: booking.property.hostId || 0
+          },
+          company,
+          booking: bookingInfo,
+          recipientType: 'host',
+          paymentStatus: 'completed',
+          paymentAmount: booking.totalPrice,
+          paymentCurrency: 'USD'
+        });
+
+        // Send notification to agent if exists
+        if (booking.property.agent) {
+          await paymentEmailService.sendPaymentConfirmedToHost({
+            user: {
+              firstName: booking.property.agent.firstName,
+              lastName: booking.property.agent.lastName,
+              email: booking.property.agent.email,
+              id: booking.property.agent.id
+            },
+            company,
+            booking: bookingInfo,
+            recipientType: 'host',
+            paymentStatus: 'completed',
+            paymentAmount: booking.totalPrice,
+            paymentCurrency: 'USD'
+          }).catch(err => console.error('[PAWAPAY_STATUS_CHECK] Error sending agent notification:', err));
+        }
+      } else if (status === 'failed') {
+        // Send failure notification to guest
+        await paymentEmailService.sendPaymentFailedEmail({
+          user: {
+            firstName: booking.guest.firstName,
+            lastName: booking.guest.lastName,
+            email: booking.guest.email,
+            id: booking.guestId
+          },
+          company,
+          booking: bookingInfo,
+          recipientType: 'guest',
+          paymentStatus: 'failed',
+          failureReason
+        });
+      }
+    } catch (error) {
+      console.error('[PAWAPAY_STATUS_CHECK] Error sending property booking payment emails:', error);
+    }
+  }
+
+  /**
+   * Send payment status emails for tour bookings
+   */
+  private async sendTourBookingPaymentEmails(
+    bookingId: string,
+    status: 'completed' | 'failed',
+    failureReason?: string
+  ): Promise<void> {
+    try {
+      const booking = await prisma.tourBooking.findFirst({
+        where: { id: bookingId },
+        include: {
+          tour: { include: { tourGuide: true } },
+          schedule: true,
+          user: true
+        }
+      });
+
+      if (!booking || !booking.user || !booking.tour.tourGuide) return;
+
+      const bookingInfo: any = {
+        id: booking.id,
+        tourId: String(booking.tourId),
+        tour: {
+          title: booking.tour.title,
+          description: booking.tour.description,
+          category: booking.tour.category,
+          type: booking.tour.type,
+          duration: booking.tour.duration,
+          difficulty: booking.tour.difficulty,
+          location: `${booking.tour.locationCity}, ${booking.tour.locationCountry}`,
+          images: booking.tour.images || {},
+          price: booking.tour.price,
+          currency: booking.tour.currency,
+          inclusions: booking.tour.inclusions || [],
+          exclusions: booking.tour.exclusions || [],
+          requirements: booking.tour.requirements || [],
+          meetingPoint: booking.tour.meetingPoint
+        },
+        scheduleId: booking.scheduleId,
+        schedule: {
+          startDate: booking.schedule.startDate.toISOString(),
+          endDate: booking.schedule.endDate.toISOString(),
+          startTime: booking.schedule.startTime,
+          endTime: booking.schedule.endTime || undefined,
+          availableSlots: booking.schedule.availableSlots,
+          bookedSlots: booking.schedule.bookedSlots
+        },
+        tourGuideId: booking.tourGuideId,
+        tourGuide: {
+          firstName: booking.tour.tourGuide.firstName,
+          lastName: booking.tour.tourGuide.lastName,
+          email: booking.tour.tourGuide.email,
+          phone: booking.tour.tourGuide.phone || undefined,
+          profileImage: booking.tour.tourGuide.profileImage || undefined,
+          bio: booking.tour.tourGuide.bio || undefined,
+          rating: booking.tour.tourGuide.rating || undefined,
+          totalTours: booking.tour.tourGuide.totalTours || undefined
+        },
+        userId: booking.userId,
+        user: {
+          firstName: booking.user.firstName,
+          lastName: booking.user.lastName,
+          email: booking.user.email,
+          phone: booking.user.phone || undefined,
+          profileImage: booking.user.profileImage || undefined
+        },
+        numberOfParticipants: booking.numberOfParticipants,
+        participants: booking.participants || [],
+        totalAmount: booking.totalAmount,
+        currency: booking.currency,
+        status: booking.status,
+        paymentStatus: booking.paymentStatus,
+        checkInStatus: booking.checkInStatus,
+        checkInTime: booking.checkInTime?.toISOString(),
+        checkOutTime: booking.checkOutTime?.toISOString(),
+        specialRequests: booking.specialRequests || undefined,
+        refundAmount: booking.refundAmount || undefined,
+        refundReason: booking.refundReason || undefined,
+        bookingDate: booking.bookingDate.toISOString(),
+        createdAt: booking.createdAt.toISOString(),
+        updatedAt: booking.updatedAt.toISOString()
+      };
+
+      const company = {
+        name: 'Jambolush',
+        website: 'https://jambolush.com',
+        supportEmail: 'support@jambolush.com',
+        logo: 'https://jambolush.com/favicon.ico'
+      };
+
+      if (status === 'completed') {
+        // Send confirmation to guest
+        await paymentEmailService.sendPaymentCompletedEmail({
+          user: {
+            firstName: booking.user.firstName,
+            lastName: booking.user.lastName,
+            email: booking.user.email,
+            id: booking.userId
+          },
+          company,
+          booking: bookingInfo,
+          recipientType: 'guest',
+          paymentStatus: 'completed',
+          paymentAmount: booking.totalAmount,
+          paymentCurrency: booking.currency
+        });
+
+        // Send notification to tour guide
+        await paymentEmailService.sendPaymentConfirmedToHost({
+          user: {
+            firstName: booking.tour.tourGuide.firstName,
+            lastName: booking.tour.tourGuide.lastName,
+            email: booking.tour.tourGuide.email,
+            id: booking.tourGuideId
+          },
+          company,
+          booking: bookingInfo,
+          recipientType: 'guide',
+          paymentStatus: 'completed',
+          paymentAmount: booking.totalAmount,
+          paymentCurrency: booking.currency
+        });
+      } else if (status === 'failed') {
+        // Send failure notification to guest
+        await paymentEmailService.sendPaymentFailedEmail({
+          user: {
+            firstName: booking.user.firstName,
+            lastName: booking.user.lastName,
+            email: booking.user.email,
+            id: booking.userId
+          },
+          company,
+          booking: bookingInfo,
+          recipientType: 'guest',
+          paymentStatus: 'failed',
+          failureReason
+        });
+      }
+    } catch (error) {
+      console.error('[PAWAPAY_STATUS_CHECK] Error sending tour booking payment emails:', error);
     }
   }
 }

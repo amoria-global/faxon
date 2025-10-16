@@ -11,6 +11,13 @@ export const config = {
   companyLogo: 'https://jambolush.com/favicon.ico',
   companyPhone: process.env.COMPANY_PHONE || '+250788437347',
 
+      // Default split rules for bookings
+    defaultSplitRules: {
+      host: parseFloat(process.env.DEFAULT_HOST_SPLIT || '78.95'), // 70% to service provider
+      agent: parseFloat(process.env.DEFAULT_AGENT_SPLIT || '4.38'), // 20% to agent/affiliate
+      platform: parseFloat(process.env.DEFAULT_PLATFORM_SPLIT || '16.67') // 10% to platform
+    },
+
   // Brevo API
   brevoApiKey: process.env.BREVO_API_KEY || '',
   brevoSenderEmail: process.env.BREVO_SENDER_EMAIL || '',

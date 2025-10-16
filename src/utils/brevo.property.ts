@@ -210,7 +210,7 @@ export class BrevoPropertyMailingService {
               In the meantime, you can review your submission or add more details from your host dashboard.
             </div>
             <div class="button-center">
-              <a href="${company.website}/dashboard/properties/${property.id}" class="button">View My Submission</a>
+              <a href="https://app.jambolush.com" class="button">View My Submission</a>
             </div>
           </div>
           <div class="footer">
@@ -235,7 +235,7 @@ export class BrevoPropertyMailingService {
             <div class="alert-text">Start sharing your listing to attract your first guests.</div>
           </div>
           <div class="button-center">
-            <a href="${company.website}/properties/${property.id}" class="button">View My Live Listing</a>
+            <a href="https://jambolush.com" class="button">View My Live Listing</a>
           </div>`;
         break;
       case 'rejected':
@@ -247,7 +247,7 @@ export class BrevoPropertyMailingService {
             <div class="alert-text">${rejectionReason || 'Please review our listing guidelines and update your submission.'}</div>
           </div>
           <div class="button-center">
-            <a href="${company.website}/dashboard/properties/${property.id}/edit" class="button">Edit My Submission</a>
+            <a href="https://app.jambolush.com" class="button">Edit My Submission</a>
           </div>`;
         break;
       default: // inactive or other
@@ -255,7 +255,7 @@ export class BrevoPropertyMailingService {
           <div class="greeting">Property Status Update</div>
           <div class="message">Hi ${host.firstName}, the status of your property "<strong>${property.name}</strong>" has been updated to <strong>${newStatus}</strong>. It is no longer visible to guests.</div>
           <div class="button-center">
-            <a href="${company.website}/dashboard/properties/${property.id}" class="button">Manage My Property</a>
+            <a href="https://app.jambolush.com" class="button">Manage My Property</a>
           </div>`;
         break;
     }
@@ -306,7 +306,7 @@ export class BrevoPropertyMailingService {
               You can view the full review and post a public response from your dashboard.
             </div>
             <div class="button-center">
-              <a href="${company.website}/dashboard/reviews" class="button">Read and Respond</a>
+              <a href="https://app.jambolush.com" class="button">Read and Respond</a>
             </div>
           </div>
           <div class="footer">
@@ -329,7 +329,7 @@ export class BrevoPropertyMailingService {
       We've received your submission for "${context.property.name}" and it is now pending review.
       Our team will get back to you within 24-48 hours.
 
-      View your submission: ${context.company.website}/dashboard/properties/${context.property.id}
+      View your submission: https://app.jambolush.com
 
       Thanks,
       The ${context.company.name} Team
@@ -342,10 +342,10 @@ export class BrevoPropertyMailingService {
     
     switch(newStatus) {
         case 'active':
-            message = `Great news! Your property, "${property.name}", has been approved and is now live. View your listing: ${context.company.website}/properties/${property.id}`;
+            message = `Great news! Your property, "${property.name}", has been approved and is now live. View your listing: https://jambolush.com`;
             break;
         case 'rejected':
-            message = `There was an issue with your property submission for "${property.name}". Please log in to your dashboard to see the required changes: ${context.company.website}/dashboard/properties/${property.id}/edit`;
+            message = `There was an issue with your property submission for "${property.name}". Please log in to your dashboard to see the required changes: https://app.jambolush.com`;
             break;
         default:
             message = `The status of your property, "${property.name}", has been updated to "${newStatus}".`;
@@ -374,7 +374,7 @@ export class BrevoPropertyMailingService {
       Rating: ${review.rating} out of 5 stars
       Comment: "${review.comment}"
 
-      Respond to this review here: ${context.company.website}/dashboard/reviews
+      Respond to this review here: https://app.jambolush.com
 
       The ${context.company.name} Team
     `.trim();

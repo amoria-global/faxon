@@ -1753,7 +1753,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/login" class="button">
+                <a href="https://jambolush.com/all/login" class="button">
                   Log In to Your Account
                 </a>
               </div>
@@ -1765,9 +1765,9 @@ Weekly Admin Report - Jambolush Platform
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/dashboard">Dashboard</a>
-                <a href="mailto:${context.company.supportEmail}">Support</a>
+                <a href="https://jambolush.com">Home</a>
+                <a href="https://app.jambolush.com">Dashboard</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
@@ -1827,7 +1827,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/dashboard" class="button">
+                <a href="https://app.jambolush.com" class="button">
                   Explore Premium Features
                 </a>
               </div>
@@ -1839,9 +1839,9 @@ Weekly Admin Report - Jambolush Platform
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/dashboard">Dashboard</a>
-                <a href="mailto:${context.company.supportEmail}">Support</a>
+                <a href="https://jambolush.com">Home</a>
+                <a href="https://app.jambolush.com">Dashboard</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
@@ -1901,7 +1901,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/dashboard/verification" class="button">
+                <a href="https://app.jambolush.com/verification" class="button">
                   Resubmit Documents
                 </a>
               </div>
@@ -1913,9 +1913,9 @@ Weekly Admin Report - Jambolush Platform
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/dashboard">Dashboard</a>
-                <a href="mailto:${context.company.supportEmail}">Support</a>
+                <a href="https://jambolush.com">Home</a>
+                <a href="https://app.jambolush.com">Dashboard</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
@@ -1976,7 +1976,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/properties/${context.action.details?.propertyId || ''}" class="button">
+                <a href="https://jambolush.com/spaces/${context.action.details?.propertyId || ''}" class="button">
                   View Your Listing
                 </a>
               </div>
@@ -1988,9 +1988,9 @@ Weekly Admin Report - Jambolush Platform
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/dashboard">Dashboard</a>
-                <a href="mailto:${context.company.supportEmail}">Support</a>
+                <a href="https://jambolush.com">Home</a>
+                <a href="https://app.jambolush.com">Dashboard</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
@@ -2052,7 +2052,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/properties/${context.action.details?.propertyId || ''}/edit" class="button">
+                <a href="https://jambolush.com/spaces/${context.action.details?.propertyId || ''}/edit" class="button">
                   Update Your Listing
                 </a>
               </div>
@@ -2064,9 +2064,9 @@ Weekly Admin Report - Jambolush Platform
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/dashboard">Dashboard</a>
-                <a href="mailto:${context.company.supportEmail}">Support</a>
+                <a href="https://jambolush.com">Home</a>
+                <a href="https://app.jambolush.com">Dashboard</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
@@ -2140,9 +2140,9 @@ Weekly Admin Report - Jambolush Platform
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/dashboard">Dashboard</a>
-                <a href="mailto:${context.company.supportEmail}">Support</a>
+                <a href="https://jambolush.com">Home</a>
+                <a href="https://app.jambolush.com">Dashboard</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
@@ -2203,7 +2203,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/tours/${context.action.details?.tourId || ''}" class="button">
+                <a href="https://jambolush.com/tours/${context.action.details?.tourId || ''}" class="button">
                   View Your Tour
                 </a>
               </div>
@@ -2215,9 +2215,9 @@ Weekly Admin Report - Jambolush Platform
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/dashboard">Dashboard</a>
-                <a href="mailto:${context.company.supportEmail}">Support</a>
+                <a href="https://jambolush.com">Home</a>
+                <a href="https://app.jambolush.com">Dashboard</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
@@ -2291,9 +2291,9 @@ Weekly Admin Report - Jambolush Platform
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/dashboard">Dashboard</a>
-                <a href="mailto:${context.company.supportEmail}">Support</a>
+                <a href="https://jambolush.com">Home</a>
+                <a href="https://app.jambolush.com">Dashboard</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
@@ -2368,7 +2368,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/bookings" class="button">
+                <a href="https://app.jambolush.com" class="button">
                   View Your Bookings
                 </a>
               </div>
@@ -2380,9 +2380,9 @@ Weekly Admin Report - Jambolush Platform
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/dashboard">Dashboard</a>
-                <a href="mailto:${context.company.supportEmail}">Support</a>
+                <a href="https://jambolush.com">Home</a>
+                <a href="https://app.jambolush.com">Dashboard</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
@@ -2457,9 +2457,9 @@ Weekly Admin Report - Jambolush Platform
             
             <div class="footer">
               <div class="footer-links">
-                <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/dashboard">Dashboard</a>
-                <a href="mailto:${context.company.supportEmail}">Support</a>
+                <a href="https://jambolush.com">Home</a>
+                <a href="https://app.jambolush.com">Dashboard</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
@@ -2533,7 +2533,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/earnings" class="button">
+                <a href="https://app.jambolush.com" class="button">
                   View Wallet History
                 </a>
               </div>
@@ -2546,7 +2546,7 @@ Weekly Admin Report - Jambolush Platform
             <div class="footer">
               <div class="footer-links">
                 <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/earnings">Wallet</a>
+                <a href="https://app.jambolush.com">Wallet</a>
                 <a href="mailto:${context.company.supportEmail}">Support</a>
               </div>
               <div class="footer-text">
@@ -2611,7 +2611,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/login" class="button">
+                <a href="https://jambolush.com/all/login" class="button">
                   Log In Again
                 </a>
               </div>
@@ -2627,7 +2627,7 @@ Weekly Admin Report - Jambolush Platform
             <div class="footer">
               <div class="footer-links">
                 <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/security">Security Settings</a>
+                <a href="https://app.jambolush.com">Security Settings</a>
                 <a href="mailto:${context.company.supportEmail}">Support</a>
               </div>
               <div class="footer-text">
@@ -2705,7 +2705,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/earnings/transactions" class="button">
+                <a href="https://app.jambolush.com/transactions" class="button">
                   View Transaction History
                 </a>
               </div>
@@ -2714,7 +2714,7 @@ Weekly Admin Report - Jambolush Platform
             <div class="footer">
               <div class="footer-links">
                 <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/earnings">Wallet</a>
+                <a href="https://app.jambolush.com">Wallet</a>
                 <a href="mailto:${context.company.supportEmail}">Support</a>
               </div>
               <div class="footer-text">
@@ -2793,7 +2793,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/earnings" class="button">
+                <a href="https://app.jambolush.com" class="button">
                   Go to Wallet
                 </a>
               </div>
@@ -2806,7 +2806,7 @@ Weekly Admin Report - Jambolush Platform
             <div class="footer">
               <div class="footer-links">
                 <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/earnings">Wallet</a>
+                <a href="https://app.jambolush.com">Wallet</a>
                 <a href="mailto:${context.company.supportEmail}">Support</a>
               </div>
               <div class="footer-text">
@@ -2886,7 +2886,7 @@ Weekly Admin Report - Jambolush Platform
               </div>
               
               <div class="button-center">
-                <a href="${context.company.website}/earnings" class="button">
+                <a href="https://app.jambolush.com" class="button">
                   View Your Wallet
                 </a>
               </div>
@@ -2895,7 +2895,7 @@ Weekly Admin Report - Jambolush Platform
             <div class="footer">
               <div class="footer-links">
                 <a href="${context.company.website}">Home</a>
-                <a href="${context.company.website}/earnings">Wallet</a>
+                <a href="https://app.jambolush.com">Wallet</a>
                 <a href="mailto:${context.company.supportEmail}">Support</a>
               </div>
               <div class="footer-text">
@@ -2950,7 +2950,7 @@ WHAT'S RESTORED:
 - Wallet and transaction access
 - All platform features
 
-Log in: ${context.company.website}/login
+Log in: https://jambolush.com/all/login
 
 Welcome back!
 
@@ -2973,7 +2973,7 @@ WHAT'S UNLOCKED:
 - Access to premium listings
 - Enhanced account security
 
-Explore premium features: ${context.company.website}/dashboard
+Explore premium features: https://app.jambolush.com
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
@@ -2995,7 +2995,7 @@ NEXT STEPS:
 3. Ensure all information is visible
 4. Resubmit through your dashboard
 
-Resubmit: ${context.company.website}/dashboard/verification
+Resubmit: https://app.jambolush.com/verification
 
 Support: ${context.company.supportEmail}
 
@@ -3019,7 +3019,7 @@ WHAT'S NEXT:
 - Respond promptly to inquiries
 - Build your reputation with great hosting
 
-View listing: ${context.company.website}/properties/${context.action.details?.propertyId || ''}
+View listing: https://jambolush.com/spaces/${context.action.details?.propertyId || ''}
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
@@ -3043,7 +3043,7 @@ HOW TO GET APPROVED:
 3. Ensure all details are accurate
 4. Resubmit for review
 
-Update listing: ${context.company.website}/properties/${context.action.details?.propertyId || ''}/edit
+Update listing: https://jambolush.com/spaces/${context.action.details?.propertyId || ''}/edit
 
 Support: ${context.company.supportEmail}
 
@@ -3091,7 +3091,7 @@ WHAT'S NEXT:
 - Respond quickly to inquiries
 - Deliver exceptional experiences
 
-View tour: ${context.company.website}/tours/${context.action.details?.tourId || ''}
+View tour: https://jambolush.com/tours/${context.action.details?.tourId || ''}
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
@@ -3136,7 +3136,7 @@ ${context.action.reason ? `REASON: ${context.action.reason}` : ''}
 
 ${refundAmount > 0 ? `REFUND: RWF ${refundAmount.toLocaleString()} will be processed within 5-7 business days.` : 'No refund applicable.'}
 
-View bookings: ${context.company.website}/bookings
+View bookings: https://app.jambolush.com
 
 Questions? Contact: ${context.company.supportEmail}
 
@@ -3187,7 +3187,7 @@ TRANSACTION DETAILS:
 ${context.action.reason ? `- Reason: ${context.action.reason}` : ''}
 - Date: ${new Date(context.action.timestamp).toLocaleString()}
 
-View wallet: ${context.company.website}/earnings
+View wallet: https://app.jambolush.com
 
 Questions? Contact: ${context.company.supportEmail}
 
@@ -3213,7 +3213,7 @@ WHAT THIS MEANS:
 
 If you didn't request this, contact support immediately: ${context.company.supportEmail}
 
-Log in: ${context.company.website}/login
+Log in: https://jambolush.com/all/login
 
 Time: ${new Date(context.action.timestamp).toLocaleString()}
 
@@ -3239,7 +3239,7 @@ DETAILS:
 
 The funds should arrive in your account within 3-5 business days.
 
-View transactions: ${context.company.website}/earnings/transactions
+View transactions: https://app.jambolush.com/transactions
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
@@ -3269,7 +3269,7 @@ NEXT STEPS:
 - Submit a new withdrawal request
 - Contact support if needed
 
-Go to wallet: ${context.company.website}/earnings
+Go to wallet: https://app.jambolush.com
 
 Support: ${context.company.supportEmail}
 
@@ -3295,7 +3295,7 @@ ${context.action.reason ? `- Note: ${context.action.reason}` : ''}
 
 You can now withdraw these funds or use them on the platform.
 
-View wallet: ${context.company.website}/earnings
+View wallet: https://app.jambolush.com
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
