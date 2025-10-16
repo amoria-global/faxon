@@ -1,5 +1,5 @@
 // src/utils/brevo.payment-status.ts - Payment Status Email Templates
-import axios from 'axios';
+import * as Brevo from '@getbrevo/brevo';
 import { config } from '../config/config';
 import { PropertyBookingInfo, TourBookingInfo } from '../types/booking.types';
 
@@ -36,34 +36,131 @@ export interface PaymentStatusMailingContext {
   failureReason?: string;
 }
 
+interface BrevoErrorResponse {
+  code?: string;
+  message?: string;
+  details?: any;
+}
+
+interface BrevoApiError extends Error {
+  response?: {
+    status?: number;
+    statusText?: string;
+    body?: BrevoErrorResponse;
+  };
+  code?: string;
+}
+
 export class BrevoPaymentStatusMailingService {
-  private apiKey: string;
-  private apiUrl = 'https://api.brevo.com/v3';
+  private transactionalEmailsApi: Brevo.TransactionalEmailsApi;
   private defaultSender: { name: string; email: string };
 
   constructor() {
-    this.apiKey = config.brevoApiKey;
-    this.defaultSender = {
-      name: 'Jambolush Bookings',
-      email: config.brevoSenderEmail
-    };
+    try {
+      // Initialize API
+      this.transactionalEmailsApi = new Brevo.TransactionalEmailsApi();
+
+      // Validate configuration
+      if (!config.brevoApiKey) {
+        throw new Error('Brevo API key is required but not configured');
+      }
+
+      if (!config.brevoSenderEmail) {
+        throw new Error('Brevo sender email is required but not configured');
+      }
+
+      // Set API key
+      this.transactionalEmailsApi.setApiKey(
+        Brevo.TransactionalEmailsApiApiKeys.apiKey, 
+        config.brevoApiKey
+      );
+
+      this.defaultSender = {
+        name: 'Jambolush Bookings',
+        email: config.brevoSenderEmail
+      };
+
+    } catch (error: any) {
+      throw error;
+    }
   }
 
-  private async makeRequest(endpoint: string, data: any) {
+  // --- ERROR HANDLING UTILITIES ---
+  private logBrevoError(context: string, error: BrevoApiError, additionalData?: any): void {
+    const errorInfo = {
+      service: 'BrevoPaymentStatusMailingService',
+      context,
+      timestamp: new Date().toISOString(),
+      error: {
+        message: error.message,
+        code: error.code,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      },
+      brevoResponse: error.response ? {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        body: error.response.body,
+      } : null,
+      additionalData: additionalData ? JSON.stringify(additionalData) : null,
+    };
+
+    console.error('Brevo API Error:', JSON.stringify(errorInfo, null, 2));
+  }
+
+  private handleBrevoError(context: string, error: BrevoApiError, additionalData?: any): Error {
+    this.logBrevoError(context, error, additionalData);
+
+    // Handle specific Brevo error codes
+    if (error.response?.status) {
+      switch (error.response.status) {
+        case 400:
+          return new Error(`Invalid request to Brevo API: ${error.response.body?.message || error.message}`);
+        case 401:
+          return new Error('Brevo API authentication failed - check your API key configuration');
+        case 402:
+          return new Error('Brevo account has insufficient credits - please add credits to your account');
+        case 403:
+          return new Error('Brevo API access forbidden - check your account permissions and plan limits');
+        case 404:
+          return new Error(`Brevo resource not found: ${error.response.body?.message || error.message}`);
+        case 429:
+          return new Error('Brevo API rate limit exceeded - please retry after some time');
+        case 500:
+        case 502:
+        case 503:
+          return new Error('Brevo service temporarily unavailable - please retry later');
+        default:
+          return new Error(`Brevo API error (${error.response.status}): ${error.response.body?.message || error.message}`);
+      }
+    }
+
+    // Handle network errors
+    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      return new Error('Unable to connect to Brevo API - check your internet connection');
+    }
+
+    if (error.code === 'ETIMEDOUT') {
+      return new Error('Brevo API request timed out - please retry');
+    }
+
+    // Default error
+    return new Error(`Brevo API error: ${error.message}`);
+  }
+
+  private async sendEmail(data: BrevoEmailData): Promise<void> {
     try {
-      await axios({
-        method: 'POST',
-        url: `${this.apiUrl}${endpoint}`,
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'api-key': this.apiKey
-        },
-        data
-      });
+      const sendSmtpEmail = new Brevo.SendSmtpEmail();
+      sendSmtpEmail.sender = data.sender;
+      sendSmtpEmail.to = data.to;
+      sendSmtpEmail.subject = data.subject;
+      sendSmtpEmail.htmlContent = data.htmlContent;
+      if (data.textContent) {
+        sendSmtpEmail.textContent = data.textContent;
+      }
+
+      await this.transactionalEmailsApi.sendTransacEmail(sendSmtpEmail);
     } catch (error: any) {
-      console.error('Brevo API Error:', error.response?.data || error.message);
-      throw new Error(`Failed to send email: ${error.response?.data?.message || error.message}`);
+      throw this.handleBrevoError('sendEmail', error, data);
     }
   }
 
@@ -79,7 +176,7 @@ export class BrevoPaymentStatusMailingService {
       textContent: this.getBookingReceivedTextTemplate(context)
     };
 
-    await this.makeRequest('/smtp/email', emailData);
+    await this.sendEmail(emailData);
     console.log(`Booking received (awaiting payment) email sent to ${context.user.email}`);
   }
 
@@ -95,7 +192,7 @@ export class BrevoPaymentStatusMailingService {
       textContent: this.getDepositReceivedTextTemplate(context)
     };
 
-    await this.makeRequest('/smtp/email', emailData);
+    await this.sendEmail(emailData);
     console.log(`Deposit received email sent to ${context.user.email}`);
   }
 
@@ -111,24 +208,31 @@ export class BrevoPaymentStatusMailingService {
       textContent: this.getPaymentCompletedTextTemplate(context)
     };
 
-    await this.makeRequest('/smtp/email', emailData);
+    await this.sendEmail(emailData);
     console.log(`Payment completed email sent to ${context.user.email}`);
   }
 
   // === PAYMENT FAILED EMAIL ===
   async sendPaymentFailedEmail(context: PaymentStatusMailingContext): Promise<void> {
-    const bookingName = 'property' in context.booking ? context.booking.property.name : context.booking.tour.title;
+    try {
+      const bookingName = 'property' in context.booking ? context.booking.property.name : context.booking.tour.title;
 
-    const emailData: BrevoEmailData = {
-      sender: this.defaultSender,
-      to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-      subject: `Payment Failed - Action Required for ${bookingName}`,
-      htmlContent: this.getPaymentFailedTemplate(context),
-      textContent: this.getPaymentFailedTextTemplate(context)
-    };
+      console.log(`[BREVO] Preparing to send payment failed email to ${context.user.email} for booking ${context.booking.id}`);
 
-    await this.makeRequest('/smtp/email', emailData);
-    console.log(`Payment failed email sent to ${context.user.email}`);
+      const emailData: BrevoEmailData = {
+        sender: this.defaultSender,
+        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+        subject: `Payment Failed - Action Required for ${bookingName}`,
+        htmlContent: this.getPaymentFailedTemplate(context),
+        textContent: this.getPaymentFailedTextTemplate(context)
+      };
+
+      await this.sendEmail(emailData);
+      console.log(`[BREVO] ✅ Payment failed email sent successfully to ${context.user.email}`);
+    } catch (error: any) {
+      console.error(`[BREVO] ❌ Failed to send payment failed email to ${context.user.email}:`, error.message);
+      throw error;
+    }
   }
 
   // === HOST/GUIDE NOTIFICATION EMAILS ===
@@ -144,7 +248,7 @@ export class BrevoPaymentStatusMailingService {
       textContent: this.getHostNewBookingTextTemplate(context)
     };
 
-    await this.makeRequest('/smtp/email', emailData);
+    await this.sendEmail(emailData);
     console.log(`New booking alert sent to host/guide ${context.user.email}`);
   }
 
@@ -160,7 +264,7 @@ export class BrevoPaymentStatusMailingService {
       textContent: this.getHostPaymentConfirmedTextTemplate(context)
     };
 
-    await this.makeRequest('/smtp/email', emailData);
+    await this.sendEmail(emailData);
     console.log(`Payment confirmed notification sent to host/guide ${context.user.email}`);
   }
 
@@ -274,7 +378,7 @@ export class BrevoPaymentStatusMailingService {
               ${detailsTable}
             </div>
             <div class="button-center">
-              <a href="${company.website}/bookings/${booking.id}/payment" class="button">Complete Payment Now</a>
+              <a href="https://jambolush.com/payment/pending?ref=${booking.id}" class="button">Complete Payment Now</a>
             </div>
             <div class="message" style="margin-top: 24px; font-size: 14px; color: #6b7280;">
               <strong>What happens next?</strong><br>
@@ -324,7 +428,7 @@ export class BrevoPaymentStatusMailingService {
               You can view your full booking details and contact information anytime from your dashboard.
             </div>
             <div class="button-center">
-              <a href="${company.website}/bookings/${booking.id}" class="button">View Booking Details</a>
+              <a href="https://app.jambolush.com" class="button">View Booking Details</a>
             </div>
           </div>
           <div class="footer">
@@ -362,7 +466,7 @@ export class BrevoPaymentStatusMailingService {
               Don't worry! You can try again with a different payment method or contact our support team for assistance.
             </div>
             <div class="button-center">
-              <a href="${company.website}/bookings/${booking.id}/payment" class="button">Retry Payment</a>
+              <a href="https://jambolush.com/payment/failed?ref=${booking.id}" class="button">Retry Payment</a>
             </div>
           </div>
           <div class="footer">
@@ -453,7 +557,7 @@ export class BrevoPaymentStatusMailingService {
               3. If confirmed, provide check-in instructions to your guest
             </div>
             <div class="button-center">
-              <a href="${company.website}/dashboard/bookings/${booking.id}" class="button">Review & Confirm Booking</a>
+              <a href="https://app.jambolush.com/all/host/bookings" class="button">Review & Confirm Booking</a>
             </div>
           </div>
           <div class="footer">
@@ -482,7 +586,7 @@ export class BrevoPaymentStatusMailingService {
 
       Booking ID: ${booking.id}
 
-      Complete payment: ${context.company.website}/bookings/${booking.id}/payment
+      Complete payment: https://jambolush.com/payment/pending?ref=${booking.id}
 
       Questions? Contact us at ${context.company.supportEmail}
     `.trim();
@@ -496,7 +600,7 @@ export class BrevoPaymentStatusMailingService {
 
       Your payment has been successfully processed and your booking (ID: ${context.booking.id}) is now confirmed!
 
-      View booking details: ${context.company.website}/bookings/${context.booking.id}
+      View booking details: https://app.jambolush.com
 
       We're excited to host you!
     `.trim();
@@ -511,7 +615,7 @@ export class BrevoPaymentStatusMailingService {
       Unfortunately, we couldn't process your payment for booking ID ${context.booking.id}.
       ${context.failureReason ? `\nReason: ${context.failureReason}` : ''}
 
-      Retry payment: ${context.company.website}/bookings/${context.booking.id}/payment
+      Retry payment: https://jambolush.com/payment/failed?ref=${context.booking.id}
 
       Need help? Contact us at ${context.company.supportEmail}
     `.trim();
@@ -552,7 +656,7 @@ export class BrevoPaymentStatusMailingService {
 
       ${guestInfo.firstName} ${guestInfo.lastName} has completed payment for booking ID ${context.booking.id}.
 
-      Please review and confirm this booking: ${context.company.website}/dashboard/bookings/${context.booking.id}
+      Please review and confirm this booking: https://app.jambolush.com/all/host/bookings
     `.trim();
   }
 }

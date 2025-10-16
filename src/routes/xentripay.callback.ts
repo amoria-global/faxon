@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { XentriPayEscrowService } from '../services/xentripay-escrow.service';
 import { XentriPayService } from '../services/xentripay.service';
 import { BrevoMailingService } from '../utils/brevo.xentripay';
+import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
 import config from '../config/config';
 
 const router = express.Router();
@@ -24,6 +25,7 @@ const xentriPayService = new XentriPayService({
 });
 
 const mailingService = new BrevoMailingService();
+const paymentEmailService = new BrevoPaymentStatusMailingService();
 const escrowService = new XentriPayEscrowService(xentriPayService, mailingService);
 
 // ==================== HELPER FUNCTIONS ====================
@@ -103,22 +105,62 @@ async function processWebhook(callbackData: any): Promise<boolean> {
   try {
     console.log(`[XENTRIPAY_CALLBACK] Processing webhook for ${callbackData.refid}`);
     console.log(`[XENTRIPAY_CALLBACK] Status: ${callbackData.status}`);
-    
-    // Find transaction by refid
-    const transactions = Array.from((escrowService as any).transactions.values());
-    const transaction: any = transactions.find(
-      (tx: any) => tx.xentriPayRefId === callbackData.refid
-    );
 
-    if (!transaction) {
+    // Import prisma for database operations
+    const { PrismaClient } = require('@prisma/client');
+    const prisma = new PrismaClient();
+
+    // Find escrow transaction by externalId (XentriPay refid)
+    const escrowTransaction = await prisma.escrowTransaction.findFirst({
+      where: { externalId: callbackData.refid },
+      include: {
+        user: { select: { id: true, email: true, firstName: true, lastName: true } },
+        recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
+      }
+    });
+
+    if (!escrowTransaction) {
       console.error('[XENTRIPAY_CALLBACK] Transaction not found for refid:', callbackData.refid);
       return false;
     }
 
-    // Check latest status from XentriPay
-    await escrowService.checkCollectionStatus(transaction.id);
+    const previousStatus = escrowTransaction.status;
+    let newStatus = previousStatus;
+
+    // Map XentriPay status to escrow status
+    if (callbackData.status === 'SUCCESS') {
+      newStatus = 'HELD';
+    } else if (callbackData.status === 'FAILED') {
+      newStatus = 'FAILED';
+    } else {
+      newStatus = 'PENDING';
+    }
+
+    // Only proceed if status has changed
+    if (newStatus !== previousStatus) {
+      console.log(`[XENTRIPAY_CALLBACK] Status changed: ${previousStatus} → ${newStatus}`);
+
+      // Update escrow transaction
+      await prisma.escrowTransaction.update({
+        where: { id: escrowTransaction.id },
+        data: {
+          status: newStatus,
+          fundedAt: newStatus === 'HELD' ? new Date() : null,
+          cancelledAt: newStatus === 'FAILED' ? new Date() : null,
+          updatedAt: new Date()
+        }
+      });
+
+      // Handle booking-related updates if this is a booking payment
+      if (newStatus === 'HELD') {
+        await handlePaymentSuccess(escrowTransaction, prisma);
+      } else if (newStatus === 'FAILED') {
+        await handlePaymentFailure(escrowTransaction, prisma);
+      }
+    }
 
     console.log(`[XENTRIPAY_CALLBACK] ✅ Webhook processed successfully: ${callbackData.refid}`);
+    await prisma.$disconnect();
     return true;
 
   } catch (error: any) {
@@ -127,6 +169,481 @@ async function processWebhook(callbackData: any): Promise<boolean> {
       refid: callbackData.refid
     });
     return false;
+  }
+}
+
+/**
+ * Handle successful payment completion
+ */
+async function handlePaymentSuccess(escrowTransaction: any, prisma: any): Promise<void> {
+  try {
+    const reference = escrowTransaction.reference;
+
+    // Check if this is a booking payment
+    if (reference && reference.startsWith('BOOKING-')) {
+      // Find booking by transaction reference
+      const booking = await prisma.booking.findFirst({
+        where: { transactionId: reference },
+        include: {
+          property: {
+            include: {
+              host: { select: { id: true, email: true, firstName: true, lastName: true } },
+              agent: { select: { id: true, email: true, firstName: true, lastName: true } }
+            }
+          },
+          guest: { select: { id: true, email: true, firstName: true, lastName: true } }
+        }
+      });
+
+      if (booking) {
+        console.log('[XENTRIPAY_CALLBACK] Processing booking payment:', booking.id);
+
+        // Update booking status
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            paymentStatus: 'completed',
+            status: 'confirmed'
+          }
+        });
+
+        // Calculate split amounts (platform gets 14%)
+        const hasAgent = booking.property.agent !== null;
+        const splitRules = calculateSplitRules(hasAgent);
+        const splitAmounts = calculateSplitAmounts(booking.totalPrice, splitRules);
+
+        // Create owner payment record
+        if (booking.property.host) {
+          await prisma.ownerPayment.create({
+            data: {
+              ownerId: booking.property.host.id,
+              propertyId: booking.propertyId,
+              bookingId: booking.id,
+              amount: booking.totalPrice,
+              platformFee: splitAmounts.platform,
+              netAmount: splitAmounts.host,
+              currency: 'USD',
+              status: 'pending',
+              checkInRequired: true,
+              checkInValidated: false
+            }
+          }).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to create owner payment:', err));
+        }
+
+        // Create agent commission record
+        if (booking.property.agent && splitAmounts.agent > 0) {
+          await prisma.agentCommission.create({
+            data: {
+              agentId: booking.property.agent.id,
+              propertyId: booking.propertyId,
+              bookingId: booking.id,
+              amount: splitAmounts.agent,
+              commissionRate: splitRules.agent,
+              status: 'pending'
+            }
+          }).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to create agent commission:', err));
+        }
+
+        // ✅ UPDATE WALLET BALANCES IMMEDIATELY ON PAYMENT COMPLETION
+        console.log('[XENTRIPAY_CALLBACK] Updating wallet balances for payment completion', {
+          bookingId: booking.id,
+          splitAmounts
+        });
+
+        // Update host wallet
+        if (booking.property.host) {
+          await updateWalletBalance(
+            prisma,
+            booking.property.host.id,
+            splitAmounts.host,
+            'PAYMENT_RECEIVED',
+            reference
+          ).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to update host wallet:', err));
+        }
+
+        // Update agent wallet (if exists)
+        if (booking.property.agent && splitAmounts.agent > 0) {
+          await updateWalletBalance(
+            prisma,
+            booking.property.agent.id,
+            splitAmounts.agent,
+            'COMMISSION_EARNED',
+            reference
+          ).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to update agent wallet:', err));
+        }
+
+        // Update platform wallet
+        if (splitAmounts.platform > 0) {
+          await updateWalletBalance(
+            prisma,
+            1, // Platform account (user ID 1)
+            splitAmounts.platform,
+            'PLATFORM_FEE',
+            reference
+          ).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to update platform wallet:', err));
+        }
+
+        console.log('[XENTRIPAY_CALLBACK] Wallet balances updated successfully');
+
+        // Mark booking as wallet distributed
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            walletDistributed: true,
+            walletDistributedAt: new Date()
+          }
+        }).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to mark booking as wallet distributed:', err));
+
+        // Log activities
+        await logActivity(prisma, booking.guestId, 'PAYMENT_COMPLETED', 'booking', booking.id, {
+          amount: booking.totalPrice,
+          currency: 'USD',
+          provider: 'Xentripay',
+          reference
+        });
+
+        if (booking.property.host) {
+          await logActivity(prisma, booking.property.host.id, 'BOOKING_PAYMENT_RECEIVED', 'booking', booking.id, {
+            amount: booking.totalPrice,
+            netAmount: splitAmounts.host,
+            platformFee: splitAmounts.platform,
+            provider: 'Xentripay'
+          });
+        }
+
+        if (booking.property.agent) {
+          await logActivity(prisma, booking.property.agent.id, 'AGENT_COMMISSION_EARNED', 'booking', booking.id, {
+            amount: splitAmounts.agent,
+            commissionRate: splitRules.agent,
+            provider: 'Xentripay'
+          });
+        }
+
+        console.log('[XENTRIPAY_CALLBACK] ✅ Booking payment processed successfully');
+
+        // Send payment confirmation emails to guest, host, and agent
+        await sendPropertyBookingPaymentEmails(reference, 'completed');
+      }
+    }
+  } catch (error) {
+    console.error('[XENTRIPAY_CALLBACK] Error handling payment success:', error);
+  }
+}
+
+/**
+ * Handle payment failure
+ */
+async function handlePaymentFailure(escrowTransaction: any, prisma: any): Promise<void> {
+  try {
+    const reference = escrowTransaction.reference;
+    const failureReason = escrowTransaction.failureReason || 'Payment was not completed';
+
+    if (reference && reference.startsWith('BOOKING-')) {
+      const booking = await prisma.booking.findFirst({
+        where: { transactionId: reference },
+        include: {
+          guest: { select: { id: true } }
+        }
+      });
+
+      if (booking) {
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            paymentStatus: 'failed'
+          }
+        });
+
+        await logActivity(prisma, booking.guestId, 'PAYMENT_FAILED', 'booking', booking.id, {
+          provider: 'Xentripay',
+          reference,
+          failureReason
+        });
+
+        // Send payment failure email to guest
+        await sendPropertyBookingPaymentEmails(reference, 'failed', failureReason);
+
+        console.log('[XENTRIPAY_CALLBACK] Booking payment marked as failed');
+      }
+    }
+  } catch (error) {
+    console.error('[XENTRIPAY_CALLBACK] Error handling payment failure:', error);
+  }
+}
+
+/**
+ * Calculate split rules for bookings - uses config values
+ */
+function calculateSplitRules(hasAgent: boolean): { platform: number; agent: number; host: number } {
+  const config = require('../config/config').default;
+  const configRules = config.escrow.defaultSplitRules;
+
+  if (hasAgent) {
+    return {
+      platform: configRules.platform,
+      agent: configRules.agent,
+      host: configRules.host
+    };
+  } else {
+    return {
+      platform: configRules.platform,
+      agent: 0,
+      host: configRules.host + configRules.agent
+    };
+  }
+}
+
+/**
+ * Calculate split amounts
+ */
+function calculateSplitAmounts(amount: number, rules: { platform: number; agent: number; host: number }) {
+  return {
+    platform: Math.round((amount * rules.platform / 100) * 100) / 100,
+    agent: Math.round((amount * rules.agent / 100) * 100) / 100,
+    host: Math.round((amount * rules.host / 100) * 100) / 100
+  };
+}
+
+/**
+ * Log activity for a user
+ */
+async function logActivity(
+  prisma: any,
+  userId: number,
+  action: string,
+  resourceType: string,
+  resourceId: string,
+  details?: any
+): Promise<void> {
+  try {
+    await prisma.activityLog.create({
+      data: {
+        userId,
+        action,
+        resourceType,
+        resourceId,
+        details: details || undefined,
+        status: 'success'
+      }
+    });
+  } catch (error) {
+    console.error('[XENTRIPAY_CALLBACK] Failed to log activity:', error);
+  }
+}
+
+/**
+ * Update wallet balance for a user
+ */
+async function updateWalletBalance(
+  prisma: any,
+  userId: number,
+  amount: number,
+  type: string,
+  reference: string
+): Promise<void> {
+  try {
+    // Get or create wallet for user
+    let wallet = await prisma.wallet.findUnique({
+      where: { userId }
+    });
+
+    if (!wallet) {
+      wallet = await prisma.wallet.create({
+        data: {
+          userId,
+          balance: 0,
+          currency: 'USD',
+          isActive: true
+        }
+      });
+    }
+
+    const newBalance = wallet.balance + amount;
+
+    // Update wallet balance
+    await prisma.wallet.update({
+      where: { userId },
+      data: { balance: newBalance }
+    });
+
+    // Create wallet transaction record
+    await prisma.walletTransaction.create({
+      data: {
+        walletId: wallet.id,
+        type: amount > 0 ? 'credit' : 'debit',
+        amount: Math.abs(amount),
+        balanceBefore: wallet.balance,
+        balanceAfter: newBalance,
+        reference,
+        description: `${type} - ${reference}`
+      }
+    });
+
+    console.log('[XENTRIPAY_CALLBACK] Wallet updated successfully', {
+      userId,
+      amount,
+      previousBalance: wallet.balance,
+      newBalance
+    });
+  } catch (error) {
+    console.error('[XENTRIPAY_CALLBACK] Failed to update wallet balance:', error);
+    throw error;
+  }
+}
+
+/**
+ * Send payment status emails for property bookings
+ */
+async function sendPropertyBookingPaymentEmails(
+  bookingId: string,
+  status: 'completed' | 'failed',
+  failureReason?: string
+): Promise<void> {
+  try {
+    const { PrismaClient } = require('@prisma/client');
+    const prisma = new PrismaClient();
+
+    const booking = await prisma.booking.findFirst({
+      where: {
+        OR: [{ id: bookingId }, { transactionId: bookingId }]
+      },
+      include: {
+        property: {
+          include: {
+            host: true,
+            agent: {
+              select: { id: true, email: true, firstName: true, lastName: true }
+            }
+          }
+        },
+        guest: true
+      }
+    });
+
+    if (!booking || !booking.guest || !booking.property.host) {
+      await prisma.$disconnect();
+      return;
+    }
+
+    const bookingInfo: any = {
+      id: booking.id,
+      propertyId: booking.propertyId,
+      property: {
+        name: booking.property.name,
+        location: booking.property.location,
+        images: typeof booking.property.images === 'string' ? JSON.parse(booking.property.images) : booking.property.images || {},
+        pricePerNight: booking.property.pricePerNight,
+        hostName: `${booking.property.host.firstName} ${booking.property.host.lastName}`,
+        hostEmail: booking.property.host.email,
+        hostPhone: booking.property.host.phone || undefined
+      },
+      guestId: booking.guestId,
+      guest: {
+        firstName: booking.guest.firstName,
+        lastName: booking.guest.lastName,
+        email: booking.guest.email,
+        phone: booking.guest.phone || undefined,
+        profileImage: booking.guest.profileImage || undefined
+      },
+      checkIn: booking.checkIn.toISOString(),
+      checkOut: booking.checkOut.toISOString(),
+      guests: booking.guests,
+      nights: Math.ceil((booking.checkOut.getTime() - booking.checkIn.getTime()) / (1000 * 60 * 60 * 24)),
+      totalPrice: booking.totalPrice,
+      status: booking.status,
+      paymentStatus: booking.paymentStatus,
+      message: booking.message || undefined,
+      specialRequests: booking.specialRequests || undefined,
+      checkInInstructions: booking.checkInInstructions || undefined,
+      checkOutInstructions: booking.checkOutInstructions || undefined,
+      createdAt: booking.createdAt.toISOString(),
+      updatedAt: booking.updatedAt.toISOString()
+    };
+
+    const company = {
+      name: 'Jambolush',
+      website: 'https://jambolush.com',
+      supportEmail: 'support@jambolush.com',
+      logo: 'https://jambolush.com/favicon.ico'
+    };
+
+    if (status === 'completed') {
+      // Send confirmation to guest
+      await paymentEmailService.sendPaymentCompletedEmail({
+        user: {
+          firstName: booking.guest.firstName,
+          lastName: booking.guest.lastName,
+          email: booking.guest.email,
+          id: booking.guestId
+        },
+        company,
+        booking: bookingInfo,
+        recipientType: 'guest',
+        paymentStatus: 'completed',
+        paymentAmount: booking.totalPrice,
+        paymentCurrency: 'USD'
+      });
+
+      // Send notification to host
+      await paymentEmailService.sendPaymentConfirmedToHost({
+        user: {
+          firstName: booking.property.host.firstName,
+          lastName: booking.property.host.lastName,
+          email: booking.property.host.email,
+          id: booking.property.hostId || 0
+        },
+        company,
+        booking: bookingInfo,
+        recipientType: 'host',
+        paymentStatus: 'completed',
+        paymentAmount: booking.totalPrice,
+        paymentCurrency: 'USD'
+      });
+
+      // Send notification to agent if exists
+      if (booking.property.agent && booking.property.agent.id) {
+        const agent = await prisma.user.findUnique({
+          where: { id: booking.property.agent.id },
+          select: { id: true, email: true, firstName: true, lastName: true }
+        });
+
+        if (agent) {
+          await paymentEmailService.sendPaymentConfirmedToHost({
+            user: {
+              firstName: agent.firstName,
+              lastName: agent.lastName,
+              email: agent.email,
+              id: agent.id
+            },
+            company,
+            booking: bookingInfo,
+            recipientType: 'host', // Using 'host' as recipient type for agent too
+            paymentStatus: 'completed',
+            paymentAmount: booking.totalPrice,
+            paymentCurrency: 'USD'
+          }).catch(err => console.error('[XENTRIPAY_CALLBACK] Error sending agent notification:', err));
+        }
+      }
+    } else if (status === 'failed') {
+      // Send failure notification to guest
+      await paymentEmailService.sendPaymentFailedEmail({
+        user: {
+          firstName: booking.guest.firstName,
+          lastName: booking.guest.lastName,
+          email: booking.guest.email,
+          id: booking.guestId
+        },
+        company,
+        booking: bookingInfo,
+        recipientType: 'guest',
+        paymentStatus: 'failed',
+        failureReason
+      });
+    }
+
+    await prisma.$disconnect();
+  } catch (error) {
+    console.error('[XENTRIPAY_CALLBACK] Error sending property booking payment emails:', error);
   }
 }
 

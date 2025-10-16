@@ -254,7 +254,7 @@ export class BrevoBookingMailingService {
               You can view your full booking details, manage your reservation, or contact the host/guide through your dashboard.
             </div>
             <div class="button-center">
-              <a href="${company.website}/bookings/${booking.id}" class="button">View My Booking</a>
+              <a href="https://app.jambolush.com" class="button">View My Booking</a>
             </div>
           </div>
           <div class="footer">
@@ -292,7 +292,7 @@ export class BrevoBookingMailingService {
               Please respond to this booking request promptly via your dashboard to confirm or decline.
             </div>
             <div class="button-center">
-              <a href="${company.website}/dashboard/bookings/${booking.id}" class="button">Manage Booking</a>
+              <a href="https://app.jambolush.com" class="button">Manage Booking</a>
             </div>
           </div>
           <div class="footer">
@@ -330,7 +330,7 @@ export class BrevoBookingMailingService {
               We're sorry to see you go. We hope you'll consider booking with us again in the future.
             </div>
             <div class="button-center">
-              <a href="${company.website}" class="button">Explore Other Options</a>
+              <a href="https://jambolush.com" class="button">Explore Other Options</a>
             </div>
           </div>
           <div class="footer">
@@ -367,7 +367,7 @@ export class BrevoBookingMailingService {
               Please double-check any check-in instructions or tour requirements. If you have any questions, don't hesitate to reach out.
             </div>
             <div class="button-center">
-              <a href="${company.website}/bookings/${booking.id}" class="button">View Full Details</a>
+              <a href="https://app.jambolush.com" class="button">View Full Details</a>
             </div>
           </div>
           <div class="footer">
@@ -399,7 +399,7 @@ export class BrevoBookingMailingService {
       Booking ID: ${booking.id}
       ${dateLabel}: ${dateValue}
 
-      View your booking details: ${context.company.website}/bookings/${booking.id}
+      View your booking details: https://app.jambolush.com
 
       Thank you,
       The ${context.company.name} Team
@@ -421,7 +421,7 @@ export class BrevoBookingMailingService {
       You have a new ${bookingType} booking request from ${guestName}.
       Booking ID: ${booking.id}
 
-      Please manage this booking from your dashboard: ${context.company.website}/dashboard/bookings/${booking.id}
+      Please manage this booking from your dashboard: https://app.jambolush.com
 
       The ${context.company.name} Team
     `.trim();
@@ -457,7 +457,7 @@ export class BrevoBookingMailingService {
       This is a friendly reminder for your upcoming booking at ${bookingName}.
       ${dateLabel}: ${dateValue}
 
-      View full details here: ${context.company.website}/bookings/${booking.id}
+      View full details here: https://app.jambolush.com
 
       We look forward to seeing you!
 

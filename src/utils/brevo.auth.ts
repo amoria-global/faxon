@@ -917,17 +917,17 @@ export class BrevoMailingService {
                   Explore Properties Now
                 </a>
               </div>
-              
+
               <div class="divider"></div>
-              
+
               <div style="text-align: center; color: #6b7280;">
                 <p>Need assistance finding the perfect property?</p>
                 <p style="margin-top: 8px;">
-                  <a href="https://app.jambolush.com/all/support" style="color: #083A85; text-decoration: none; font-weight: 500;">Contact Our Property Experts</a>
+                  <a href="https://jambolush.com/all/contact-us" style="color: #083A85; text-decoration: none; font-weight: 500;">Contact Our Property Experts</a>
                 </p>
               </div>
             </div>
-            
+
             <div class="footer">
               <div class="footer-links">
                 <a href="https://jambolush.com">Browse Properties</a>
@@ -983,7 +983,7 @@ export class BrevoMailingService {
               </div>
               
               <div class="button-center">
-                <a href="https://jambolush.com/all/account-verification" class="button">
+                <a href="https://jambolush.com/all/login" class="button">
                   Verify Email Now
                 </a>
               </div>
@@ -998,8 +998,8 @@ export class BrevoMailingService {
             
             <div class="footer">
               <div class="footer-links">
-                <a href="https://app.jambolush.com/all/support">Need Help?</a>
-                <a href="https://app.jambolush.com/all/security">Security Center</a>
+                <a href="https://jambolush.com/all/contact-us">Need Help?</a>
+                <a href="https://jambolush.com/all/contact-us">Security Center</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. Your security is our priority.
@@ -1091,9 +1091,9 @@ export class BrevoMailingService {
             
             <div class="footer">
               <div class="footer-links">
-                <a href="https://app.jambolush.com/all/support">Support</a>
-                <a href="https://app.jambolush.com/all/security">Security</a>
-                <a href="https://app.jambolush.com/all/login">Login</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
+                <a href="https://jambolush.com/all/contact-us">Security</a>
+                <a href="https://jambolush.com/all/login">Login</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. Protecting your account 24/7.
@@ -1168,7 +1168,7 @@ export class BrevoMailingService {
               </div>
               
               <div class="button-center">
-                <a href="https://app.jambolush.com/all/login" class="button">
+                <a href="https://jambolush.com/all/login" class="button">
                   Sign In to Your Account
                 </a>
               </div>
@@ -1184,9 +1184,9 @@ export class BrevoMailingService {
             
             <div class="footer">
               <div class="footer-links">
-                <a href="https://app.jambolush.com/all/security">Security Center</a>
-                <a href="https://app.jambolush.com/all/support">Support</a>
-                <a href="https://app.jambolush.com/all/login">Login</a>
+                <a href="https://jambolush.com/all/contact-us">Security Center</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
+                <a href="https://jambolush.com/all/login">Login</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. Your security enables your success.
@@ -1263,7 +1263,7 @@ export class BrevoMailingService {
             </div>
             
             <div class="button-center">
-              <a href="https://app.jambolush.com/all/security/sessions" class="button">
+              <a href="https://app.jambolush.com" class="button">
                 Review All Login Activity
               </a>
             </div>
@@ -1385,7 +1385,7 @@ export class BrevoMailingService {
               </ul>
               
               <div class="button-center">
-                <a href="https://app.jambolush.com/all/security/change-password" class="button" style="background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);">
+                <a href="https://jambolush.com/all/forgotpw" class="button" style="background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);">
                   Secure My Account Now
                 </a>
               </div>
@@ -1401,9 +1401,9 @@ export class BrevoMailingService {
             
             <div class="footer">
               <div class="footer-links">
-                <a href="https://app.jambolush.com/all/security">Security Center</a>
-                <a href="https://app.jambolush.com/all/support">Emergency Support</a>
-                <a href="https://app.jambolush.com/all/settings">Account Settings</a>
+                <a href="https://jambolush.com/all/contact-us">Security Center</a>
+                <a href="https://jambolush.com/all/contact-us">Emergency Support</a>
+                <a href="https://app.jambolush.com">Account Settings</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. Your security enables your success.
@@ -1475,7 +1475,7 @@ export class BrevoMailingService {
                 </ul>
                 
                 <div class="button-center">
-                  <a href="https://app.jambolush.com/all/appeal" class="button" style="background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);">
+                  <a href="https://jambolush.com/all/contact-us" class="button" style="background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);">
                     Submit Account Appeal
                   </a>
                 </div>
@@ -1486,11 +1486,11 @@ export class BrevoMailingService {
                     Your account has been successfully reactivated. You now have full access to all property listings, search features, and premium services.
                   </div>
                 </div>
-                
+
                 <div class="message">
                   <strong>You can now enjoy:</strong>
                 </div>
-                
+
                 <ul class="feature-list">
                   <li>Full access to all property listings and advanced search</li>
                   <li>Reconnect with your saved properties and favorites</li>
@@ -1498,9 +1498,9 @@ export class BrevoMailingService {
                   <li>Receive personalized property recommendations</li>
                   <li>Access exclusive market insights and property valuations</li>
                 </ul>
-                
+
                 <div class="button-center">
-                  <a href="https://app.jambolush.com/all/login" class="button">
+                  <a href="https://jambolush.com/all/login" class="button">
                     Access Your Account Now
                   </a>
                 </div>
@@ -1518,8 +1518,8 @@ export class BrevoMailingService {
             
             <div class="footer">
               <div class="footer-links">
-                <a href="https://app.jambolush.com/all/support">Support</a>
-                <a href="https://app.jambolush.com/all/terms">Terms of Service</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
+                <a href="https://jambolush.com/all/terms">Terms of Service</a>
                 <a href="https://jambolush.com/all/privacy-policy">Privacy Policy</a>
               </div>
               <div class="footer-text">
@@ -1591,7 +1591,7 @@ export class BrevoMailingService {
               </div>
               
               <div class="button-center">
-                <a href="https://app.jambolush.com/all/profile" class="button">
+                <a href="https://app.jambolush.com" class="button">
                   View Updated Profile
                 </a>
               </div>
@@ -1616,9 +1616,9 @@ export class BrevoMailingService {
             
             <div class="footer">
               <div class="footer-links">
-                <a href="https://app.jambolush.com/all/profile">Profile</a>
-                <a href="https://app.jambolush.com/all/settings">Settings</a>
-                <a href="https://app.jambolush.com/all/support">Support</a>
+                <a href="https://app.jambolush.com">Profile</a>
+                <a href="https://app.jambolush.com">Settings</a>
+                <a href="https://jambolush.com/all/contact-us">Support</a>
               </div>
               <div class="footer-text">
                 © ${new Date().getFullYear()} ${context.company.name}. Personalizing your property journey.
@@ -1640,7 +1640,7 @@ Welcome to ${context.company.name}, ${context.user.firstName}!
 
 Congratulations! You've successfully joined Rwanda's premier real estate platform. We're excited to help you discover exceptional properties and connect with the best opportunities in the market.
 
-Start exploring premium properties: https://app.jambolush.com
+Start exploring premium properties: https://jambolush.com
 
 What's next:
 • Complete your profile for personalized recommendations
@@ -1648,7 +1648,7 @@ What's next:
 • Connect with certified real estate professionals
 • Set up property alerts for your preferred locations
 
-Need assistance? Contact our property experts: https://app.jambolush.com/all/support
+Need assistance? Contact our property experts: https://jambolush.com/all/contact-us
 
 © ${new Date().getFullYear()} ${context.company.name}
 Connecting you to Rwanda's finest properties.
@@ -1665,7 +1665,7 @@ Hi ${context.user.firstName}, please verify your email address to access premium
 Verification Code: ${context.verification?.code}
 Code expires in: ${context.verification?.expiresIn}
 
-Verify at: https://jambolush.com/all/account-verification
+Verify at: https://jambolush.com/all/login
 
 If you didn't create this account, please ignore this email.
 
@@ -1700,7 +1700,7 @@ Hi ${context.user.firstName}, your password was successfully changed. Your accou
 
 Changed: ${context.security?.timestamp ? new Date(context.security.timestamp).toLocaleString() : 'Recently'}
 
-You can now sign in: https://app.jambolush.com/all/login
+You can now sign in: https://jambolush.com/all/login
 
 If you didn't make this change, contact security immediately at ${context.company.supportEmail}.
 
@@ -1720,7 +1720,7 @@ Device: ${context.security?.device || 'Unknown Device'}
 Location: ${context.security?.location || 'Unknown Location'}
 
 If you don't recognize this activity, secure your account immediately:
-https://app.jambolush.com/all/security
+https://app.jambolush.com
 
 © ${new Date().getFullYear()} ${context.company.name}
 Protecting your property journey 24/7.
@@ -1734,7 +1734,7 @@ URGENT SECURITY ALERT - ${context.company.name}
 ${context.user.firstName}, suspicious activity detected on your account. Immediate action required.
 
 Secure your account immediately:
-1. Change your password: https://app.jambolush.com/all/security/change-password
+1. Change your password: https://jambolush.com/all/forgotpw
 2. Enable two-factor authentication
 3. Review account activity
 4. Contact emergency support: ${context.company.supportEmail}
@@ -1746,17 +1746,17 @@ Your security enables your success.
 
   private getAccountStatusTextTemplate(context: MailingContext, status: 'suspended' | 'reactivated'): string {
     const action = status === 'suspended' ? 'temporarily suspended' : 'successfully reactivated';
-    const url = status === 'suspended' ? '/all/appeal' : '/all/login';
-    const message = status === 'suspended' 
+    const url = status === 'suspended' ? '/all/contact-us' : '/all/login';
+    const message = status === 'suspended'
       ? 'Your account access has been temporarily restricted due to security concerns or policy violations. Submit an appeal:'
       : 'Welcome back! Your account is now active with full access to all property listings. Sign in:';
-    
+
     return `
 Account ${action.toUpperCase()} - ${context.company.name}
 
 Hi ${context.user.firstName}, your ${context.company.name} account has been ${action}.
 
-${message} https://app.jambolush.com${url}
+${message} https://jambolush.com${url}
 
 Questions? Contact support: ${context.company.supportEmail}
 
@@ -1773,7 +1773,7 @@ Hi ${context.user.firstName}, your profile has been successfully updated. These 
 
 Updated: ${context.security?.timestamp ? new Date(context.security.timestamp).toLocaleString() : 'Recently'}
 
-View profile: https://app.jambolush.com/all/profile
+View profile: https://app.jambolush.com
 
 If you didn't make these changes, report it: ${context.company.supportEmail}
 

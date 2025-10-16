@@ -206,7 +206,7 @@ export class BrevoTourMailingService {
             <div class="info-row"><span class="info-label">Duration</span><span class="info-value">${tour.duration} Hours</span></div>
           </div>
           <div class="button-center">
-            <a href="${company.website}/dashboard/tours/${tour.id}" class="button">Manage My Tour</a>
+            <a href="https://app.jambolush.com" class="button">Manage My Tour</a>
           </div>
         </div>
         <div class="footer"><div class="footer-text">© ${new Date().getFullYear()} ${company.name}</div></div>
@@ -234,7 +234,7 @@ export class BrevoTourMailingService {
             <div class="info-row"><span class="info-label">Total Amount</span><span class="info-value">${booking.currency} ${booking.totalAmount.toFixed(2)}</span></div>
           </div>
           <div class="button-center">
-            <a href="${company.website}/dashboard/bookings/${booking.id}" class="button">View and Respond</a>
+            <a href="https://app.jambolush.com" class="button">View and Respond</a>
           </div>
         </div>
         <div class="footer"><div class="footer-text">© ${new Date().getFullYear()} ${company.name}</div></div>
@@ -276,7 +276,7 @@ export class BrevoTourMailingService {
             <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${booking.id}</span></div>
           </div>
           <div class="button-center">
-            <a href="${company.website}/my-tours/bookings/${booking.id}" class="button">View Full Details</a>
+            <a href="https://app.jambolush.com" class="button">View Full Details</a>
           </div>
         </div>
         <div class="footer"><div class="footer-text">© ${new Date().getFullYear()} ${company.name}</div></div>
@@ -306,7 +306,7 @@ export class BrevoTourMailingService {
               </div>
             </div>
             <div class="button-center">
-              <a href="${company.website}/dashboard/reviews" class="button">Read and Respond</a>
+              <a href="https://app.jambolush.com" class="button">Read and Respond</a>
             </div>
           </div>
           <div class="footer"><div class="footer-text">© ${new Date().getFullYear()} ${company.name}</div></div>
@@ -321,7 +321,7 @@ export class BrevoTourMailingService {
       New Tour Created!
       Hi ${context.recipient.firstName},
       Your tour, "${context.tour.title}", is now live.
-      Manage it here: ${context.company.website}/dashboard/tours/${context.tour.id}
+      Manage it here: https://app.jambolush.com
       - The ${context.company.name} Team
     `.trim();
   }
@@ -332,7 +332,7 @@ export class BrevoTourMailingService {
       New Booking Request
       Hi ${context.recipient.firstName},
       You have a new request from ${context.booking.userName} for "${context.tour.title}" on ${new Date(context.booking.tourDate).toLocaleDateString()}.
-      Respond here: ${context.company.website}/dashboard/bookings/${context.booking.id}
+      Respond here: https://app.jambolush.com
       - The ${context.company.name} Team
     `.trim();
   }
@@ -344,7 +344,7 @@ export class BrevoTourMailingService {
       Booking ${status}
       Hi ${context.recipient.firstName},
       Your booking for "${context.tour.title}" on ${new Date(context.booking.tourDate).toLocaleDateString()} is now ${status}.
-      View details: ${context.company.website}/my-tours/bookings/${context.booking.id}
+      View details: https://app.jambolush.com
       - The ${context.company.name} Team
     `.trim();
   }
@@ -355,7 +355,7 @@ export class BrevoTourMailingService {
       New Review Received
       Hi ${context.recipient.firstName},
       You have a new ${context.review.rating}-star review from ${context.review.userName} for "${context.tour.title}".
-      Read it here: ${context.company.website}/dashboard/reviews
+      Read it here: https://app.jambolush.com
       - The ${context.company.name} Team
     `.trim();
   }

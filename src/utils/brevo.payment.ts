@@ -233,7 +233,7 @@ export class BrevoPaymentMailingService {
               <div class="info-row"><span class="info-label">Reference ID</span><span class="info-value">${reference}</span></div>
             </div>
             <div class="button-center">
-              <a href="${company.website}/dashboard/payments" class="button">View My Transactions</a>
+              <a href="https://app.jambolush.com" class="button">View My Transactions</a>
             </div>
           </div>
           <div class="footer">
@@ -269,7 +269,7 @@ export class BrevoPaymentMailingService {
               <div class="alert-text">If you did not add this payment method, please contact our support team immediately to secure your account.</div>
             </div>
             <div class="button-center">
-              <a href="${company.website}/dashboard/settings/payment" class="button">Manage Payment Methods</a>
+              <a href="https://app.jambolush.com" class="button">Manage Payment Methods</a>
             </div>
           </div>
           <div class="footer">
@@ -294,7 +294,7 @@ export class BrevoPaymentMailingService {
 
       Your ${type} of ${currency} ${amount.toFixed(2)} (Ref: ${reference}) has been updated to: ${status.toUpperCase()}.
 
-      View your full history: ${context.company.website}/dashboard/payments
+      View your full history: https://app.jambolush.com
 
       The ${context.company.name} Team
     `.trim();
