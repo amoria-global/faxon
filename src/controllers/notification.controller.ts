@@ -16,8 +16,7 @@ export interface UnifiedNotification {
   fromUser?: string;
   relatedEntity?: string;
   metadata?: any;
-  source: 'escrow' | 'tour';
-  escrowTransactionId?: string;
+  source: 'tour';
   data?: any;
   channels?: string[];
   readAt?: Date;
@@ -65,69 +64,22 @@ export const notificationController = {
       const typeWhere = type && type !== 'all' ? { type: type as string } : {};
       const statusWhere = status && status !== 'all' ? { isRead: status === 'read' } : {};
 
-      // Fetch escrow notifications
-      let escrowNotifications: any[] = [];
-      if (!source || source === 'all' || source === 'escrow') {
-        escrowNotifications = await db.escrowNotification.findMany({
-          where: {
-            ...baseWhere,
-            ...searchWhere,
-            ...typeWhere,
-            ...statusWhere
-          },
-          include: {
-            escrowTransaction: {
-              select: { reference: true, amount: true, currency: true }
-            }
-          },
-          orderBy: {
-            [sortField === 'timestamp' ? 'createdAt' : sortField as string]: sortOrder
-          },
-          skip,
-          take: limitNum
-        });
-      }
+      // Fetch tour notifications only (escrow notifications deprecated)
+      const tourNotifications = await db.tourNotification.findMany({
+        where: {
+          ...baseWhere,
+          ...searchWhere,
+          ...typeWhere,
+          ...statusWhere
+        },
+        orderBy: {
+          [sortField === 'timestamp' ? 'createdAt' : sortField as string]: sortOrder
+        },
+        skip,
+        take: limitNum
+      });
 
-      // Fetch tour notifications
-      let tourNotifications: any[] = [];
-      if (!source || source === 'all' || source === 'tour') {
-        tourNotifications = await db.tourNotification.findMany({
-          where: {
-            ...baseWhere,
-            ...searchWhere,
-            ...typeWhere,
-            ...statusWhere
-          },
-          orderBy: {
-            [sortField === 'timestamp' ? 'createdAt' : sortField as string]: sortOrder
-          },
-          skip,
-          take: limitNum
-        });
-      }
-
-      // Transform and combine notifications
-      const transformedEscrowNotifications: UnifiedNotification[] = escrowNotifications.map(n => ({
-        id: n.id,
-        userId: n.userId,
-        title: n.title,
-        message: n.message,
-        type: n.type,
-        timestamp: n.createdAt,
-        isRead: n.isRead,
-        metadata: n.data,
-        source: 'escrow' as const,
-        escrowTransactionId: n.escrowTransactionId || undefined,
-        data: n.data,
-        channels: (n.channels as string[]) || undefined,
-        readAt: n.readAt || undefined,
-        sentAt: n.sentAt || undefined,
-        emailSent: n.emailSent,
-        smsSent: n.smsSent,
-        pushSent: n.pushSent,
-        relatedEntity: n.escrowTransaction?.reference
-      }));
-
+      // Transform notifications
       const transformedTourNotifications: UnifiedNotification[] = tourNotifications.map(n => ({
         id: n.id,
         userId: n.userId,
@@ -141,43 +93,24 @@ export const notificationController = {
         data: n.data
       }));
 
-      // Combine and sort all notifications
-      let allNotifications = [...transformedEscrowNotifications, ...transformedTourNotifications];
-
-      // Sort combined notifications
-      allNotifications.sort((a, b) => {
-        const aTime = new Date(a.timestamp).getTime();
-        const bTime = new Date(b.timestamp).getTime();
-        return sortOrder === 'desc' ? bTime - aTime : aTime - bTime;
-      });
-
-      // Apply pagination to combined results
-      const paginatedNotifications = allNotifications.slice(0, limitNum);
-
       // Get total counts for stats
-      const [escrowTotalCount, escrowUnreadCount, tourTotalCount, tourUnreadCount] = await Promise.all([
-        db.escrowNotification.count({ where: { userId } }),
-        db.escrowNotification.count({ where: { userId, isRead: false } }),
+      const [tourTotalCount, tourUnreadCount] = await Promise.all([
         db.tourNotification.count({ where: { userId } }),
         db.tourNotification.count({ where: { userId, isRead: false } })
       ]);
-
-      const totalCount = escrowTotalCount + tourTotalCount;
-      const unreadCount = escrowUnreadCount + tourUnreadCount;
 
       res.json({
         success: true,
         message: 'Notifications fetched successfully',
         data: {
-          notifications: paginatedNotifications,
-          total: totalCount,
+          notifications: transformedTourNotifications,
+          total: tourTotalCount,
           page: pageNum,
           limit: limitNum,
-          totalPages: Math.ceil(totalCount / limitNum),
+          totalPages: Math.ceil(tourTotalCount / limitNum),
           stats: {
-            unreadCount,
-            totalCount,
-            escrowCount: escrowTotalCount,
+            unreadCount: tourUnreadCount,
+            totalCount: tourTotalCount,
             tourCount: tourTotalCount
           }
         }
@@ -198,46 +131,7 @@ export const notificationController = {
       const { id } = req.params;
       const userId = (req as any).user?.id || 1;
 
-      // Try to find in escrow notifications first
-      let notification = await db.escrowNotification.findFirst({
-        where: { id, userId },
-        include: {
-          escrowTransaction: {
-            select: { reference: true, amount: true, currency: true }
-          }
-        }
-      });
-
-      if (notification) {
-        const transformedNotification: UnifiedNotification = {
-          id: notification.id,
-          userId: notification.userId,
-          title: notification.title,
-          message: notification.message,
-          type: notification.type,
-          timestamp: notification.createdAt,
-          isRead: notification.isRead,
-          metadata: notification.data,
-          source: 'escrow',
-          escrowTransactionId: notification.escrowTransactionId || undefined,
-          data: notification.data,
-          channels: (notification.channels as string[]) || undefined,
-          readAt: notification.readAt || undefined,
-          sentAt: notification.sentAt || undefined,
-          emailSent: notification.emailSent,
-          smsSent: notification.smsSent,
-          pushSent: notification.pushSent,
-          relatedEntity: notification.escrowTransaction?.reference
-        };
-
-        return res.json({
-          success: true,
-          message: 'Notification fetched successfully',
-          data: transformedNotification
-        });
-      }
-
-      // Try to find in tour notifications
+      // Find in tour notifications only (escrow deprecated)
       const tourNotification = await db.tourNotification.findFirst({
         where: { id, userId }
       });
@@ -283,23 +177,7 @@ export const notificationController = {
       const { id } = req.params;
       const userId = (req as any).user?.id || 1;
 
-      // Try to update in escrow notifications first
-      const escrowUpdated = await db.escrowNotification.updateMany({
-        where: { id, userId },
-        data: {
-          isRead: true,
-          readAt: new Date()
-        }
-      });
-
-      if (escrowUpdated.count > 0) {
-        return res.json({
-          success: true,
-          message: 'Notification marked as read'
-        });
-      }
-
-      // Try to update in tour notifications
+      // Update in tour notifications only (escrow deprecated)
       const tourUpdated = await db.tourNotification.updateMany({
         where: { id, userId },
         data: { isRead: true }
@@ -332,23 +210,7 @@ export const notificationController = {
       const { id } = req.params;
       const userId = (req as any).user?.id || 1;
 
-      // Try to update in escrow notifications first
-      const escrowUpdated = await db.escrowNotification.updateMany({
-        where: { id, userId },
-        data: {
-          isRead: false,
-          readAt: null
-        }
-      });
-
-      if (escrowUpdated.count > 0) {
-        return res.json({
-          success: true,
-          message: 'Notification marked as unread'
-        });
-      }
-
-      // Try to update in tour notifications
+      // Update in tour notifications only (escrow deprecated)
       const tourUpdated = await db.tourNotification.updateMany({
         where: { id, userId },
         data: { isRead: false }
@@ -380,27 +242,16 @@ export const notificationController = {
     try {
       const userId = (req as any).user?.id || 1;
 
-      // Update both escrow and tour notifications
-      const [escrowUpdated, tourUpdated] = await Promise.all([
-        db.escrowNotification.updateMany({
-          where: { userId, isRead: false },
-          data: {
-            isRead: true,
-            readAt: new Date()
-          }
-        }),
-        db.tourNotification.updateMany({
-          where: { userId, isRead: false },
-          data: { isRead: true }
-        })
-      ]);
-
-      const totalUpdated = escrowUpdated.count + tourUpdated.count;
+      // Update tour notifications only (escrow deprecated)
+      const tourUpdated = await db.tourNotification.updateMany({
+        where: { userId, isRead: false },
+        data: { isRead: true }
+      });
 
       res.json({
         success: true,
-        message: `${totalUpdated} notifications marked as read`,
-        data: { updatedCount: totalUpdated }
+        message: `${tourUpdated.count} notifications marked as read`,
+        data: { updatedCount: tourUpdated.count }
       });
     } catch (error) {
       console.error('Error marking all notifications as read:', error);
@@ -418,19 +269,7 @@ export const notificationController = {
       const { id } = req.params;
       const userId = (req as any).user?.id || 1;
 
-      // Try to delete from escrow notifications first
-      const escrowDeleted = await db.escrowNotification.deleteMany({
-        where: { id, userId }
-      });
-
-      if (escrowDeleted.count > 0) {
-        return res.json({
-          success: true,
-          message: 'Notification deleted successfully'
-        });
-      }
-
-      // Try to delete from tour notifications
+      // Delete from tour notifications only (escrow deprecated)
       const tourDeleted = await db.tourNotification.deleteMany({
         where: { id, userId }
       });
@@ -464,9 +303,6 @@ export const notificationController = {
         title,
         message,
         type = 'info',
-        source = 'tour',
-        escrowTransactionId,
-        channels = ['in_app'],
         data
       } = req.body;
 
@@ -477,33 +313,17 @@ export const notificationController = {
         });
       }
 
-      let newNotification;
-
-      if (source === 'escrow') {
-        newNotification = await db.escrowNotification.create({
-          data: {
-            userId,
-            title,
-            message,
-            type,
-            escrowTransactionId,
-            channels,
-            data,
-            isRead: false
-          }
-        });
-      } else {
-        newNotification = await db.tourNotification.create({
-          data: {
-            userId,
-            title,
-            message,
-            type,
-            data,
-            isRead: false
-          }
-        });
-      }
+      // Create tour notification only (escrow deprecated)
+      const newNotification = await db.tourNotification.create({
+        data: {
+          userId,
+          title,
+          message,
+          type,
+          data,
+          isRead: false
+        }
+      });
 
       res.status(201).json({
         success: true,
@@ -525,47 +345,33 @@ export const notificationController = {
     try {
       const userId = (req as any).user?.id || 1;
 
-      // Get stats from both tables using simpler count queries
-      const [escrowStats, tourStats] = await Promise.all([
-        db.escrowNotification.groupBy({
-          by: ['type'],
-          where: { userId },
-          _count: { _all: true }
-        }),
-        db.tourNotification.groupBy({
-          by: ['type'],
-          where: { userId },
-          _count: { _all: true }
-        })
-      ]);
+      // Get stats from tour notifications only (escrow deprecated)
+      const tourStats = await db.tourNotification.groupBy({
+        by: ['type'],
+        where: { userId },
+        _count: { _all: true }
+      });
 
       // Get total counts
-      const [escrowTotalCount, escrowUnreadCount, tourTotalCount, tourUnreadCount] = await Promise.all([
-        db.escrowNotification.count({ where: { userId } }),
-        db.escrowNotification.count({ where: { userId, isRead: false } }),
+      const [tourTotalCount, tourUnreadCount] = await Promise.all([
         db.tourNotification.count({ where: { userId } }),
         db.tourNotification.count({ where: { userId, isRead: false } })
       ]);
 
-      const totalCount = escrowTotalCount + tourTotalCount;
-      const unreadCount = escrowUnreadCount + tourUnreadCount;
-
-      // Combine type statistics
+      // Type statistics
       const typeStats: Record<string, number> = {};
-      [...escrowStats, ...tourStats].forEach(stat => {
-        typeStats[stat.type] = (typeStats[stat.type] || 0) + stat._count._all;
+      tourStats.forEach(stat => {
+        typeStats[stat.type] = stat._count._all;
       });
 
       const stats = {
-        total: totalCount,
-        unread: unreadCount,
+        total: tourTotalCount,
+        unread: tourUnreadCount,
         byType: typeStats,
         bySource: {
-          escrow: escrowTotalCount,
           tour: tourTotalCount
         },
         unreadBySource: {
-          escrow: escrowUnreadCount,
           tour: tourUnreadCount
         }
       };

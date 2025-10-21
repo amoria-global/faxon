@@ -459,13 +459,13 @@ export class PaymentDistributionService {
 
   /**
    * Calculate split rules based on whether property has an agent
-   * Uses configuration from config.escrow.defaultSplitRules
+   * Uses configuration from config.defaultSplitRules
    * - Platform: 16.67%
    * - Agent: 4.38% (if exists, otherwise goes to host)
    * - Host: 78.95% (or 83.33% if no agent)
    */
   private calculateSplitRules(hasAgent: boolean): { platform: number; agent: number; host: number } {
-    const configRules = config.escrow.defaultSplitRules;
+    const configRules = config.defaultSplitRules;
 
     if (hasAgent) {
       // With agent: Use configured splits

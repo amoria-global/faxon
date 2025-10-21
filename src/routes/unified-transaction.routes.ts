@@ -2,8 +2,80 @@
 
 import { Router } from 'express';
 import { unifiedTransactionController } from '../controllers/unified-transaction.controller';
+import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
+
+// ==================== UNIFIED PAYMENT ENDPOINTS ====================
+
+/**
+ * @route POST /api/transactions/deposit
+ * @desc Unified deposit endpoint - routes based on payment method
+ * @body paymentMethod - "momo" (mobile money via PawaPay), "card" (card via XentriPay), or "property" (pay at property)
+ * @body amount - Amount in USD (will be converted to RWF)
+ *
+ * For Mobile Money (momo):
+ * @body phoneNumber - Required
+ * @body provider - Mobile provider (MTN_RWANDA, AIRTEL_RWANDA)
+ * @body country - Country code (default: RW)
+ * @body description - Optional
+ * @body internalReference - Optional booking/transaction reference
+ * @body metadata - Optional additional data
+ *
+ * For Card Payment (card):
+ * @body email - Required
+ * @body customerName - Customer's full name
+ * @body phoneNumber - Optional (for contact)
+ * @body description - Optional
+ * @body internalReference - Optional booking/transaction reference
+ * @body metadata - Optional additional data
+ *
+ * For Property Payment (property):
+ * @body amount - Required
+ * @body internalReference - Required (booking ID)
+ * @body email - Optional
+ * @body customerName - Optional
+ * @body phoneNumber - Optional
+ * @body description - Optional
+ * @body metadata - Optional additional data
+ *
+ * @access Protected - Requires authentication (JWT token in Authorization header)
+ * @header Authorization - Bearer <token>
+ *
+ * @example Mobile Money
+ * {
+ *   "paymentMethod": "momo",
+ *   "amount": 100,
+ *   "phoneNumber": "0788123456",
+ *   "provider": "MTN_RWANDA",
+ *   "country": "RW",
+ *   "description": "Booking payment",
+ *   "internalReference": "BOOKING-123"
+ * }
+ *
+ * @example Card Payment
+ * {
+ *   "paymentMethod": "card",
+ *   "amount": 100,
+ *   "email": "user@example.com",
+ *   "customerName": "John Doe",
+ *   "phoneNumber": "0788123456",
+ *   "description": "Booking payment",
+ *   "internalReference": "BOOKING-123"
+ * }
+ *
+ * @example Property Payment
+ * {
+ *   "paymentMethod": "property",
+ *   "amount": 100,
+ *   "email": "user@example.com",
+ *   "customerName": "John Doe",
+ *   "phoneNumber": "0788123456",
+ *   "description": "Booking payment",
+ *   "internalReference": "BOOKING-123"
+ * }
+ */
+router.post('/deposit', authenticate, (req, res) => unifiedTransactionController.initiateUnifiedDeposit(req, res));
 
 // ==================== WALLET & BALANCE ====================
 
@@ -144,5 +216,29 @@ router.get('/:id', (req, res) => unifiedTransactionController.getTransactionById
  * @access Public (add auth middleware as needed)
  */
 router.get('/', (req, res) => unifiedTransactionController.getAllTransactions(req, res));
+
+// ==================== PROPERTY PAYMENT COLLECTION ====================
+
+/**
+ * @route POST /api/transactions/property-payment/collect/:bookingId
+ * @desc Mark property payment as collected (host/owner only)
+ * @body collectedBy - ID of host/admin who collected payment
+ * @body collectedAmount - Amount collected in RWF (optional, defaults to booking total)
+ * @access Host/Owner
+ *
+ * @example
+ * {
+ *   "collectedBy": 123,
+ *   "collectedAmount": 50000
+ * }
+ */
+router.post('/property-payment/collect/:bookingId', (req, res) => unifiedTransactionController.collectPropertyPayment(req, res));
+
+/**
+ * @route GET /api/transactions/property-payments/pending/:hostId
+ * @desc Get pending property payments for a host
+ * @access Host/Owner
+ */
+router.get('/property-payments/pending/:hostId', (req, res) => unifiedTransactionController.getPendingPropertyPayments(req, res));
 
 export default router;

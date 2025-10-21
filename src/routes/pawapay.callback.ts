@@ -98,48 +98,80 @@ router.post('/', logPawaPayRequest, validatePawaPayWebhook, async (req: Request,
     const metadataObj = webhookData.metadata || {};
     const extractedUserId = extractUserIdFromMetadata(metadataObj);
 
-    // Process transaction update
-    const transaction = await prisma.pawaPayTransaction.upsert({
-      where: { transactionId },
-      create: {
-        userId: extractedUserId, // Extract userId from metadata
+    const internalRef = extractInternalReferenceFromMetadata(metadataObj);
+
+    // CRITICAL: Check if transaction already exists before creating
+    // If it doesn't exist and we don't have a userId, we should NOT create it
+    // This prevents creating transactions with null userId when webhook arrives before deposit initiation
+    const existingTransaction = await prisma.transaction.findUnique({
+      where: { reference: transactionId }
+    });
+
+    // If transaction doesn't exist and we don't have userId, log warning and skip creation
+    if (!existingTransaction && !extractedUserId) {
+      console.warn('[PAWAPAY_CALLBACK] ⚠️ Transaction not found and no userId in metadata - skipping creation', {
         transactionId,
         transactionType,
+        status: webhookData.status
+      });
+      // Return success to PawaPay but don't create the transaction
+      // The deposit initiation will create it with proper userId
+      res.status(200).json({
+        success: true,
+        transactionId,
         status: webhookData.status,
-        amount: webhookData.requestedAmount,
+        note: 'Transaction not created - awaiting deposit initiation'
+      });
+      return;
+    }
+
+    // Process transaction update using unified Transaction model
+    const transaction = await prisma.transaction.upsert({
+      where: { reference: transactionId },
+      create: {
+        reference: transactionId,
+        provider: 'PAWAPAY',
+        transactionType,
+        paymentMethod: 'mobile_money',
+        userId: extractedUserId, // This should now always have a value when creating
+        amount: parseFloat(webhookData.requestedAmount),
         currency: webhookData.currency,
-        country: webhookData.country,
-        correspondent: webhookData.correspondent,
+        requestedAmount: parseFloat(webhookData.requestedAmount),
+        depositedAmount: webhookData.depositedAmount ? parseFloat(webhookData.depositedAmount) : undefined,
+        status: webhookData.status,
+        externalId: transactionId,
+        providerTransactionId: webhookData.correspondentIds?.PROVIDER_TRANSACTION_ID,
+        financialTransactionId: webhookData.correspondentIds?.FINANCIAL_TRANSACTION_ID,
         payerPhone: webhookData.payer?.address.value,
         recipientPhone: webhookData.recipient?.address.value,
-        customerTimestamp: webhookData.customerTimestamp ? new Date(webhookData.customerTimestamp) : null,
+        correspondent: webhookData.correspondent,
         statementDescription: webhookData.statementDescription,
-        requestedAmount: webhookData.requestedAmount,
-        depositedAmount: webhookData.depositedAmount,
-        providerTransactionId: webhookData.correspondentIds?.PROVIDER_TRANSACTION_ID,
-        financialTransactionId: webhookData.correspondentIds?.FINANCIAL_TRANSACTION_ID,
-        relatedDepositId: transactionType === 'REFUND' ? webhookData.depositId : null,
+        customerTimestamp: webhookData.customerTimestamp ? new Date(webhookData.customerTimestamp) : undefined,
+        country: webhookData.country,
+        bookingId: internalRef, // Store internal reference as bookingId
+        isRefund: transactionType === 'REFUND',
+        relatedTransactionId: transactionType === 'REFUND' ? webhookData.depositId : undefined,
         failureCode: webhookData.failureReason?.failureCode,
-        failureMessage: webhookData.failureReason?.failureMessage,
-        metadata: (webhookData.metadata || {}) as any,
+        failureReason: webhookData.failureReason?.failureMessage,
         callbackReceived: true,
         callbackReceivedAt: new Date(),
-        receivedByPawaPay: webhookData.receivedByPawaPay ? new Date(webhookData.receivedByPawaPay) : null,
-        internalReference: extractInternalReferenceFromMetadata(metadataObj), // Also extract internal reference
-        completedAt: webhookData.status === 'COMPLETED' ? new Date() : null
+        receivedByProvider: webhookData.receivedByPawaPay ? new Date(webhookData.receivedByPawaPay) : undefined,
+        completedAt: webhookData.status === 'COMPLETED' ? new Date() : undefined,
+        metadata: (webhookData.metadata || {}) as any
       },
       update: {
-        userId: extractedUserId, // Update userId if it was null
+        // IMPORTANT: Do NOT update userId - it should only be set on initial deposit creation
+        // userId is preserved from original transaction and never updated during status checkups
         status: webhookData.status,
         callbackReceived: true,
         callbackReceivedAt: new Date(),
-        depositedAmount: webhookData.depositedAmount,
+        depositedAmount: webhookData.depositedAmount ? parseFloat(webhookData.depositedAmount) : undefined,
         providerTransactionId: webhookData.correspondentIds?.PROVIDER_TRANSACTION_ID,
         financialTransactionId: webhookData.correspondentIds?.FINANCIAL_TRANSACTION_ID,
         failureCode: webhookData.failureReason?.failureCode,
-        failureMessage: webhookData.failureReason?.failureMessage,
-        completedAt: webhookData.status === 'COMPLETED' ? new Date() : null,
-        internalReference: extractInternalReferenceFromMetadata(metadataObj) // Also update internal reference
+        failureReason: webhookData.failureReason?.failureMessage,
+        completedAt: webhookData.status === 'COMPLETED' ? new Date() : undefined,
+        bookingId: internalRef // Update internal reference
       }
     });
 
@@ -186,7 +218,7 @@ async function handleFailedTransaction(
   transaction: any,
   webhookData: PawaPayWebhookData
 ): Promise<void> {
-  const internalRef = transaction.internalReference || (transaction.metadata as any)?.internalReference;
+  const internalRef = transaction.bookingId || (transaction.metadata as any)?.internalReference;
 
   if (!internalRef) {
     console.log('[PAWAPAY_CALLBACK] No internal reference found for failed transaction');
@@ -455,7 +487,7 @@ async function handleCompletedTransaction(
   _webhookData: PawaPayWebhookData,
   amount: number
 ): Promise<void> {
-  const internalRef = transaction.internalReference || (transaction.metadata as any)?.internalReference;
+  const internalRef = transaction.bookingId || (transaction.metadata as any)?.internalReference;
 
   if (!internalRef) return;
 
@@ -477,16 +509,7 @@ async function handleDepositCompletion(
   _amount: number
 ): Promise<void> {
   try {
-    if (internalRef.startsWith('ESC_') || internalRef.includes('escrow')) {
-      await prisma.escrowTransaction.updateMany({
-        where: { reference: internalRef, status: 'PENDING' },
-        data: {
-          status: 'FUNDED',
-          fundedAt: new Date(),
-          externalId: transaction.transactionId
-        }
-      });
-    }
+    // Removed escrow transaction handling as escrow system has been deprecated
 
     if (internalRef.startsWith('BOOK_') || internalRef.includes('booking')) {
       // Fetch full booking details with all relationships
@@ -797,7 +820,7 @@ async function handleDepositCompletion(
  */
 function calculateSplitRules(hasAgent: boolean): { platform: number; agent: number; host: number } {
   const config = require('../config/config').default;
-  const configRules = config.escrow.defaultSplitRules;
+  const configRules = config.defaultSplitRules;
 
   if (hasAgent) {
     return {
@@ -960,31 +983,34 @@ async function handleRefundCompletion(
   amount: number
 ): Promise<void> {
   try {
-    const escrowTx = await prisma.escrowTransaction.findFirst({
-      where: { reference: internalRef },
+    // Check for booking refunds
+    const booking = await prisma.booking.findFirst({
+      where: {
+        OR: [{ transactionId: internalRef }, { id: internalRef }]
+      },
       include: {
-        user: { select: { id: true, email: true, firstName: true, lastName: true } }
+        guest: { select: { id: true, email: true, firstName: true, lastName: true } }
       }
     });
 
-    if (escrowTx) {
-      await prisma.escrowTransaction.update({
-        where: { id: escrowTx.id },
+    if (booking) {
+      await prisma.booking.update({
+        where: { id: booking.id },
         data: {
-          status: 'REFUNDED',
-          refundedAt: new Date()
+          paymentStatus: 'refunded',
+          status: 'cancelled'
         }
       });
 
       // Log activity
-      await logActivity(escrowTx.userId, 'REFUND_COMPLETED', 'escrow', escrowTx.id, {
-        amount: escrowTx.amount,
-        currency: escrowTx.currency,
+      await logActivity(booking.guestId, 'REFUND_COMPLETED', 'booking', booking.id, {
+        amount: booking.totalPrice,
+        currency: 'USD',
         provider: 'PawaPay',
         reference: internalRef
       });
 
-      console.log('[PAWAPAY] ✅ Refund completed successfully for escrow transaction:', escrowTx.id);
+      console.log('[PAWAPAY] ✅ Refund completed successfully for booking:', booking.id);
     }
   } catch (error) {
     console.error('[PAWAPAY] Error handling refund completion:', error);

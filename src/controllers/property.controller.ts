@@ -2386,7 +2386,7 @@ export class PropertyController {
 
       let filteredTransactions = escrowTransactions;
       if (status) {
-        filteredTransactions = escrowTransactions.filter(t => t.status === status);
+        filteredTransactions = escrowTransactions.filter((t: any) => t.status === status);
       }
 
       const startIndex = (page - 1) * limit;

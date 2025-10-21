@@ -1,7 +1,5 @@
 // services/status-poller.service.ts
 import { PrismaClient } from '@prisma/client';
-import { PesapalService } from './pesapal.service';
-import { EscrowService } from './escrow.service';
 import { PawaPayService } from './pawapay.service';
 import { XentriPayService } from './xentripay.service';
 import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
@@ -12,8 +10,6 @@ const paymentEmailService = new BrevoPaymentStatusMailingService();
 export class StatusPollerService {
   private pollingInterval: NodeJS.Timeout | null = null;
   private isPolling: boolean = false;
-  private pesapalService: PesapalService;
-  private escrowService: EscrowService;
   private pawaPayService: PawaPayService;
   private xentriPayService: XentriPayService;
   private pollIntervalMs: number;
@@ -24,14 +20,10 @@ export class StatusPollerService {
   private readonly ADMIN_EMAIL = 'admin@amoriaglobal.com';
 
   constructor(
-    pesapalService: PesapalService,
-    escrowService: EscrowService,
     pawaPayService: PawaPayService,
     xentriPayService: XentriPayService,
     pollIntervalMs: number = 3 * 60 * 60 * 1000 // Default: 3 hours
   ) {
-    this.pesapalService = pesapalService;
-    this.escrowService = escrowService;
     this.pawaPayService = pawaPayService;
     this.xentriPayService = xentriPayService;
     this.pollIntervalMs = pollIntervalMs;
@@ -86,9 +78,7 @@ export class StatusPollerService {
 
       // Run all checks in parallel
       await Promise.allSettled([
-        this.pollCompletedAndFailedEscrowTransactions(minDate, maxDate),
-        this.pollCompletedAndFailedPawaPayTransactions(minDate, maxDate),
-        this.pollCompletedAndFailedXentriPayTransactions(minDate, maxDate)
+        this.pollCompletedAndFailedPawaPayTransactions(minDate, maxDate)
       ]);
 
       console.log('[STATUS_POLLER] ✅ Comprehensive polling cycle complete');
@@ -99,63 +89,64 @@ export class StatusPollerService {
   }
 
   /**
+   * DEPRECATED: Escrow system has been removed
    * Poll Pesapal/Escrow transactions that are COMPLETED or FAILED (2 hours to 10 days old)
    */
-  private async pollCompletedAndFailedEscrowTransactions(minDate: Date, maxDate: Date) {
-    try {
-      console.log('[STATUS_POLLER] Checking completed/failed Pesapal transactions...');
-
-      const transactions = await prisma.escrowTransaction.findMany({
-        where: {
-          status: { in: ['HELD', 'FAILED'] }, // HELD = payment successful, FAILED = payment failed
-          externalId: { not: null },
-          createdAt: {
-            gte: minDate,
-            lte: maxDate
-          }
-        },
-        select: {
-          id: true,
-          reference: true,
-          externalId: true,
-          status: true,
-          createdAt: true,
-          statusCheckCount: true,
-          lastStatusCheck: true,
-          notificationCount: true,
-          notificationSentAt: true
-        },
-        take: 100
-      });
-
-      if (transactions.length === 0) {
-        console.log('[STATUS_POLLER] No completed/failed escrow transactions to check');
-        return;
-      }
-
-      console.log(`[STATUS_POLLER] Found ${transactions.length} completed/failed escrow transactions to process`);
-
-      let processed = 0;
-      let errors = 0;
-
-      for (const transaction of transactions) {
-        try {
-          await this.processEscrowTransactionForBooking(transaction);
-          processed++;
-        } catch (error: any) {
-          console.error(`[STATUS_POLLER] Failed to process escrow transaction ${transaction.reference}:`, error.message);
-          errors++;
-        }
-
-        await this.delay(500); // Rate limiting
-      }
-
-      console.log(`[STATUS_POLLER] ✅ Escrow: ${processed} processed, ${errors} errors`);
-
-    } catch (error: any) {
-      console.error('[STATUS_POLLER] ❌ Escrow polling error:', error);
-    }
-  }
+  // private async pollCompletedAndFailedEscrowTransactions(minDate: Date, maxDate: Date) {
+  //   try {
+  //     console.log('[STATUS_POLLER] Checking completed/failed Pesapal transactions...');
+  //
+  //     const transactions = await prisma.escrowTransaction.findMany({
+  //       where: {
+  //         status: { in: ['HELD', 'FAILED'] }, // HELD = payment successful, FAILED = payment failed
+  //         externalId: { not: null },
+  //         createdAt: {
+  //           gte: minDate,
+  //           lte: maxDate
+  //         }
+  //       },
+  //       select: {
+  //         id: true,
+  //         reference: true,
+  //         externalId: true,
+  //         status: true,
+  //         createdAt: true,
+  //         statusCheckCount: true,
+  //         lastStatusCheck: true,
+  //         notificationCount: true,
+  //         notificationSentAt: true
+  //       },
+  //       take: 100
+  //     });
+  //
+  //     if (transactions.length === 0) {
+  //       console.log('[STATUS_POLLER] No completed/failed escrow transactions to check');
+  //       return;
+  //     }
+  //
+  //     console.log(`[STATUS_POLLER] Found ${transactions.length} completed/failed escrow transactions to process`);
+  //
+  //     let processed = 0;
+  //     let errors = 0;
+  //
+  //     for (const transaction of transactions) {
+  //       try {
+  //         await this.processEscrowTransactionForBooking(transaction);
+  //         processed++;
+  //       } catch (error: any) {
+  //         console.error(`[STATUS_POLLER] Failed to process escrow transaction ${transaction.reference}:`, error.message);
+  //         errors++;
+  //       }
+  //
+  //       await this.delay(500); // Rate limiting
+  //     }
+  //
+  //     console.log(`[STATUS_POLLER] ✅ Escrow: ${processed} processed, ${errors} errors`);
+  //
+  //   } catch (error: any) {
+  //     console.error('[STATUS_POLLER] ❌ Escrow polling error:', error);
+  //   }
+  // }
 
   /**
    * Poll PawaPay transactions that are COMPLETED or FAILED (2 hours to 10 days old)
@@ -164,8 +155,9 @@ export class StatusPollerService {
     try {
       console.log('[STATUS_POLLER] Checking completed/failed PawaPay transactions...');
 
-      const transactions = await prisma.pawaPayTransaction.findMany({
+      const transactions = await prisma.transaction.findMany({
         where: {
+          provider: 'PAWAPAY',
           status: { in: ['COMPLETED', 'FAILED'] },
           transactionType: 'DEPOSIT', // Only deposits (payments for bookings)
           createdAt: {
@@ -176,15 +168,15 @@ export class StatusPollerService {
         select: {
           id: true,
           userId: true,
-          transactionId: true,
+          reference: true,
           transactionType: true,
           status: true,
           createdAt: true,
-          internalReference: true,
+          bookingId: true,
           metadata: true,
           completedAt: true,
           failureCode: true,
-          failureMessage: true,
+          failureReason: true,
           statusCheckCount: true,
           lastStatusCheck: true,
           notificationCount: true,
@@ -208,7 +200,7 @@ export class StatusPollerService {
           await this.processPawaPayTransactionForBooking(transaction);
           processed++;
         } catch (error: any) {
-          console.error(`[STATUS_POLLER] Failed to process PawaPay transaction ${transaction.transactionId}:`, error.message);
+          console.error(`[STATUS_POLLER] Failed to process PawaPay transaction ${transaction.reference}:`, error.message);
           errors++;
         }
 
@@ -223,134 +215,136 @@ export class StatusPollerService {
   }
 
   /**
+   * DEPRECATED: Escrow system has been removed
    * Poll XentriPay transactions that are HELD or FAILED (2 hours to 10 days old)
    */
-  private async pollCompletedAndFailedXentriPayTransactions(minDate: Date, maxDate: Date) {
-    try {
-      console.log('[STATUS_POLLER] Checking completed/failed XentriPay transactions...');
-
-      // First get all HELD/FAILED transactions, then filter for XentriPay in code
-      const allTransactions = await prisma.escrowTransaction.findMany({
-        where: {
-          status: { in: ['HELD', 'FAILED'] },
-          createdAt: {
-            gte: minDate,
-            lte: maxDate
-          }
-        },
-        select: {
-          id: true,
-          reference: true,
-          status: true,
-          metadata: true,
-          createdAt: true,
-          statusCheckCount: true,
-          lastStatusCheck: true,
-          notificationCount: true,
-          notificationSentAt: true
-        },
-        take: 100
-      });
-
-      // Filter for XentriPay transactions (those with xentriPayRefId in metadata)
-      const transactions = allTransactions.filter(t => {
-        try {
-          const metadata = t.metadata as any;
-          return metadata && metadata.xentriPayRefId;
-        } catch {
-          return false;
-        }
-      });
-
-      if (transactions.length === 0) {
-        console.log('[STATUS_POLLER] No completed/failed XentriPay transactions to check');
-        return;
-      }
-
-      console.log(`[STATUS_POLLER] Found ${transactions.length} completed/failed XentriPay transactions to process`);
-
-      let processed = 0;
-      let errors = 0;
-
-      for (const transaction of transactions) {
-        try {
-          await this.processXentriPayTransactionForBooking(transaction);
-          processed++;
-        } catch (error: any) {
-          console.error(`[STATUS_POLLER] Failed to process XentriPay transaction ${transaction.reference}:`, error.message);
-          errors++;
-        }
-
-        await this.delay(500); // Rate limiting
-      }
-
-      console.log(`[STATUS_POLLER] ✅ XentriPay: ${processed} processed, ${errors} errors`);
-
-    } catch (error: any) {
-      console.error('[STATUS_POLLER] ❌ XentriPay polling error:', error);
-    }
-  }
+  // private async pollCompletedAndFailedXentriPayTransactions(minDate: Date, maxDate: Date) {
+  //   try {
+  //     console.log('[STATUS_POLLER] Checking completed/failed XentriPay transactions...');
+  //
+  //     // First get all HELD/FAILED transactions, then filter for XentriPay in code
+  //     const allTransactions = await prisma.escrowTransaction.findMany({
+  //       where: {
+  //         status: { in: ['HELD', 'FAILED'] },
+  //         createdAt: {
+  //           gte: minDate,
+  //           lte: maxDate
+  //         }
+  //       },
+  //       select: {
+  //         id: true,
+  //         reference: true,
+  //         status: true,
+  //         metadata: true,
+  //         createdAt: true,
+  //         statusCheckCount: true,
+  //         lastStatusCheck: true,
+  //         notificationCount: true,
+  //         notificationSentAt: true
+  //       },
+  //       take: 100
+  //     });
+  //
+  //     // Filter for XentriPay transactions (those with xentriPayRefId in metadata)
+  //     const transactions = allTransactions.filter(t => {
+  //       try {
+  //         const metadata = t.metadata as any;
+  //         return metadata && metadata.xentriPayRefId;
+  //       } catch {
+  //         return false;
+  //       }
+  //     });
+  //
+  //     if (transactions.length === 0) {
+  //       console.log('[STATUS_POLLER] No completed/failed XentriPay transactions to check');
+  //       return;
+  //     }
+  //
+  //     console.log(`[STATUS_POLLER] Found ${transactions.length} completed/failed XentriPay transactions to process`);
+  //
+  //     let processed = 0;
+  //     let errors = 0;
+  //
+  //     for (const transaction of transactions) {
+  //       try {
+  //         await this.processXentriPayTransactionForBooking(transaction);
+  //         processed++;
+  //       } catch (error: any) {
+  //         console.error(`[STATUS_POLLER] Failed to process XentriPay transaction ${transaction.reference}:`, error.message);
+  //         errors++;
+  //       }
+  //
+  //       await this.delay(500); // Rate limiting
+  //     }
+  //
+  //     console.log(`[STATUS_POLLER] ✅ XentriPay: ${processed} processed, ${errors} errors`);
+  //
+  //   } catch (error: any) {
+  //     console.error('[STATUS_POLLER] ❌ XentriPay polling error:', error);
+  //   }
+  // }
 
   /**
+   * DEPRECATED: Escrow system has been removed
    * Process escrow transaction (Pesapal) and update booking status
    */
-  private async processEscrowTransactionForBooking(transaction: any): Promise<void> {
-    try {
-      console.log(`[STATUS_POLLER] Processing escrow transaction ${transaction.reference} (status: ${transaction.status})`);
-
-      // Update status check tracking
-      await prisma.escrowTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          statusCheckCount: { increment: 1 },
-          lastStatusCheck: new Date()
-        }
-      });
-
-      // Find related booking
-      const booking = await prisma.booking.findFirst({
-        where: { transactionId: transaction.reference },
-        include: {
-          property: {
-            include: {
-              host: true,
-              agent: true
-            }
-          },
-          guest: true
-        }
-      });
-
-      if (!booking) {
-        console.log(`[STATUS_POLLER] No booking found for transaction ${transaction.reference}`);
-        return;
-      }
-
-      console.log(`[STATUS_POLLER] Found booking ${booking.id} for transaction ${transaction.reference}`);
-
-      if (transaction.status === 'HELD') {
-        // Payment successful
-        await this.handleSuccessfulPayment('ESCROW', transaction.id, booking);
-      } else if (transaction.status === 'FAILED') {
-        // Payment failed
-        await this.handleFailedPayment('ESCROW', transaction.id, booking);
-      }
-
-    } catch (error: any) {
-      console.error(`[STATUS_POLLER] Error processing escrow transaction:`, error);
-      throw error;
-    }
-  }
+  // private async processEscrowTransactionForBooking(transaction: any): Promise<void> {
+  //   try {
+  //     console.log(`[STATUS_POLLER] Processing escrow transaction ${transaction.reference} (status: ${transaction.status})`);
+  //
+  //     // Update status check tracking
+  //     await prisma.escrowTransaction.update({
+  //       where: { id: transaction.id },
+  //       data: {
+  //         statusCheckCount: { increment: 1 },
+  //         lastStatusCheck: new Date()
+  //       }
+  //     });
+  //
+  //     // Find related booking
+  //     const booking = await prisma.booking.findFirst({
+  //       where: { transactionId: transaction.reference },
+  //       include: {
+  //         property: {
+  //           include: {
+  //             host: true,
+  //             agent: true
+  //           }
+  //         },
+  //         guest: true
+  //       }
+  //     });
+  //
+  //     if (!booking) {
+  //       console.log(`[STATUS_POLLER] No booking found for transaction ${transaction.reference}`);
+  //       return;
+  //     }
+  //
+  //     console.log(`[STATUS_POLLER] Found booking ${booking.id} for transaction ${transaction.reference}`);
+  //
+  //     if (transaction.status === 'HELD') {
+  //       // Payment successful
+  //       await this.handleSuccessfulPayment('ESCROW', transaction.id, booking);
+  //     } else if (transaction.status === 'FAILED') {
+  //       // Payment failed
+  //       await this.handleFailedPayment('ESCROW', transaction.id, booking);
+  //     }
+  //
+  //   } catch (error: any) {
+  //     console.error(`[STATUS_POLLER] Error processing escrow transaction:`, error);
+  //     throw error;
+  //   }
+  // }
 
   /**
    * Process PawaPay transaction and update booking status
    */
   private async processPawaPayTransactionForBooking(transaction: any): Promise<void> {
     try {
-      console.log(`[STATUS_POLLER] Processing PawaPay transaction ${transaction.transactionId} (status: ${transaction.status})`);
+      console.log(`[STATUS_POLLER] Processing PawaPay transaction ${transaction.reference} (status: ${transaction.status})`);
 
       // Update status check tracking
-      await prisma.pawaPayTransaction.update({
+      await prisma.transaction.update({
         where: { id: transaction.id },
         data: {
           statusCheckCount: { increment: 1 },
@@ -358,10 +352,10 @@ export class StatusPollerService {
         }
       });
 
-      const internalRef = transaction.internalReference || (transaction.metadata as any)?.internalReference;
+      const internalRef = transaction.bookingId || (transaction.metadata as any)?.internalReference;
 
       if (!internalRef) {
-        console.log(`[STATUS_POLLER] No internal reference found for PawaPay transaction ${transaction.transactionId}`);
+        console.log(`[STATUS_POLLER] No internal reference found for PawaPay transaction ${transaction.reference}`);
         return;
       }
 
@@ -385,7 +379,7 @@ export class StatusPollerService {
         if (transaction.status === 'COMPLETED') {
           await this.handleSuccessfulPayment('PAWAPAY', transaction.id, booking);
         } else if (transaction.status === 'FAILED') {
-          await this.handleFailedPayment('PAWAPAY', transaction.id, booking, transaction.failureMessage);
+          await this.handleFailedPayment('PAWAPAY', transaction.id, booking, transaction.failureReason);
         }
         return;
       }
@@ -406,7 +400,7 @@ export class StatusPollerService {
         if (transaction.status === 'COMPLETED') {
           await this.handleSuccessfulTourPayment('PAWAPAY', transaction.id, tourBooking);
         } else if (transaction.status === 'FAILED') {
-          await this.handleFailedTourPayment('PAWAPAY', transaction.id, tourBooking, transaction.failureMessage);
+          await this.handleFailedTourPayment('PAWAPAY', transaction.id, tourBooking, transaction.failureReason);
         }
         return;
       }
@@ -420,53 +414,54 @@ export class StatusPollerService {
   }
 
   /**
+   * DEPRECATED: Escrow system has been removed
    * Process XentriPay transaction and update booking status
    */
-  private async processXentriPayTransactionForBooking(transaction: any): Promise<void> {
-    try {
-      console.log(`[STATUS_POLLER] Processing XentriPay transaction ${transaction.reference} (status: ${transaction.status})`);
-
-      // Update status check tracking
-      await prisma.escrowTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          statusCheckCount: { increment: 1 },
-          lastStatusCheck: new Date()
-        }
-      });
-
-      // Find related booking
-      const booking = await prisma.booking.findFirst({
-        where: { transactionId: transaction.reference },
-        include: {
-          property: {
-            include: {
-              host: true,
-              agent: true
-            }
-          },
-          guest: true
-        }
-      });
-
-      if (!booking) {
-        console.log(`[STATUS_POLLER] No booking found for XentriPay transaction ${transaction.reference}`);
-        return;
-      }
-
-      console.log(`[STATUS_POLLER] Found booking ${booking.id} for XentriPay transaction ${transaction.reference}`);
-
-      if (transaction.status === 'HELD') {
-        await this.handleSuccessfulPayment('XENTRIPAY', transaction.id, booking);
-      } else if (transaction.status === 'FAILED') {
-        await this.handleFailedPayment('XENTRIPAY', transaction.id, booking);
-      }
-
-    } catch (error: any) {
-      console.error(`[STATUS_POLLER] Error processing XentriPay transaction:`, error);
-      throw error;
-    }
-  }
+  // private async processXentriPayTransactionForBooking(transaction: any): Promise<void> {
+  //   try {
+  //     console.log(`[STATUS_POLLER] Processing XentriPay transaction ${transaction.reference} (status: ${transaction.status})`);
+  //
+  //     // Update status check tracking
+  //     await prisma.escrowTransaction.update({
+  //       where: { id: transaction.id },
+  //       data: {
+  //         statusCheckCount: { increment: 1 },
+  //         lastStatusCheck: new Date()
+  //       }
+  //     });
+  //
+  //     // Find related booking
+  //     const booking = await prisma.booking.findFirst({
+  //       where: { transactionId: transaction.reference },
+  //       include: {
+  //         property: {
+  //           include: {
+  //             host: true,
+  //             agent: true
+  //           }
+  //         },
+  //         guest: true
+  //       }
+  //     });
+  //
+  //     if (!booking) {
+  //       console.log(`[STATUS_POLLER] No booking found for XentriPay transaction ${transaction.reference}`);
+  //       return;
+  //     }
+  //
+  //     console.log(`[STATUS_POLLER] Found booking ${booking.id} for XentriPay transaction ${transaction.reference}`);
+  //
+  //     if (transaction.status === 'HELD') {
+  //       await this.handleSuccessfulPayment('XENTRIPAY', transaction.id, booking);
+  //     } else if (transaction.status === 'FAILED') {
+  //       await this.handleFailedPayment('XENTRIPAY', transaction.id, booking);
+  //     }
+  //
+  //   } catch (error: any) {
+  //     console.error(`[STATUS_POLLER] Error processing XentriPay transaction:`, error);
+  //     throw error;
+  //   }
+  // }
 
   /**
    * Handle successful payment - confirm booking and send notifications
@@ -641,15 +636,18 @@ export class StatusPollerService {
       let transaction: any;
 
       if (provider === 'PAWAPAY') {
-        transaction = await prisma.pawaPayTransaction.findUnique({
+        transaction = await prisma.transaction.findUnique({
           where: { id: transactionId },
           select: { notificationSentAt: true, notificationCount: true }
         });
       } else {
-        transaction = await prisma.escrowTransaction.findUnique({
-          where: { id: transactionId },
-          select: { notificationSentAt: true, notificationCount: true }
-        });
+        // DEPRECATED: Escrow system has been removed
+        // transaction = await prisma.escrowTransaction.findUnique({
+        //   where: { id: transactionId },
+        //   select: { notificationSentAt: true, notificationCount: true }
+        // });
+        console.warn('[STATUS_POLLER] Escrow/XentriPay notification check called but system is deprecated');
+        return false;
       }
 
       if (!transaction) {
@@ -680,7 +678,7 @@ export class StatusPollerService {
   private async markNotificationSent(provider: 'ESCROW' | 'PAWAPAY' | 'XENTRIPAY', transactionId: string): Promise<void> {
     try {
       if (provider === 'PAWAPAY') {
-        await prisma.pawaPayTransaction.update({
+        await prisma.transaction.update({
           where: { id: transactionId },
           data: {
             notificationSentAt: new Date(),
@@ -688,13 +686,15 @@ export class StatusPollerService {
           }
         });
       } else {
-        await prisma.escrowTransaction.update({
-          where: { id: transactionId },
-          data: {
-            notificationSentAt: new Date(),
-            notificationCount: { increment: 1 }
-          }
-        });
+        // DEPRECATED: Escrow system has been removed
+        // await prisma.escrowTransaction.update({
+        //   where: { id: transactionId },
+        //   data: {
+        //     notificationSentAt: new Date(),
+        //     notificationCount: { increment: 1 }
+        //   }
+        // });
+        console.warn('[STATUS_POLLER] Escrow/XentriPay notification marking called but system is deprecated');
       }
     } catch (error: any) {
       console.error('[STATUS_POLLER] Error marking notification as sent:', error);

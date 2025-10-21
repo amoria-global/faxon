@@ -455,24 +455,84 @@ export interface AdminTourReviewListItem extends AdminReviewListItem {
 // === PAYMENT & ESCROW MANAGEMENT TYPES ===
 export interface AdminPaymentTransaction {
   id: string;
-  userId: number;
+  reference: string;
+
+  // Provider & Type
+  provider: string; // PAWAPAY, XENTRIPAY, PROPERTY, LEGACY
+  type: string; // DEPOSIT, PAYOUT, REFUND, TRANSFER, etc.
+  method: string; // mobile_money, card, cash_at_property, etc.
+
+  // User Information
+  userId: number | null;
   userName: string;
   userEmail: string;
-  type: string;
-  method: string;
+  userPhone?: string;
+  recipientId?: number | null;
+  recipientName?: string;
+  recipientEmail?: string;
+
+  // Amount & Currency
   amount: number;
   currency: string;
-  status: string;
-  reference: string;
-  externalId?: string;
-  description?: string;
-  charges?: number;
+  requestedAmount?: number;
   netAmount?: number;
+  charges?: number;
+
+  // Split/Fee Information
+  platformFee?: number;
+  agentCommission?: number;
+  hostShare?: number;
+
+  // Status & Tracking
+  status: string;
+  failureReason?: string;
+  failureCode?: string;
+
+  // Provider IDs
+  externalId?: string;
+  providerTransactionId?: string;
+  financialTransactionId?: string;
+
+  // Account Details
   sourceAccount?: string;
   destinationAccount?: string;
-  failureReason?: string;
+  payerPhone?: string;
+  recipientPhone?: string;
+  payerEmail?: string;
+  correspondent?: string; // MNO provider code
+
+  // Description & Notes
+  description?: string;
+  statementDescription?: string;
+
+  // Booking & Entity Links
+  bookingId?: string;
+  propertyId?: number;
+  tourId?: string;
+
+  // Dates
   createdAt: string;
+  updatedAt?: string;
   completedAt?: string;
+  processedAt?: string;
+  receivedByProvider?: string;
+  customerTimestamp?: string;
+
+  // Refund Information
+  isRefund: boolean;
+  refundedAt?: string;
+  refundedAmount?: number;
+  depositedAmount?: number;
+  relatedTransactionId?: string;
+
+  // Additional Flags
+  isP2P: boolean;
+  country?: string;
+
+  // Metadata
+  metadata?: any;
+
+  // Deprecated fields (for backward compatibility)
   escrowStatus?: string;
   isEscrowBased: boolean;
 }

@@ -1,279 +1,273 @@
-// services/unified-transaction.service.ts - Unified transaction retrieval for all payment providers
+// services/unified-transaction.service.ts - Unified transaction service using new Transaction model
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Transaction, Prisma } from '@prisma/client';
 
 const prisma = new PrismaClient();
-
-export interface UnifiedTransaction {
-  id: string;
-  provider: 'PESAPAL' | 'PAWAPAY' | 'XENTRIPAY';
-  type: 'DEPOSIT' | 'PAYOUT' | 'REFUND' | 'ESCROW';
-  status: string;
-  amount: number | string;
-  currency: string;
-  reference: string;
-  externalId?: string;
-  userId?: number;
-  recipientId?: number;
-  recipientPhone?: string;
-  payerPhone?: string;
-  description?: string;
-  metadata?: any;
-  createdAt: Date;
-  updatedAt: Date;
-  completedAt?: Date;
-  failureReason?: string;
-  providerTransactionId?: string;
-  financialTransactionId?: string;
-}
 
 export interface UnifiedTransactionFilters {
   userId?: number;
   recipientId?: number;
-  provider?: 'PESAPAL' | 'PAWAPAY' | 'XENTRIPAY';
-  type?: 'DEPOSIT' | 'PAYOUT' | 'REFUND' | 'ESCROW';
+  provider?: 'PAWAPAY' | 'XENTRIPAY' | 'PROPERTY';
+  transactionType?: 'DEPOSIT' | 'PAYOUT' | 'REFUND' | 'TRANSFER' | 'COMMISSION' | 'FEE';
+  paymentMethod?: string; // Filter by payment method (mobile_money, card, cash_at_property, etc.)
   status?: string;
+  isRefund?: boolean;
+  bookingId?: string;
+  propertyId?: number;
+  tourId?: string;
   fromDate?: Date;
   toDate?: Date;
   limit?: number;
   offset?: number;
 }
 
+export interface TransactionStats {
+  totalTransactions: number;
+  byProvider: Record<string, number>;
+  byStatus: Record<string, number>;
+  byType: Record<string, number>;
+  totalVolume: Record<string, number>; // By currency
+  completedVolume: Record<string, number>;
+  pendingVolume: Record<string, number>;
+}
+
 export class UnifiedTransactionService {
   /**
-   * Get all transactions across all providers
+   * Helper: Add payment type classification to transaction
+   * NOTE: Payment method 'cc' is used by provider but we save as 'card' in DB
    */
-  async getAllTransactions(filters: UnifiedTransactionFilters = {}): Promise<UnifiedTransaction[]> {
+  private enrichTransactionWithPaymentType(transaction: any) {
+    // Determine if this is a cash/property payment or direct online payment
+    const isCashPayment = transaction.provider === 'PROPERTY' ||
+                          transaction.paymentMethod === 'cash_at_property' ||
+                          transaction.paymentMethod === 'cash';
+
+    const paymentType = isCashPayment ? 'cash_at_property' : 'online';
+
+    const paymentTypeLabel = isCashPayment
+      ? 'Cash at Property'
+      : transaction.paymentMethod === 'mobile_money'
+        ? 'Mobile Money (Online)'
+        : (transaction.paymentMethod === 'card' || transaction.paymentMethod === 'cc')
+          ? 'Card Payment (Online)'
+          : 'Online Payment';
+
+    return {
+      ...transaction,
+      paymentType,
+      paymentTypeLabel,
+      isCashPayment,
+      isOnlinePayment: !isCashPayment
+    };
+  }
+
+  /**
+   * Get all transactions with filters
+   */
+  async getAllTransactions(filters: UnifiedTransactionFilters = {}): Promise<any[]> {
     const limit = filters.limit || 100;
     const offset = filters.offset || 0;
 
-    // Build where clauses for each provider
-    const whereClause: any = {};
-    const pawaPayWhere: any = {};
+    // Build where clause
+    const where: Prisma.TransactionWhereInput = {};
 
     if (filters.userId) {
-      whereClause.userId = filters.userId;
-      pawaPayWhere.userId = filters.userId;
+      where.userId = filters.userId;
+    }
+
+    if (filters.recipientId) {
+      where.recipientId = filters.recipientId;
+    }
+
+    if (filters.provider) {
+      where.provider = filters.provider;
+    }
+
+    if (filters.transactionType) {
+      where.transactionType = filters.transactionType;
+    }
+
+    if (filters.paymentMethod) {
+      where.paymentMethod = filters.paymentMethod;
     }
 
     if (filters.status) {
-      whereClause.status = filters.status;
-      pawaPayWhere.status = filters.status;
+      where.status = filters.status;
     }
 
-    if (filters.fromDate) {
-      whereClause.createdAt = { ...whereClause.createdAt, gte: filters.fromDate };
-      pawaPayWhere.createdAt = { ...pawaPayWhere.createdAt, gte: filters.fromDate };
+    if (filters.isRefund !== undefined) {
+      where.isRefund = filters.isRefund;
     }
 
-    if (filters.toDate) {
-      whereClause.createdAt = { ...whereClause.createdAt, lte: filters.toDate };
-      pawaPayWhere.createdAt = { ...pawaPayWhere.createdAt, lte: filters.toDate };
+    if (filters.bookingId) {
+      where.bookingId = filters.bookingId;
     }
 
-    // Fetch from all sources in parallel
-    const [escrowTransactions, pawaPayTransactions] = await Promise.all([
-      // Escrow transactions (includes Pesapal and XentriPay)
-      prisma.escrowTransaction.findMany({
-        where: whereClause,
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-        skip: offset
-      }),
+    if (filters.propertyId) {
+      where.propertyId = filters.propertyId;
+    }
 
-      // PawaPay transactions
-      prisma.pawaPayTransaction.findMany({
-        where: pawaPayWhere,
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-        skip: offset
-      })
-    ]);
+    if (filters.tourId) {
+      where.tourId = filters.tourId;
+    }
 
-    // Map to unified format
-    const unifiedTransactions: UnifiedTransaction[] = [];
-
-    // Map escrow transactions (Pesapal and XentriPay)
-    for (const tx of escrowTransactions) {
-      const metadata = tx.metadata as any;
-      const provider = metadata?.xentriPayRefId ? 'XENTRIPAY' : 'PESAPAL';
-
-      // Apply provider filter if specified
-      if (filters.provider && filters.provider !== provider) {
-        continue;
+    if (filters.fromDate || filters.toDate) {
+      where.createdAt = {};
+      if (filters.fromDate) {
+        where.createdAt.gte = filters.fromDate;
       }
-
-      // Apply type filter
-      const txType = tx.type === 'DEPOSIT' ? 'ESCROW' : tx.type as any;
-      if (filters.type && filters.type !== txType && filters.type !== 'DEPOSIT') {
-        continue;
+      if (filters.toDate) {
+        where.createdAt.lte = filters.toDate;
       }
-
-      unifiedTransactions.push({
-        id: tx.id,
-        provider,
-        type: txType,
-        status: tx.status,
-        amount: tx.amount,
-        currency: tx.currency,
-        reference: tx.reference,
-        externalId: tx.externalId || undefined,
-        userId: tx.userId,
-        recipientId: tx.recipientId || undefined,
-        description: tx.description || undefined,
-        metadata: metadata,
-        createdAt: tx.createdAt,
-        updatedAt: tx.updatedAt,
-        completedAt: tx.releasedAt || tx.cancelledAt || tx.refundedAt || undefined,
-        failureReason: undefined
-      });
     }
 
-    // Map PawaPay transactions
-    for (const tx of pawaPayTransactions) {
-      // Apply provider filter
-      if (filters.provider && filters.provider !== 'PAWAPAY') {
-        continue;
+    const transactions = await prisma.transaction.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true
+          }
+        },
+        recipient: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true
+          }
+        }
       }
+    });
 
-      // Apply type filter
-      if (filters.type && filters.type !== tx.transactionType as any) {
-        continue;
-      }
-
-      unifiedTransactions.push({
-        id: tx.id,
-        provider: 'PAWAPAY',
-        type: tx.transactionType as any,
-        status: tx.status,
-        amount: tx.amount,
-        currency: tx.currency,
-        reference: tx.transactionId,
-        externalId: tx.providerTransactionId || undefined,
-        userId: tx.userId || undefined,
-        recipientId: undefined,
-        recipientPhone: tx.recipientPhone || undefined,
-        payerPhone: tx.payerPhone || undefined,
-        description: tx.statementDescription || undefined,
-        metadata: tx.metadata,
-        createdAt: tx.createdAt,
-        updatedAt: tx.updatedAt,
-        completedAt: tx.completedAt || undefined,
-        failureReason: tx.failureMessage || undefined,
-        providerTransactionId: tx.providerTransactionId || undefined,
-        financialTransactionId: tx.financialTransactionId || undefined
-      });
-    }
-
-    // Sort by creation date (newest first)
-    unifiedTransactions.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-
-    // Apply limit
-    return unifiedTransactions.slice(0, limit);
+    // Enrich each transaction with payment type classification
+    return transactions.map(tx => this.enrichTransactionWithPaymentType(tx));
   }
 
   /**
    * Get transactions by user ID
    */
-  async getTransactionsByUserId(userId: number, filters: Omit<UnifiedTransactionFilters, 'userId'> = {}): Promise<UnifiedTransaction[]> {
+  async getTransactionsByUserId(
+    userId: number,
+    filters: Omit<UnifiedTransactionFilters, 'userId'> = {}
+  ): Promise<Transaction[]> {
     return this.getAllTransactions({ ...filters, userId });
   }
 
   /**
-   * Get transactions by recipient ID (escrow only)
+   * Get transactions by recipient ID
    */
-  async getTransactionsByRecipientId(recipientId: number, filters: Omit<UnifiedTransactionFilters, 'recipientId'> = {}): Promise<UnifiedTransaction[]> {
+  async getTransactionsByRecipientId(
+    recipientId: number,
+    filters: Omit<UnifiedTransactionFilters, 'recipientId'> = {}
+  ): Promise<Transaction[]> {
     return this.getAllTransactions({ ...filters, recipientId });
   }
 
   /**
-   * Get single transaction by ID and provider
+   * Get single transaction by ID
    */
-  async getTransactionById(id: string, provider?: 'PESAPAL' | 'PAWAPAY' | 'XENTRIPAY'): Promise<UnifiedTransaction | null> {
-    // Try to find in escrow transactions first
-    if (!provider || provider === 'PESAPAL' || provider === 'XENTRIPAY') {
-      const escrowTx = await prisma.escrowTransaction.findUnique({
-        where: { id }
-      });
-
-      if (escrowTx) {
-        const metadata = escrowTx.metadata as any;
-        const txProvider = metadata?.xentriPayRefId ? 'XENTRIPAY' : 'PESAPAL';
-
-        return {
-          id: escrowTx.id,
-          provider: txProvider,
-          type: escrowTx.type === 'DEPOSIT' ? 'ESCROW' : escrowTx.type as any,
-          status: escrowTx.status,
-          amount: escrowTx.amount,
-          currency: escrowTx.currency,
-          reference: escrowTx.reference,
-          externalId: escrowTx.externalId || undefined,
-          userId: escrowTx.userId,
-          recipientId: escrowTx.recipientId || undefined,
-          description: escrowTx.description || undefined,
-          metadata: metadata,
-          createdAt: escrowTx.createdAt,
-          updatedAt: escrowTx.updatedAt,
-          completedAt: escrowTx.releasedAt || escrowTx.cancelledAt || escrowTx.refundedAt || undefined,
-          failureReason: undefined
-        };
+  async getTransactionById(id: string): Promise<any | null> {
+    const transaction = await prisma.transaction.findUnique({
+      where: { id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true
+          }
+        },
+        recipient: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true
+          }
+        }
       }
+    });
+
+    if (!transaction) {
+      return null;
     }
 
-    // Try to find in PawaPay transactions
-    if (!provider || provider === 'PAWAPAY') {
-      const pawaPayTx = await prisma.pawaPayTransaction.findUnique({
-        where: { id }
-      });
+    return this.enrichTransactionWithPaymentType(transaction);
+  }
 
-      if (pawaPayTx) {
-        return {
-          id: pawaPayTx.id,
-          provider: 'PAWAPAY',
-          type: pawaPayTx.transactionType as any,
-          status: pawaPayTx.status,
-          amount: pawaPayTx.amount,
-          currency: pawaPayTx.currency,
-          reference: pawaPayTx.transactionId,
-          externalId: pawaPayTx.providerTransactionId || undefined,
-          userId: pawaPayTx.userId || undefined,
-          recipientId: undefined,
-          recipientPhone: pawaPayTx.recipientPhone || undefined,
-          payerPhone: pawaPayTx.payerPhone || undefined,
-          description: pawaPayTx.statementDescription || undefined,
-          metadata: pawaPayTx.metadata,
-          createdAt: pawaPayTx.createdAt,
-          updatedAt: pawaPayTx.updatedAt,
-          completedAt: pawaPayTx.completedAt || undefined,
-          failureReason: pawaPayTx.failureMessage || undefined,
-          providerTransactionId: pawaPayTx.providerTransactionId || undefined,
-          financialTransactionId: pawaPayTx.financialTransactionId || undefined
-        };
+  /**
+   * Get transaction by reference
+   */
+  async getTransactionByReference(reference: string): Promise<Transaction | null> {
+    return prisma.transaction.findUnique({
+      where: { reference },
+      include: {
+        user: true,
+        recipient: true
       }
-    }
+    });
+  }
 
-    return null;
+  /**
+   * Get transaction by provider transaction ID
+   */
+  async getTransactionByProviderTransactionId(
+    providerTransactionId: string
+  ): Promise<Transaction | null> {
+    return prisma.transaction.findFirst({
+      where: { providerTransactionId },
+      include: {
+        user: true,
+        recipient: true
+      }
+    });
+  }
+
+  /**
+   * Get transaction by booking ID
+   */
+  async getTransactionsByBookingId(bookingId: string): Promise<Transaction[]> {
+    return prisma.transaction.findMany({
+      where: { bookingId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: true,
+        recipient: true
+      }
+    });
   }
 
   /**
    * Get transaction statistics
    */
-  async getTransactionStats(userId?: number): Promise<{
-    totalTransactions: number;
-    byProvider: Record<string, number>;
-    byStatus: Record<string, number>;
-    byType: Record<string, number>;
-    totalVolume: Record<string, number>; // By currency
-  }> {
-    const transactions = await this.getAllTransactions({ userId, limit: 10000 });
+  async getTransactionStats(userId?: number): Promise<TransactionStats> {
+    const filters: UnifiedTransactionFilters = { limit: 10000 };
+    if (userId) {
+      filters.userId = userId;
+    }
 
-    const stats = {
+    const transactions = await this.getAllTransactions(filters);
+
+    const stats: TransactionStats = {
       totalTransactions: transactions.length,
-      byProvider: {} as Record<string, number>,
-      byStatus: {} as Record<string, number>,
-      byType: {} as Record<string, number>,
-      totalVolume: {} as Record<string, number>
+      byProvider: {},
+      byStatus: {},
+      byType: {},
+      totalVolume: {},
+      completedVolume: {},
+      pendingVolume: {}
     };
 
     for (const tx of transactions) {
@@ -284,16 +278,201 @@ export class UnifiedTransactionService {
       stats.byStatus[tx.status] = (stats.byStatus[tx.status] || 0) + 1;
 
       // Count by type
-      stats.byType[tx.type] = (stats.byType[tx.type] || 0) + 1;
+      stats.byType[tx.transactionType] = (stats.byType[tx.transactionType] || 0) + 1;
 
       // Sum volume by currency
-      const amount = typeof tx.amount === 'string' ? parseFloat(tx.amount) : tx.amount;
-      if (!isNaN(amount)) {
-        stats.totalVolume[tx.currency] = (stats.totalVolume[tx.currency] || 0) + amount;
+      const amount = tx.amount;
+      stats.totalVolume[tx.currency] = (stats.totalVolume[tx.currency] || 0) + amount;
+
+      // Completed volume
+      if (tx.status === 'COMPLETED' || tx.status === 'HELD') {
+        stats.completedVolume[tx.currency] = (stats.completedVolume[tx.currency] || 0) + amount;
+      }
+
+      // Pending volume
+      if (tx.status === 'PENDING' || tx.status === 'PROCESSING') {
+        stats.pendingVolume[tx.currency] = (stats.pendingVolume[tx.currency] || 0) + amount;
       }
     }
 
     return stats;
+  }
+
+  /**
+   * Get recent transactions
+   */
+  async getRecentTransactions(limit: number = 10): Promise<Transaction[]> {
+    return prisma.transaction.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true
+          }
+        },
+        recipient: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true
+          }
+        }
+      }
+    });
+  }
+
+  /**
+   * Get pending transactions (for status polling)
+   */
+  async getPendingTransactions(): Promise<Transaction[]> {
+    return prisma.transaction.findMany({
+      where: {
+        status: {
+          in: ['PENDING', 'PROCESSING']
+        }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+  }
+
+  /**
+   * Get transactions requiring status check
+   */
+  async getTransactionsNeedingStatusCheck(maxAge: number = 24): Promise<Transaction[]> {
+    const maxAgeDate = new Date();
+    maxAgeDate.setHours(maxAgeDate.getHours() - maxAge);
+
+    return prisma.transaction.findMany({
+      where: {
+        status: {
+          in: ['PENDING', 'PROCESSING', 'HELD']
+        },
+        OR: [
+          { lastStatusCheck: null },
+          { lastStatusCheck: { lt: maxAgeDate } }
+        ]
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+  }
+
+  /**
+   * Update transaction status
+   */
+  async updateTransactionStatus(
+    id: string,
+    status: string,
+    additionalData?: Partial<Transaction>
+  ): Promise<Transaction> {
+    // Build update data carefully to avoid type issues with metadata
+    const updateData: any = {
+      status,
+      updatedAt: new Date(),
+      lastStatusCheck: new Date(),
+      statusCheckCount: {
+        increment: 1
+      }
+    };
+
+    // Add additional data if provided, handling metadata specially
+    if (additionalData) {
+      const { metadata, ...rest } = additionalData;
+      Object.assign(updateData, rest);
+
+      // Only include metadata if it's not null
+      if (metadata !== null && metadata !== undefined) {
+        updateData.metadata = metadata;
+      }
+    }
+
+    // Set completed timestamp if status is final
+    if (['COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED'].includes(status) && !additionalData?.completedAt) {
+      updateData.completedAt = new Date();
+    }
+
+    return prisma.transaction.update({
+      where: { id },
+      data: updateData
+    });
+  }
+
+  /**
+   * Create a new transaction
+   */
+  async createTransaction(data: Prisma.TransactionCreateInput): Promise<Transaction> {
+    return prisma.transaction.create({
+      data
+    });
+  }
+
+  /**
+   * Get transactions by provider
+   */
+  async getTransactionsByProvider(
+    provider: 'PAWAPAY' | 'XENTRIPAY',
+    filters: Omit<UnifiedTransactionFilters, 'provider'> = {}
+  ): Promise<Transaction[]> {
+    return this.getAllTransactions({ ...filters, provider });
+  }
+
+  /**
+   * Search transactions by phone number
+   */
+  async searchByPhoneNumber(phoneNumber: string): Promise<Transaction[]> {
+    return prisma.transaction.findMany({
+      where: {
+        OR: [
+          { payerPhone: { contains: phoneNumber } },
+          { recipientPhone: { contains: phoneNumber } }
+        ]
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50
+    });
+  }
+
+  /**
+   * Get failed transactions
+   */
+  async getFailedTransactions(limit: number = 100): Promise<Transaction[]> {
+    return prisma.transaction.findMany({
+      where: {
+        status: 'FAILED'
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        user: true,
+        recipient: true
+      }
+    });
+  }
+
+  /**
+   * Get refund transactions
+   */
+  async getRefundTransactions(originalTransactionId?: string): Promise<Transaction[]> {
+    const where: Prisma.TransactionWhereInput = {
+      isRefund: true
+    };
+
+    if (originalTransactionId) {
+      where.relatedTransactionId = originalTransactionId;
+    }
+
+    return prisma.transaction.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: true,
+        recipient: true
+      }
+    });
   }
 }
 

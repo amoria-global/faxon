@@ -2,12 +2,13 @@
 
 import * as Brevo from '@getbrevo/brevo';
 import { config } from '../config/config';
-import {
-  EscrowTransaction,
-  EscrowParticipant,
-  WithdrawalRequest,
-  EscrowTransactionStatus
-} from '../types/pesapal.types';
+// DEPRECATED: Escrow system removed - types no longer available
+// import {
+//   EscrowTransaction,
+//   EscrowParticipant,
+//   WithdrawalRequest,
+//   EscrowTransactionStatus
+// } from '../types/pesapal.types';
 
 interface EmailTemplate {
   subject: string;
@@ -58,123 +59,123 @@ export class EmailService {
     };
   }
 
-  // === DEPOSIT NOTIFICATIONS ===
+  // === DEPRECATED: ESCROW DEPOSIT NOTIFICATIONS ===
+  // DEPRECATED: Escrow system removed
+  // async sendDepositCreatedEmail(data: {
+  //   user: EscrowParticipant;
+  //   transaction: EscrowTransaction;
+  //   checkoutUrl: string;
+  // }): Promise<void> {
+  //   try {
+  //     const template = this.generateDepositCreatedTemplate(data);
+  //
+  //     await this.sendEmail({
+  //       to: data.user.email,
+  //       subject: template.subject,
+  //       html: template.html,
+  //       text: template.text
+  //     });
+  //
+  //     console.log(`Deposit created email sent to ${data.user.email}`);
+  //   } catch (error: any) {
+  //     console.error('Failed to send deposit created email:', error);
+  //     throw error;
+  //   }
+  // }
 
-  async sendDepositCreatedEmail(data: {
-    user: EscrowParticipant;
-    transaction: EscrowTransaction;
-    checkoutUrl: string;
-  }): Promise<void> {
-    try {
-      const template = this.generateDepositCreatedTemplate(data);
+  // === DEPRECATED: ESCROW STATUS UPDATE NOTIFICATIONS ===
+  // DEPRECATED: Escrow system removed
+  // async sendTransactionStatusEmail(data: {
+  //   user: EscrowParticipant;
+  //   transaction: EscrowTransaction;
+  //   status: EscrowTransactionStatus;
+  // }): Promise<void> {
+  //   try {
+  //     const template = this.generateStatusUpdateTemplate(data);
+  //
+  //     await this.sendEmail({
+  //       to: data.user.email,
+  //       subject: template.subject,
+  //       html: template.html,
+  //       text: template.text
+  //     });
+  //
+  //     console.log(`Status update email sent to ${data.user.email} - Status: ${data.status}`);
+  //   } catch (error: any) {
+  //     console.error('Failed to send status update email:', error);
+  //     throw error;
+  //   }
+  // }
 
-      await this.sendEmail({
-        to: data.user.email,
-        subject: template.subject,
-        html: template.html,
-        text: template.text
-      });
+  // === DEPRECATED: ESCROW RELEASE NOTIFICATIONS ===
+  // DEPRECATED: Escrow system removed
+  // async sendFundsReleasedEmail(data: {
+  //   user: EscrowParticipant;
+  //   transaction: EscrowTransaction;
+  // }): Promise<void> {
+  //   try {
+  //     const template = this.generateFundsReleasedTemplate(data);
+  //
+  //     await this.sendEmail({
+  //       to: data.user.email,
+  //       subject: template.subject,
+  //       html: template.html,
+  //       text: template.text
+  //     });
+  //
+  //     console.log(`Funds released email sent to ${data.user.email}`);
+  //   } catch (error: any) {
+  //     console.error('Failed to send funds released email:', error);
+  //     throw error;
+  //   }
+  // }
 
-      console.log(`Deposit created email sent to ${data.user.email}`);
-    } catch (error: any) {
-      console.error('Failed to send deposit created email:', error);
-      throw error;
-    }
-  }
+  // === DEPRECATED: ESCROW WITHDRAWAL NOTIFICATIONS ===
+  // DEPRECATED: Escrow system removed
+  // async sendWithdrawalRequestEmail(data: {
+  //   user: EscrowParticipant;
+  //   withdrawal: WithdrawalRequest;
+  // }): Promise<void> {
+  //   try {
+  //     const template = this.generateWithdrawalRequestTemplate(data);
+  //
+  //     await this.sendEmail({
+  //       to: data.user.email,
+  //       subject: template.subject,
+  //       html: template.html,
+  //       text: template.text
+  //     });
+  //
+  //     console.log(`Withdrawal request email sent to ${data.user.email}`);
+  //   } catch (error: any) {
+  //     console.error('Failed to send withdrawal request email:', error);
+  //     throw error;
+  //   }
+  // }
 
-  // === STATUS UPDATE NOTIFICATIONS ===
-
-  async sendTransactionStatusEmail(data: {
-    user: EscrowParticipant;
-    transaction: EscrowTransaction;
-    status: EscrowTransactionStatus;
-  }): Promise<void> {
-    try {
-      const template = this.generateStatusUpdateTemplate(data);
-
-      await this.sendEmail({
-        to: data.user.email,
-        subject: template.subject,
-        html: template.html,
-        text: template.text
-      });
-
-      console.log(`Status update email sent to ${data.user.email} - Status: ${data.status}`);
-    } catch (error: any) {
-      console.error('Failed to send status update email:', error);
-      throw error;
-    }
-  }
-
-  // === RELEASE NOTIFICATIONS ===
-
-  async sendFundsReleasedEmail(data: {
-    user: EscrowParticipant;
-    transaction: EscrowTransaction;
-  }): Promise<void> {
-    try {
-      const template = this.generateFundsReleasedTemplate(data);
-
-      await this.sendEmail({
-        to: data.user.email,
-        subject: template.subject,
-        html: template.html,
-        text: template.text
-      });
-
-      console.log(`Funds released email sent to ${data.user.email}`);
-    } catch (error: any) {
-      console.error('Failed to send funds released email:', error);
-      throw error;
-    }
-  }
-
-  // === WITHDRAWAL NOTIFICATIONS ===
-
-  async sendWithdrawalRequestEmail(data: {
-    user: EscrowParticipant;
-    withdrawal: WithdrawalRequest;
-  }): Promise<void> {
-    try {
-      const template = this.generateWithdrawalRequestTemplate(data);
-
-      await this.sendEmail({
-        to: data.user.email,
-        subject: template.subject,
-        html: template.html,
-        text: template.text
-      });
-
-      console.log(`Withdrawal request email sent to ${data.user.email}`);
-    } catch (error: any) {
-      console.error('Failed to send withdrawal request email:', error);
-      throw error;
-    }
-  }
-
-  // === REFUND NOTIFICATIONS ===
-
-  async sendRefundProcessedEmail(data: {
-    user: EscrowParticipant;
-    transaction: EscrowTransaction;
-    refundAmount: number;
-  }): Promise<void> {
-    try {
-      const template = this.generateRefundProcessedTemplate(data);
-
-      await this.sendEmail({
-        to: data.user.email,
-        subject: template.subject,
-        html: template.html,
-        text: template.text
-      });
-
-      console.log(`Refund processed email sent to ${data.user.email}`);
-    } catch (error: any) {
-      console.error('Failed to send refund processed email:', error);
-      throw error;
-    }
-  }
+  // === DEPRECATED: ESCROW REFUND NOTIFICATIONS ===
+  // DEPRECATED: Escrow system removed
+  // async sendRefundProcessedEmail(data: {
+  //   user: EscrowParticipant;
+  //   transaction: EscrowTransaction;
+  //   refundAmount: number;
+  // }): Promise<void> {
+  //   try {
+  //     const template = this.generateRefundProcessedTemplate(data);
+  //
+  //     await this.sendEmail({
+  //       to: data.user.email,
+  //       subject: template.subject,
+  //       html: template.html,
+  //       text: template.text
+  //     });
+  //
+  //     console.log(`Refund processed email sent to ${data.user.email}`);
+  //   } catch (error: any) {
+  //     console.error('Failed to send refund processed email:', error);
+  //     throw error;
+  //   }
+  // }
 
   // === BOOKING PAYMENT NOTIFICATIONS ===
 
@@ -283,8 +284,9 @@ export class EmailService {
   }
 
   // === TEMPLATE GENERATORS ===
-
-  private generateDepositCreatedTemplate(data: {
+  // === DEPRECATED: ESCROW TEMPLATE GENERATORS ===
+  // DEPRECATED: Escrow system removed
+  /* private generateDepositCreatedTemplate(data: {
     user: EscrowParticipant;
     transaction: EscrowTransaction;
     checkoutUrl: string;
@@ -365,9 +367,9 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
     `;
 
     return { subject, html, text };
-  }
+  } */
 
-  private generateStatusUpdateTemplate(data: {
+  /* private generateStatusUpdateTemplate(data: {
     user: EscrowParticipant;
     transaction: EscrowTransaction;
     status: EscrowTransactionStatus;
@@ -448,9 +450,9 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
     `;
 
     return { subject, html, text };
-  }
+  } */
 
-  private generateFundsReleasedTemplate(data: {
+  /* private generateFundsReleasedTemplate(data: {
     user: EscrowParticipant;
     transaction: EscrowTransaction;
   }): EmailTemplate {
@@ -522,9 +524,9 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
     `;
 
     return { subject, html, text };
-  }
+  } */
 
-  private generateWithdrawalRequestTemplate(data: {
+  /* private generateWithdrawalRequestTemplate(data: {
     user: EscrowParticipant;
     withdrawal: WithdrawalRequest;
   }): EmailTemplate {
@@ -613,9 +615,9 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
     `;
 
     return { subject, html, text };
-  }
+  } */
 
-  private generateRefundProcessedTemplate(data: {
+  /* private generateRefundProcessedTemplate(data: {
     user: EscrowParticipant;
     transaction: EscrowTransaction;
     refundAmount: number;
@@ -702,7 +704,7 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
     `;
 
     return { subject, html, text };
-  }
+  } */
 
   // === BOOKING PAYMENT TEMPLATES ===
 
@@ -964,7 +966,8 @@ Need help? Contact us at ${this.companyInfo.supportEmail}
     await this.transactionalEmailsApi.sendTransacEmail(sendEmailRequest);
   }
 
-  private getStatusSpecificContent(status: EscrowTransactionStatus, transaction: EscrowTransaction): string {
+  // DEPRECATED: Escrow system removed
+  /* private getStatusSpecificContent(status: EscrowTransactionStatus, transaction: EscrowTransaction): string {
     switch (status) {
       case 'HELD':
         return '<div class="message">Your funds are now securely held and will be released once the service is confirmed as delivered.</div>';
@@ -977,7 +980,7 @@ Need help? Contact us at ${this.companyInfo.supportEmail}
       default:
         return '';
     }
-  }
+  } */
 
   // === HEALTH CHECK ===
 

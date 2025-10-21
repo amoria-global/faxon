@@ -48,13 +48,14 @@ export class EnhancedPropertyService {
   // === TRANSACTION SUMMARY CALCULATION ===
   async getAgentTransactionSummary(agentId: number) {
     const [escrowSummary, paymentSummary, agentBookings] = await Promise.all([
-      // Escrow transactions for agent
-      prisma.escrowTransaction.aggregate({
+      // Transaction summary for agent (DEPOSIT/PAYOUT types)
+      prisma.transaction.aggregate({
         where: {
           OR: [
             { userId: agentId },
             { recipientId: agentId }
-          ]
+          ],
+          transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] }
         },
         _sum: { amount: true },
         _count: true
@@ -98,18 +99,19 @@ export class EnhancedPropertyService {
 
   // === ESCROW COMMISSION STATES ===
   async getEscrowCommissionStates(agentId: number) {
-    const escrowTransactions = await prisma.escrowTransaction.findMany({
+    const escrowTransactions = await prisma.transaction.findMany({
       where: {
         OR: [
           { userId: agentId },
           { recipientId: agentId }
-        ]
+        ],
+        transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] }
       },
       select: {
         id: true,
         amount: true,
         status: true,
-        type: true,
+        transactionType: true,
         metadata: true
       }
     });
@@ -123,7 +125,7 @@ export class EnhancedPropertyService {
       refunded: 0
     };
 
-    escrowTransactions.forEach(transaction => {
+    escrowTransactions.forEach((transaction: any) => {
       const amount = transaction.amount;
       
       switch (transaction.status) {
@@ -145,6 +147,9 @@ export class EnhancedPropertyService {
           break;
         case 'REFUNDED':
           states.refunded += amount;
+          break;
+        case 'COMPLETED':
+          states.paid += amount;
           break;
       }
     });
@@ -224,8 +229,9 @@ export class EnhancedPropertyService {
   // === GET BOOKING TRANSACTION DATA ===
   async getBookingTransactionData(agentBookingId: string) {
     const [escrowTransaction, paymentTransaction] = await Promise.all([
-      prisma.escrowTransaction.findFirst({
+      prisma.transaction.findFirst({
         where: {
+          transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] },
           metadata: {
             path: ['agentBookingId'],
             equals: agentBookingId
@@ -268,13 +274,14 @@ export class EnhancedPropertyService {
       }
     });
 
-    // Get related escrow transactions
-    const escrowTransactions = await prisma.escrowTransaction.findMany({
+    // Get related transactions (escrow-type)
+    const escrowTransactions = await prisma.transaction.findMany({
       where: {
         OR: [
           { userId: agentId },
           { recipientId: agentId }
         ],
+        transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] },
         createdAt: { gte: twelveMonthsAgo }
       },
       select: {
@@ -302,7 +309,7 @@ export class EnhancedPropertyService {
     const monthlyData: { [key: string]: MonthlyCommissionData } | any = {};
 
     // Process agent bookings
-    agentBookings.forEach(booking => {
+    agentBookings.forEach((booking: any) => {
       const month = booking.createdAt.toISOString().slice(0, 7);
       if (!monthlyData[month]) {
         monthlyData[month] = {
@@ -321,7 +328,7 @@ export class EnhancedPropertyService {
     });
 
     // Process escrow transactions
-    escrowTransactions.forEach(transaction => {
+    escrowTransactions.forEach((transaction: any) => {
       const month = transaction.createdAt.toISOString().slice(0, 7);
       if (!monthlyData[month]) {
         monthlyData[month] = {
@@ -348,7 +355,7 @@ export class EnhancedPropertyService {
     });
 
     // Process payment transactions
-    paymentTransactions.forEach(transaction => {
+    paymentTransactions.forEach((transaction: any) => {
       const month = transaction.createdAt.toISOString().slice(0, 7);
       if (!monthlyData[month]) {
         monthlyData[month] = {
@@ -379,12 +386,13 @@ export class EnhancedPropertyService {
 
   // === GET AGENT ESCROW TRANSACTIONS ===
   async getAgentEscrowTransactions(agentId: number) {
-    return await prisma.escrowTransaction.findMany({
+    return await prisma.transaction.findMany({
       where: {
         OR: [
           { userId: agentId },
           { recipientId: agentId }
-        ]
+        ],
+        transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] }
       },
       include: {
         user: { select: { firstName: true, lastName: true } },
@@ -471,12 +479,13 @@ export class EnhancedPropertyService {
 
   // === ESCROW BREAKDOWN ===
   async getAgentEscrowBreakdown(agentId: number, startDate: Date) {
-    const escrowTransactions = await prisma.escrowTransaction.findMany({
+    const escrowTransactions = await prisma.transaction.findMany({
       where: {
         OR: [
           { userId: agentId },
           { recipientId: agentId }
         ],
+        transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] },
         createdAt: { gte: startDate }
       },
       orderBy: { createdAt: 'desc' }
@@ -484,11 +493,11 @@ export class EnhancedPropertyService {
 
     const breakdown = {
       total: escrowTransactions.length,
-      pending: escrowTransactions.filter(t => t.status === 'PENDING').length,
-      held: escrowTransactions.filter(t => t.status === 'HELD').length,
-      released: escrowTransactions.filter(t => t.status === 'RELEASED').length,
-      failed: escrowTransactions.filter(t => ['FAILED', 'CANCELLED'].includes(t.status)).length,
-      totalAmount: escrowTransactions.reduce((sum, t) => sum + t.amount, 0),
+      pending: escrowTransactions.filter((t: any) => t.status === 'PENDING').length,
+      held: escrowTransactions.filter((t: any) => t.status === 'HELD').length,
+      released: escrowTransactions.filter((t: any) => t.status === 'RELEASED').length,
+      failed: escrowTransactions.filter((t: any) => ['FAILED', 'CANCELLED'].includes(t.status)).length,
+      totalAmount: escrowTransactions.reduce((sum: any, t: any) => sum + t.amount, 0),
       transactions: escrowTransactions
     };
 
@@ -507,11 +516,11 @@ export class EnhancedPropertyService {
 
     const breakdown = {
       total: paymentTransactions.length,
-      pending: paymentTransactions.filter(t => t.status === 'pending').length,
-      processing: paymentTransactions.filter(t => t.status === 'processing').length,
-      completed: paymentTransactions.filter(t => ['completed', 'success'].includes(t.status)).length,
-      failed: paymentTransactions.filter(t => ['failed', 'cancelled'].includes(t.status)).length,
-      totalAmount: paymentTransactions.reduce((sum, t) => sum + t.amount, 0),
+      pending: paymentTransactions.filter((t: any) => t.status === 'pending').length,
+      processing: paymentTransactions.filter((t: any) => t.status === 'processing').length,
+      completed: paymentTransactions.filter((t: any) => ['completed', 'success'].includes(t.status)).length,
+      failed: paymentTransactions.filter((t: any) => ['failed', 'cancelled'].includes(t.status)).length,
+      totalAmount: paymentTransactions.reduce((sum: any, t: any) => sum + t.amount, 0),
       transactions: paymentTransactions
     };
 
@@ -607,19 +616,20 @@ export class EnhancedPropertyService {
   }
 
   private async getEscrowOverview(agentId: number) {
-    const summary = await prisma.escrowTransaction.groupBy({
+    const summary = await prisma.transaction.groupBy({
       by: ['status'],
       where: {
         OR: [
           { userId: agentId },
           { recipientId: agentId }
-        ]
+        ],
+        transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] }
       },
       _sum: { amount: true },
       _count: true
     });
 
-    return summary.reduce((acc, item) => {
+    return summary.reduce((acc: any, item: any) => {
       acc[item.status.toLowerCase()] = {
         count: item._count,
         amount: item._sum.amount || 0
@@ -647,12 +657,13 @@ export class EnhancedPropertyService {
 
   private async getRecentTransactionActivity(agentId: number) {
     const [escrowTransactions, paymentTransactions] = await Promise.all([
-      prisma.escrowTransaction.findMany({
+      prisma.transaction.findMany({
         where: {
           OR: [
             { userId: agentId },
             { recipientId: agentId }
-          ]
+          ],
+          transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] }
         },
         include: {
           user: { select: { firstName: true, lastName: true } },
@@ -673,8 +684,8 @@ export class EnhancedPropertyService {
 
     // Combine and sort by date
     const allTransactions = [
-      ...escrowTransactions.map(t => ({ ...t, source: 'escrow' })),
-      ...paymentTransactions.map(t => ({ ...t, source: 'payment' }))
+      ...escrowTransactions.map((t: any) => ({ ...t, source: 'escrow' })),
+      ...paymentTransactions.map((t: any) => ({ ...t, source: 'payment' }))
     ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     return allTransactions.slice(0, 15);
@@ -692,12 +703,13 @@ export class EnhancedPropertyService {
 
   private async getFailedTransactions(agentId: number) {
     const [failedEscrow, failedPayments] = await Promise.all([
-      prisma.escrowTransaction.findMany({
+      prisma.transaction.findMany({
         where: {
           OR: [
             { userId: agentId },
             { recipientId: agentId }
           ],
+          transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] },
           status: { in: ['FAILED', 'CANCELLED'] }
         },
         orderBy: { createdAt: 'desc' },

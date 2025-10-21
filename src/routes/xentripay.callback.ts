@@ -1,10 +1,9 @@
 // routes/xentripay-callback.routes.ts
+// NOTE: Escrow functionality has been deprecated and removed
 
 import express, { Request, Response } from 'express';
 import crypto from 'crypto';
-import { XentriPayEscrowService } from '../services/xentripay-escrow.service';
 import { XentriPayService } from '../services/xentripay.service';
-import { BrevoMailingService } from '../utils/brevo.xentripay';
 import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
 import config from '../config/config';
 
@@ -13,8 +12,8 @@ const router = express.Router();
 // ==================== INITIALIZE SERVICES ====================
 
 const isProduction = process.env.NODE_ENV === 'production';
-const baseUrl = isProduction 
-  ? 'https://xentripay.com' 
+const baseUrl = isProduction
+  ? 'https://xentripay.com'
   : 'https://test.xentripay.com';
 
 const xentriPayService = new XentriPayService({
@@ -24,9 +23,7 @@ const xentriPayService = new XentriPayService({
   timeout: 30000
 });
 
-const mailingService = new BrevoMailingService();
 const paymentEmailService = new BrevoPaymentStatusMailingService();
-const escrowService = new XentriPayEscrowService(xentriPayService, mailingService);
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -110,53 +107,15 @@ async function processWebhook(callbackData: any): Promise<boolean> {
     const { PrismaClient } = require('@prisma/client');
     const prisma = new PrismaClient();
 
-    // Find escrow transaction by externalId (XentriPay refid)
-    const escrowTransaction = await prisma.escrowTransaction.findFirst({
-      where: { externalId: callbackData.refid },
-      include: {
-        user: { select: { id: true, email: true, firstName: true, lastName: true } },
-        recipient: { select: { id: true, email: true, firstName: true, lastName: true } }
-      }
-    });
+    // NOTE: Escrow system deprecated - now handling booking payments directly
+    // Extract booking reference from callbackData if available
+    const reference = callbackData.refid;
 
-    if (!escrowTransaction) {
-      console.error('[XENTRIPAY_CALLBACK] Transaction not found for refid:', callbackData.refid);
-      return false;
-    }
-
-    const previousStatus = escrowTransaction.status;
-    let newStatus = previousStatus;
-
-    // Map XentriPay status to escrow status
+    // Handle payment based on status
     if (callbackData.status === 'SUCCESS') {
-      newStatus = 'HELD';
+      await handlePaymentSuccessDirectly(reference, prisma);
     } else if (callbackData.status === 'FAILED') {
-      newStatus = 'FAILED';
-    } else {
-      newStatus = 'PENDING';
-    }
-
-    // Only proceed if status has changed
-    if (newStatus !== previousStatus) {
-      console.log(`[XENTRIPAY_CALLBACK] Status changed: ${previousStatus} → ${newStatus}`);
-
-      // Update escrow transaction
-      await prisma.escrowTransaction.update({
-        where: { id: escrowTransaction.id },
-        data: {
-          status: newStatus,
-          fundedAt: newStatus === 'HELD' ? new Date() : null,
-          cancelledAt: newStatus === 'FAILED' ? new Date() : null,
-          updatedAt: new Date()
-        }
-      });
-
-      // Handle booking-related updates if this is a booking payment
-      if (newStatus === 'HELD') {
-        await handlePaymentSuccess(escrowTransaction, prisma);
-      } else if (newStatus === 'FAILED') {
-        await handlePaymentFailure(escrowTransaction, prisma);
-      }
+      await handlePaymentFailureDirectly(reference, prisma);
     }
 
     console.log(`[XENTRIPAY_CALLBACK] ✅ Webhook processed successfully: ${callbackData.refid}`);
@@ -173,12 +132,10 @@ async function processWebhook(callbackData: any): Promise<boolean> {
 }
 
 /**
- * Handle successful payment completion
+ * Handle successful payment completion (direct booking payment - no escrow)
  */
-async function handlePaymentSuccess(escrowTransaction: any, prisma: any): Promise<void> {
+async function handlePaymentSuccessDirectly(reference: string, prisma: any): Promise<void> {
   try {
-    const reference = escrowTransaction.reference;
-
     // Check if this is a booking payment
     if (reference && reference.startsWith('BOOKING-')) {
       // Find booking by transaction reference
@@ -331,12 +288,11 @@ async function handlePaymentSuccess(escrowTransaction: any, prisma: any): Promis
 }
 
 /**
- * Handle payment failure
+ * Handle payment failure (direct booking payment - no escrow)
  */
-async function handlePaymentFailure(escrowTransaction: any, prisma: any): Promise<void> {
+async function handlePaymentFailureDirectly(reference: string, prisma: any): Promise<void> {
   try {
-    const reference = escrowTransaction.reference;
-    const failureReason = escrowTransaction.failureReason || 'Payment was not completed';
+    const failureReason = 'Payment was not completed';
 
     if (reference && reference.startsWith('BOOKING-')) {
       const booking = await prisma.booking.findFirst({
@@ -376,7 +332,7 @@ async function handlePaymentFailure(escrowTransaction: any, prisma: any): Promis
  */
 function calculateSplitRules(hasAgent: boolean): { platform: number; agent: number; host: number } {
   const config = require('../config/config').default;
-  const configRules = config.escrow.defaultSplitRules;
+  const configRules = config.defaultSplitRules;
 
   if (hasAgent) {
     return {
@@ -839,18 +795,12 @@ router.post('/check-status', async (req: Request, res: Response) => {
     console.log('[XENTRIPAY_CHECK] Manual status check:', { refid, transactionId });
 
     let status;
-    
+
     if (refid) {
       // Check collection status by refid
       status = await xentriPayService.getCollectionStatus(refid);
-    } else if (transactionId) {
-      // Check transaction status in escrow service
-      const transaction = await escrowService.getTransaction(transactionId);
-      if (transaction?.xentriPayRefId) {
-        status = await xentriPayService.getCollectionStatus(transaction.xentriPayRefId);
-      } else {
-        throw new Error('Transaction not found or has no XentriPay reference');
-      }
+    } else {
+      throw new Error('refid is required for status check');
     }
 
     res.json({
