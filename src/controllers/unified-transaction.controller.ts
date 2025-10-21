@@ -4,9 +4,11 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { unifiedTransactionService, UnifiedTransactionFilters } from '../services/unified-transaction.service';
 import { PawaPayService } from '../services/pawapay.service';
-import { PAWAPAY_PROVIDERS } from '../types/pawapay.types';
+import { XentriPayService } from '../services/xentripay.service';
 import { logger } from '../utils/logger';
 import config from '../config/config';
+import { currencyExchangeService } from '../services/currency-exchange.service';
+import { PhoneUtils } from '../utils/phone.utils';
 
 const prisma = new PrismaClient();
 
@@ -17,10 +19,719 @@ const pawaPayService = new PawaPayService({
   environment: config.pawapay.environment
 });
 
+// Initialize XentriPay service
+const isProduction = process.env.NODE_ENV === 'production';
+const xentriPayBaseUrl = isProduction
+  ? 'https://xentripay.com'
+  : 'https://test.xentripay.com';
+
+const xentriPayService = new XentriPayService({
+  apiKey: process.env.XENTRIPAY_API_KEY || '',
+  baseUrl: process.env.XENTRIPAY_BASE_URL || xentriPayBaseUrl,
+  environment: isProduction ? 'production' : 'sandbox',
+  timeout: 30000
+});
+
 export class UnifiedTransactionController {
+  /**
+   * Helper: Send booking notifications to user, host, and agent
+   */
+  private async sendBookingNotifications(
+    bookingId: string,
+    transactionReference: string,
+    rwfAmount: number,
+    paymentMethod: string,
+    paymentInstructions?: string
+  ): Promise<void> {
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        include: {
+          property: {
+            include: {
+              host: true,
+              agent: true
+            }
+          },
+          guest: true
+        }
+      });
+
+      if (!booking || !booking.property.host) {
+        logger.warn('Cannot send notifications: Booking or host not found', 'UnifiedTransactionController', { bookingId });
+        return;
+      }
+
+      const { BrevoPropertyMailingService } = require('../utils/brevo.property');
+      const propertyEmailService = new BrevoPropertyMailingService();
+
+      const company = {
+        name: 'Jambolush',
+        website: 'https://jambolush.com',
+        supportEmail: 'support@jambolush.com',
+        logo: 'https://jambolush.com/favicon.ico'
+      };
+
+      const isPropertyPayment = paymentMethod === 'Pay at Property' || paymentMethod === 'cash_at_property';
+      const defaultInstructions = isPropertyPayment
+        ? 'Please pay the full amount in cash when you check in at the property. A 5% service fee is included.'
+        : 'Your payment is being processed. You will receive a confirmation once it\'s complete.';
+
+      // Notify guest/user
+      propertyEmailService.sendBookingNotificationToGuest({
+        user: {
+          firstName: booking.guest.firstName,
+          lastName: booking.guest.lastName,
+          email: booking.guest.email,
+          id: booking.guestId
+        },
+        company,
+        booking: {
+          id: booking.id,
+          propertyName: booking.property.name,
+          checkIn: booking.checkIn.toISOString(),
+          checkOut: booking.checkOut.toISOString(),
+          totalPrice: rwfAmount,
+          currency: 'RWF',
+          transactionReference,
+          paymentMethod,
+          paymentInstructions: paymentInstructions || defaultInstructions
+        }
+      }).catch((err: any) => logger.error('Failed to send guest notification', 'UnifiedTransactionController', err));
+
+      // Notify host/owner
+      const hostInstructions = isPropertyPayment
+        ? 'Guest will pay cash at check-in. Please collect the full amount and mark as collected in your dashboard.'
+        : 'Payment is being processed online. You will be notified when the payment is complete.';
+
+      propertyEmailService.sendBookingNotificationToHost({
+        user: {
+          firstName: booking.property.host.firstName,
+          lastName: booking.property.host.lastName,
+          email: booking.property.host.email,
+          id: booking.property.hostId
+        },
+        company,
+        booking: {
+          id: booking.id,
+          propertyName: booking.property.name,
+          guestName: `${booking.guest.firstName} ${booking.guest.lastName}`,
+          guestEmail: booking.guest.email,
+          guestPhone: booking.guest.phone || 'Not provided',
+          checkIn: booking.checkIn.toISOString(),
+          checkOut: booking.checkOut.toISOString(),
+          totalPrice: rwfAmount,
+          currency: 'RWF',
+          transactionReference,
+          paymentMethod,
+          collectionInstructions: hostInstructions
+        }
+      }).catch((err: any) => logger.error('Failed to send host notification', 'UnifiedTransactionController', err));
+
+      // Notify agent if property has an agent
+      if (booking.property.agent) {
+        propertyEmailService.sendBookingNotificationToAgent({
+          user: {
+            firstName: booking.property.agent.firstName,
+            lastName: booking.property.agent.lastName,
+            email: booking.property.agent.email,
+            id: booking.property.agent.id
+          },
+          company,
+          booking: {
+            id: booking.id,
+            propertyName: booking.property.name,
+            hostName: `${booking.property.host.firstName} ${booking.property.host.lastName}`,
+            guestName: `${booking.guest.firstName} ${booking.guest.lastName}`,
+            checkIn: booking.checkIn.toISOString(),
+            checkOut: booking.checkOut.toISOString(),
+            totalPrice: rwfAmount,
+            currency: 'RWF',
+            transactionReference,
+            paymentMethod
+          }
+        }).catch((err: any) => logger.error('Failed to send agent notification', 'UnifiedTransactionController', err));
+      }
+
+      logger.info('Booking notifications sent', 'UnifiedTransactionController', { bookingId, paymentMethod });
+    } catch (error) {
+      logger.error('Failed to send booking notifications', 'UnifiedTransactionController', error);
+      // Don't throw - notifications are non-critical
+    }
+  }
+
+  // ==================== UNIFIED DEPOSIT (PAYMENTS) ====================
+
+  /**
+   * Unified deposit endpoint - routes based on payment method
+   * POST /api/transactions/deposit
+   * @body paymentMethod - "momo" (mobile money via PawaPay), "card" (card via XentriPay), or "property" (pay at property)
+   * @body amount - Amount in USD (will be converted to RWF for both providers)
+   * @body phoneNumber - Phone number (required for momo, optional for card)
+   * @body email - Email (required for card, optional for momo)
+   * @body For momo: provider (MTN_RWANDA, AIRTEL_RWANDA), country, description, internalReference
+   * @body For card: customerName, description, internalReference
+   * @body For property: internalReference (booking ID), amount, customerName, email
+   */
+  async initiateUnifiedDeposit(req: Request, res: Response): Promise<void> {
+    try {
+      const { paymentMethod, ...depositData } = req.body;
+
+      // Validate payment method
+      if (!paymentMethod || !['momo', 'card', 'property'].includes(paymentMethod)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid or missing paymentMethod. Must be "momo" (mobile money), "card", or "property" (pay at property)'
+        });
+        return;
+      }
+
+      logger.info('Initiating unified deposit', 'UnifiedTransactionController', {
+        paymentMethod,
+        amount: depositData.amount
+      });
+
+      // Route based on payment method:
+      // - "momo" (mobile money) -> PawaPay
+      // - "card" -> XentriPay
+      // - "property" -> Cash payment at property (no provider)
+      if (paymentMethod === 'momo') {
+        await this.handlePawaPayDeposit(req, res, depositData);
+      } else if (paymentMethod === 'card') {
+        await this.handleXentriPayCardDeposit(req, res, depositData);
+      } else if (paymentMethod === 'property') {
+        await this.handlePropertyPayment(req, res, depositData);
+      }
+    } catch (error: any) {
+      logger.error('Failed to initiate unified deposit', 'UnifiedTransactionController', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to initiate deposit',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Handle PawaPay deposit
+   */
+  private async handlePawaPayDeposit(req: Request, res: Response, depositData: any): Promise<void> {
+    const userId = req.user?.userId ? parseInt(req.user.userId) : undefined;
+    const { amount, phoneNumber, provider: mobileProvider, country, description, internalReference, metadata } = depositData;
+
+    // CRITICAL: Validate userId exists before creating transaction
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required. User must be logged in to initiate deposit.'
+      });
+      return;
+    }
+
+    if (!amount || !phoneNumber || !mobileProvider) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields for PawaPay: amount, phoneNumber, provider (mobile provider)'
+      });
+      return;
+    }
+
+    // Frontend sends amount in USD, we need to convert to RWF
+    const usdAmount = parseFloat(amount);
+
+    // Convert USD to RWF using deposit rate (+0.5%)
+    const { rwfAmount, rate: depositRate, exchangeRate } = await currencyExchangeService.convertUSDToRWF_Deposit(usdAmount);
+
+    const countryISO3 = pawaPayService.convertToISO3CountryCode(country || 'RW');
+    const formattedPhone = pawaPayService.formatPhoneNumber(phoneNumber, country === 'RW' ? '250' : undefined);
+    const providerCode = pawaPayService.getProviderCode(mobileProvider, countryISO3);
+
+    // PawaPay expects amount in RWF (no decimal places for RWF)
+    const amountInSmallestUnit = rwfAmount.toString();
+    const depositId = pawaPayService.generateTransactionId();
+
+    // Fetch user email for metadata
+    const user = userId ? await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, firstName: true, lastName: true, phone: true }
+    }) : null;
+
+    const metadataArray: any[] = Object.entries({
+      ...(metadata || {}),
+      clientReferenceId: internalReference,
+      userId: userId,
+      userEmail: user?.email,
+      userFirstName: user?.firstName,
+      userLastName: user?.lastName,
+      userPhone: user?.phone
+    }).map(([key, value]) => {
+      if (value === undefined || value === null) return null;
+      const isPII = key.toLowerCase() === 'userid' || key.toLowerCase().includes('customer');
+      const entry: { [key: string]: any } = { [key]: String(value) };
+      if (isPII) entry.isPII = true;
+      return entry;
+    }).filter(Boolean);
+
+    const depositRequest = {
+      depositId,
+      amount: amountInSmallestUnit,
+      currency: 'RWF' as 'RWF',
+      payer: {
+        type: 'MMO' as 'MMO',
+        accountDetails: {
+          phoneNumber: formattedPhone,
+          provider: providerCode
+        }
+      },
+      metadata: metadataArray
+    };
+
+    const response = await pawaPayService.initiateDeposit(depositRequest);
+
+    // Store in unified Transaction table
+    await prisma.transaction.create({
+      data: {
+        reference: depositId,
+        provider: 'PAWAPAY',
+        transactionType: 'DEPOSIT',
+        paymentMethod: 'mobile_money',
+        userId,
+        amount: parseFloat(amountInSmallestUnit),
+        currency: 'RWF',
+        requestedAmount: parseFloat(amountInSmallestUnit),
+        status: response.status,
+        externalId: depositId,
+        providerTransactionId: response.correspondentIds?.PROVIDER_TRANSACTION_ID,
+        financialTransactionId: response.correspondentIds?.FINANCIAL_TRANSACTION_ID,
+        payerPhone: formattedPhone,
+        correspondent: providerCode,
+        description: description,
+        statementDescription: description,
+        customerTimestamp: response.customerTimestamp ? new Date(response.customerTimestamp) : new Date(),
+        country: countryISO3,
+        bookingId: internalReference,
+        failureCode: response.failureReason?.failureCode,
+        failureReason: response.failureReason?.failureMessage,
+        receivedByProvider: response.receivedByPawaPay ? new Date(response.receivedByPawaPay) : undefined,
+        metadata: {
+          ...(metadata || {}),
+          originalAmountUSD: usdAmount,
+          exchangeRate: depositRate,
+          baseRate: exchangeRate.base,
+          depositRate: exchangeRate.depositRate,
+          payoutRate: exchangeRate.payoutRate,
+          spread: exchangeRate.spread,
+          amountRWF: rwfAmount,
+          userEmail: user?.email,
+          userFirstName: user?.firstName,
+          userLastName: user?.lastName,
+          userPhone: user?.phone,
+          internalReference,
+          // Default split percentages from config
+          splitRules: {
+            host: config.defaultSplitRules.host,
+            agent: config.defaultSplitRules.agent,
+            platform: config.defaultSplitRules.platform
+          }
+        }
+      }
+    });
+
+    // Send notifications to user, host, and agent if this is a booking payment
+    if (internalReference) {
+      await this.sendBookingNotifications(
+        internalReference,
+        depositId,
+        rwfAmount,
+        'Mobile Money',
+        'Your mobile money payment is being processed. You will receive a confirmation once it\'s complete.'
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      provider: 'pawapay',
+      message: 'Deposit initiated successfully via PawaPay',
+      data: {
+        depositId,
+        status: response.status,
+        amountUSD: usdAmount,
+        amountRWF: rwfAmount,
+        currency: 'RWF',
+        exchangeRate: {
+          rate: depositRate,
+          base: exchangeRate.base,
+          depositRate: exchangeRate.depositRate,
+          payoutRate: exchangeRate.payoutRate,
+          spread: exchangeRate.spread
+        },
+        country: countryISO3,
+        provider: providerCode,
+        failureReason: response.failureReason,
+        created: response.created
+      }
+    });
+  }
+
+  /**
+   * Handle XentriPay card deposit
+   * NOTE: We send pmethod='cc' to the provider but save paymentMethod='card' in database
+   * This is to match provider's expected format while maintaining consistent DB schema
+   */
+  private async handleXentriPayCardDeposit(req: Request, res: Response, depositData: any): Promise<void> {
+    const userId = req.user?.userId ? parseInt(req.user.userId) : undefined;
+    const { amount, phoneNumber, email, customerName, description, internalReference, metadata } = depositData;
+
+    // CRITICAL: Validate userId exists before creating transaction
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required. User must be logged in to initiate deposit.'
+      });
+      return;
+    }
+
+    if (!amount || !email) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields for card payment: amount, email'
+      });
+      return;
+    }
+
+    // Frontend sends amount in USD
+    const usdAmount = parseFloat(amount);
+
+    // Get exchange rate for response (XentriPayService will do conversion internally)
+    const { rwfAmount, rate: depositRate, exchangeRate } = await currencyExchangeService.convertUSDToRWF_Deposit(usdAmount);
+
+    // Fetch user info if not provided
+    const user = userId ? await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, firstName: true, lastName: true, phone: true }
+    }) : null;
+
+    const customerReference = internalReference || xentriPayService.generateCustomerReference('CARD');
+
+    // Check if transaction with this reference already exists
+    const existingTransaction = await prisma.transaction.findUnique({
+      where: { reference: customerReference }
+    });
+
+    if (existingTransaction) {
+      // If transaction exists and was created recently (within last 10 minutes), return it
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+      if (existingTransaction.createdAt > tenMinutesAgo) {
+        logger.info('Returning existing transaction for duplicate reference', 'UnifiedTransactionController', {
+          reference: customerReference,
+          existingStatus: existingTransaction.status
+        });
+
+        res.status(200).json({
+          success: true,
+          message: 'Transaction already exists',
+          data: {
+            transaction: existingTransaction,
+            exchangeRate: {
+              rate: depositRate,
+              amountUSD: usdAmount,
+              amountRWF: rwfAmount
+            }
+          }
+        });
+        return;
+      } else {
+        // If old transaction exists, generate a new reference
+        const newReference = xentriPayService.generateCustomerReference('CARD');
+        logger.warn('Old transaction with reference exists, generating new reference', 'UnifiedTransactionController', {
+          oldReference: customerReference,
+          newReference: newReference
+        });
+        // Update customerReference to use the new one
+        depositData.internalReference = newReference;
+        // Recursively call with new reference
+        return this.handleXentriPayCardDeposit(req, res, depositData);
+      }
+    }
+
+    // Use phone number or default (cnumber must be 10 digits without country code)
+    const contactNumber = phoneNumber || user?.phone || '0780000000';
+    const cnumberFormatted = PhoneUtils.formatPhone(contactNumber, false); // e.g., "0780371519"
+    const msisdnFormatted = PhoneUtils.formatPhone(contactNumber, true); // e.g., "250780371519"
+
+    // Validate cnumber is 10 digits
+    if (!/^\d{10}$/.test(cnumberFormatted)) {
+      res.status(400).json({
+        success: false,
+        message: 'Phone number must be exactly 10 digits (e.g., 0780000000)'
+      });
+      return;
+    }
+
+    // Initiate card collection via XentriPay
+    // NOTE: XentriPayService.initiateCollection() expects USD amount and converts to RWF internally
+    // Send 'cc' as pmethod to provider, but save 'card' in database
+    // The redirecturl will be dynamically set by the provider based on payment status
+    const collectionResponse = await xentriPayService.initiateCollection({
+      email: email || user?.email || 'guest@jambolush.com',
+      cname: customerName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Guest',
+      amount: usdAmount, // Send USD - service will convert to RWF
+      cnumber: cnumberFormatted, // 10 digits: "0780371519"
+      msisdn: msisdnFormatted, // Full: "250780371519"
+      currency: 'USD', // Service will convert to RWF
+      pmethod: 'cc', // Send 'cc' to provider instead of 'card'
+      chargesIncluded: 'true',
+      redirecturl: 'https://jambolush.com/payment/status' // Provider will append actual status
+    });
+
+    // Store in unified Transaction table
+    await prisma.transaction.create({
+      data: {
+        reference: customerReference,
+        provider: 'XENTRIPAY',
+        transactionType: 'DEPOSIT',
+        paymentMethod: 'card',
+        userId,
+        amount: rwfAmount,
+        currency: 'RWF',
+        requestedAmount: rwfAmount,
+        status: 'PENDING',
+        externalId: collectionResponse.refid || customerReference,
+        payerPhone: msisdnFormatted,
+        description: description,
+        bookingId: internalReference,
+        metadata: {
+          ...(metadata || {}),
+          originalAmountUSD: usdAmount,
+          exchangeRate: depositRate,
+          baseRate: exchangeRate.base,
+          depositRate: exchangeRate.depositRate,
+          payoutRate: exchangeRate.payoutRate,
+          spread: exchangeRate.spread,
+          amountRWF: rwfAmount,
+          xentriPayRefId: collectionResponse.refid,
+          xentriPayTid: collectionResponse.tid,
+          xentriPayAuthkey: collectionResponse.authkey,
+          xentriPayReply: collectionResponse.reply,
+          paymentMethod: 'card',
+          userEmail: email || user?.email,
+          customerName: customerName,
+          cnumber: cnumberFormatted,
+          msisdn: msisdnFormatted,
+          userFirstName: user?.firstName,
+          userLastName: user?.lastName,
+          internalReference,
+          // Default split percentages from config
+          splitRules: {
+            host: config.defaultSplitRules.host,
+            agent: config.defaultSplitRules.agent,
+            platform: config.defaultSplitRules.platform
+          }
+        }
+      }
+    });
+
+    // Send notifications to user, host, and agent if this is a booking payment
+    if (internalReference) {
+      await this.sendBookingNotifications(
+        internalReference,
+        customerReference,
+        rwfAmount,
+        'Card Payment',
+        'Your card payment is being processed. You will receive a confirmation once it\'s complete.'
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      provider: 'xentripay',
+      paymentMethod: 'card',
+      message: 'Card payment initiated successfully via XentriPay',
+      data: {
+        depositId: customerReference,
+        refId: collectionResponse.refid,
+        tid: collectionResponse.tid,
+        status: 'PENDING',
+        amountUSD: usdAmount,
+        amountRWF: rwfAmount,
+        currency: 'RWF',
+        exchangeRate: {
+          rate: depositRate,
+          base: exchangeRate.base,
+          depositRate: exchangeRate.depositRate,
+          payoutRate: exchangeRate.payoutRate,
+          spread: exchangeRate.spread
+        },
+        paymentUrl: collectionResponse.url,
+        reply: collectionResponse.reply,
+        instructions: 'Redirect user to paymentUrl to complete card payment'
+      }
+    });
+  }
+
+  /**
+   * Handle property payment (pay at property / cash payment)
+   */
+  private async handlePropertyPayment(req: Request, res: Response, depositData: any): Promise<void> {
+    const userId = req.user?.userId ? parseInt(req.user.userId) : undefined;
+    const { amount, email, customerName, phoneNumber, description, internalReference, metadata } = depositData;
+
+    // CRITICAL: Validate userId exists before creating transaction
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required. User must be logged in to initiate deposit.'
+      });
+      return;
+    }
+
+    if (!amount || !internalReference) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields for property payment: amount, internalReference (booking ID)'
+      });
+      return;
+    }
+
+    // Frontend sends amount in USD
+    const usdAmount = parseFloat(amount);
+
+    // Get exchange rate for RWF conversion (even though payment is at property)
+    const { rwfAmount, rate: depositRate, exchangeRate } = await currencyExchangeService.convertUSDToRWF_Deposit(usdAmount);
+
+    // Fetch user info
+    const user = userId ? await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, firstName: true, lastName: true, phone: true }
+    }) : null;
+
+    const propertyPaymentRef = `PROP-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+
+    // Create a transaction record with status PENDING_PROPERTY_PAYMENT
+    const transaction = await prisma.transaction.create({
+      data: {
+        reference: propertyPaymentRef,
+        provider: 'PROPERTY', // No external provider for property payments
+        transactionType: 'DEPOSIT',
+        paymentMethod: 'cash_at_property',
+        userId,
+        amount: rwfAmount,
+        currency: 'RWF',
+        requestedAmount: rwfAmount,
+        status: 'PENDING_PROPERTY_PAYMENT', // Special status for property payments
+        description: description || 'Pay at property',
+        bookingId: internalReference,
+        payerPhone: phoneNumber || user?.phone,
+        payerEmail: email || user?.email,
+        metadata: {
+          ...(metadata || {}),
+          originalAmountUSD: usdAmount,
+          exchangeRate: depositRate,
+          baseRate: exchangeRate.base,
+          depositRate: exchangeRate.depositRate,
+          payoutRate: exchangeRate.payoutRate,
+          spread: exchangeRate.spread,
+          amountRWF: rwfAmount,
+          paymentMethod: 'property',
+          userEmail: email || user?.email,
+          customerName: customerName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim(),
+          userFirstName: user?.firstName,
+          userLastName: user?.lastName,
+          internalReference,
+          paymentInstructions: 'Payment to be collected at property check-in',
+          // Default split percentages from config
+          splitRules: {
+            host: config.defaultSplitRules.host,
+            agent: config.defaultSplitRules.agent,
+            platform: config.defaultSplitRules.platform
+          }
+        }
+      }
+    });
+
+    // Update booking record to reflect "pay at property" selection
+    if (internalReference) {
+      try {
+        await prisma.booking.update({
+          where: { id: internalReference },
+          data: {
+            paymentMethod: 'property',
+            payAtProperty: true,
+            paymentStatus: 'pending_property',
+            transactionId: transaction.id,
+            status: 'confirmed' // Booking is confirmed even though payment is pending
+          }
+        });
+      } catch (bookingError) {
+        logger.warn('Failed to update booking for property payment', 'UnifiedTransactionController', {
+          bookingId: internalReference,
+          error: bookingError
+        });
+      }
+    }
+
+    // Send notifications to user, host, and agent (if applicable)
+    await this.sendBookingNotifications(
+      internalReference,
+      propertyPaymentRef,
+      rwfAmount,
+      'Pay at Property',
+      'Please pay the full amount in cash when you check in at the property. A 5% service fee is included.'
+    );
+
+    logger.info('Property payment initiated', 'UnifiedTransactionController', {
+      reference: propertyPaymentRef,
+      bookingId: internalReference,
+      amountUSD: usdAmount,
+      amountRWF: rwfAmount
+    });
+
+    res.status(200).json({
+      success: true,
+      provider: 'property',
+      paymentMethod: 'property',
+      message: 'Pay at property selected successfully. Payment will be collected when you check in.',
+      data: {
+        depositId: propertyPaymentRef,
+        transactionId: transaction.id,
+        status: 'PENDING_PROPERTY_PAYMENT',
+        amountUSD: usdAmount,
+        amountRWF: rwfAmount,
+        currency: 'RWF',
+        exchangeRate: {
+          rate: depositRate,
+          base: exchangeRate.base,
+          depositRate: exchangeRate.depositRate,
+          payoutRate: exchangeRate.payoutRate,
+          spread: exchangeRate.spread
+        },
+        bookingId: internalReference,
+        instructions: 'Please pay the full amount in cash when you check in at the property. A 5% service fee is included.'
+      }
+    });
+  }
+
+  // ==================== TRANSACTION QUERIES ====================
+
   /**
    * Get all transactions with optional filters
    * GET /api/transactions
+   * @query userId - Filter by user ID
+   * @query recipientId - Filter by recipient ID
+   * @query provider - Filter by provider (PAWAPAY, XENTRIPAY, PROPERTY)
+   * @query paymentMethod - Filter by payment method (mobile_money, card, cash_at_property)
+   * @query type - Filter by transaction type (DEPOSIT, PAYOUT, etc.)
+   * @query status - Filter by status
+   * @query fromDate - Filter by date range (start)
+   * @query toDate - Filter by date range (end)
+   * @query limit - Limit results (default: 100)
+   * @query offset - Offset for pagination (default: 0)
+   *
+   * Response includes:
+   * - paymentType: 'cash_at_property' | 'online'
+   * - paymentTypeLabel: Human-readable label
+   * - isCashPayment: Boolean flag
+   * - isOnlinePayment: Boolean flag
    */
   async getAllTransactions(req: Request, res: Response): Promise<void> {
     try {
@@ -28,7 +739,8 @@ export class UnifiedTransactionController {
         userId: req.query.userId ? parseInt(req.query.userId as string) : undefined,
         recipientId: req.query.recipientId ? parseInt(req.query.recipientId as string) : undefined,
         provider: req.query.provider as any,
-        type: req.query.type as any,
+        transactionType: req.query.type as any,
+        paymentMethod: req.query.paymentMethod as string,
         status: req.query.status as string,
         fromDate: req.query.fromDate ? new Date(req.query.fromDate as string) : undefined,
         toDate: req.query.toDate ? new Date(req.query.toDate as string) : undefined,
@@ -40,9 +752,18 @@ export class UnifiedTransactionController {
 
       const transactions = await unifiedTransactionService.getAllTransactions(filters);
 
+      // Count payment types for admin summary
+      const cashPayments = transactions.filter(tx => tx.isCashPayment).length;
+      const onlinePayments = transactions.filter(tx => tx.isOnlinePayment).length;
+
       res.status(200).json({
         success: true,
         count: transactions.length,
+        summary: {
+          total: transactions.length,
+          cashPayments,
+          onlinePayments
+        },
         data: transactions
       });
     } catch (error: any) {
@@ -73,7 +794,7 @@ export class UnifiedTransactionController {
 
       const filters: Omit<UnifiedTransactionFilters, 'userId'> = {
         provider: req.query.provider as any,
-        type: req.query.type as any,
+        transactionType: req.query.type as any,
         status: req.query.status as string,
         fromDate: req.query.fromDate ? new Date(req.query.fromDate as string) : undefined,
         toDate: req.query.toDate ? new Date(req.query.toDate as string) : undefined,
@@ -119,7 +840,7 @@ export class UnifiedTransactionController {
 
       const filters: Omit<UnifiedTransactionFilters, 'recipientId'> = {
         provider: req.query.provider as any,
-        type: req.query.type as any,
+        transactionType: req.query.type as any,
         status: req.query.status as string,
         fromDate: req.query.fromDate ? new Date(req.query.fromDate as string) : undefined,
         toDate: req.query.toDate ? new Date(req.query.toDate as string) : undefined,
@@ -154,16 +875,15 @@ export class UnifiedTransactionController {
   async getTransactionById(req: Request, res: Response): Promise<void> {
     try {
       const id = req.params.id;
-      const provider = req.query.provider as any;
 
-      logger.info('Fetching transaction by ID', 'UnifiedTransactionController', { id, provider });
+      logger.info('Fetching transaction by ID', 'UnifiedTransactionController', { id });
 
-      const transaction = await unifiedTransactionService.getTransactionById(id, provider);
+      const transaction = await unifiedTransactionService.getTransactionById(id);
 
       if (!transaction) {
         res.status(404).json({
           success: false,
-          message: 'Transaction not found'
+          message: 'Transaction not found '+transaction
         });
         return;
       }
@@ -368,77 +1088,82 @@ export class UnifiedTransactionController {
   /**
    * Get Rwanda-specific withdrawal providers (optimized for Rwanda)
    * GET /api/transactions/withdrawal-methods/rwanda
+   * Returns both banks and mobile money providers supported in Rwanda
    */
   async getRwandaWithdrawalMethods(req: Request, res: Response): Promise<void> {
     try {
       logger.info('Fetching Rwanda withdrawal methods', 'UnifiedTransactionController');
 
-      // Rwanda mobile money providers from PawaPay
-      const rwandaProviders = [
-        {
-          id: 'mtn_rwanda',
-          code: PAWAPAY_PROVIDERS.MTN_RWANDA,
-          name: 'MTN Mobile Money',
-          shortName: 'MTN MoMo',
-          provider: 'MTN',
-          country: 'RWA',
-          countryName: 'Rwanda',
-          currency: 'RWF',
-          logo: 'https://www.mtn.co.rw/wp-content/uploads/2021/01/mtn-logo.png',
-          color: '#FFCB05',
-          active: true,
-          supportsDeposits: true,
-          supportsPayouts: true,
-          accountFormat: {
-            label: 'MTN Mobile Money Number',
-            placeholder: '078XXXXXXX or 079XXXXXXX',
-            pattern: '^(078|079)[0-9]{7}$',
-            example: '0788123456'
-          },
-          fees: {
-            withdrawalFee: '0%',
-            note: 'Fees may apply based on transaction amount'
-          }
-        },
-        {
-          id: 'airtel_rwanda',
-          code: PAWAPAY_PROVIDERS.AIRTEL_RWANDA,
-          name: 'Airtel Money',
-          shortName: 'Airtel',
-          provider: 'Airtel',
-          country: 'RWA',
-          countryName: 'Rwanda',
-          currency: 'RWF',
-          logo: 'https://www.airtel.in/static-assets/new-home/img/brand-logo.png',
-          color: '#ED1C24',
-          active: true,
-          supportsDeposits: true,
-          supportsPayouts: true,
-          accountFormat: {
-            label: 'Airtel Money Number',
-            placeholder: '073XXXXXXX',
-            pattern: '^(073)[0-9]{7}$',
-            example: '0731234567'
-          },
-          fees: {
-            withdrawalFee: '0%',
-            note: 'Fees may apply based on transaction amount'
-          }
-        }
-      ];
+      const {
+        ALL_RWANDA_WITHDRAWAL_PROVIDERS,
+        getBankProviders,
+        getMobileMoneyProviders
+      } = require('../types/withdrawal-providers.types');
+
+      const banks = getBankProviders();
+      const mobileMoney = getMobileMoneyProviders();
 
       res.status(200).json({
         success: true,
         country: 'RWA',
         countryName: 'Rwanda',
         currency: 'RWF',
-        count: rwandaProviders.length,
-        data: rwandaProviders,
+        count: ALL_RWANDA_WITHDRAWAL_PROVIDERS.length,
+        data: {
+          banks: banks.map((bank: any) => ({
+            id: bank.id,
+            code: bank.code,
+            name: bank.name,
+            type: bank.type,
+            country: bank.country,
+            currency: bank.currency,
+            active: bank.active,
+            accountFormat: bank.accountFormat,
+            logo: bank.logo,
+            color: bank.color
+          })),
+          mobileMoney: mobileMoney.map((provider: any) => ({
+            id: provider.id,
+            code: provider.code,
+            name: provider.name,
+            type: provider.type,
+            country: provider.country,
+            currency: provider.currency,
+            active: provider.active,
+            accountFormat: provider.accountFormat,
+            fees: provider.fees,
+            logo: provider.logo,
+            color: provider.color,
+            supportsDeposits: true,
+            supportsPayouts: true
+          })),
+          all: ALL_RWANDA_WITHDRAWAL_PROVIDERS
+        },
+        summary: {
+          totalProviders: ALL_RWANDA_WITHDRAWAL_PROVIDERS.length,
+          banks: banks.length,
+          mobileMoney: mobileMoney.length
+        },
         info: {
-          supportedProviders: ['MTN Mobile Money', 'Airtel Money'],
+          supportedBanks: [
+            'Investment and Mortgage Bank',
+            'Banque de Kigali',
+            'Guaranty Trust Bank',
+            'National Commercial Bank of Africa',
+            'Ecobank Rwanda',
+            'Access Bank Rwanda',
+            'Urwego Opportunity Bank',
+            'Equity Bank',
+            'Banque Populaire du Rwanda',
+            'Zigama CSS',
+            'Bank of Africa Rwanda',
+            'Unguka Bank',
+            'Banque Nationale du Rwanda'
+          ],
+          supportedMobileMoney: ['MTN Mobile Money', 'Airtel Rwanda', 'SPENN'],
           processingTime: 'Instant to few minutes',
           availability: '24/7',
-          note: 'All mobile money withdrawals are processed through PawaPay'
+          note: 'All withdrawals are processed according to provider specifications'
         }
       });
     } catch (error: any) {
@@ -516,15 +1241,83 @@ export class UnifiedTransactionController {
   /**
    * Add a new withdrawal method
    * POST /api/transactions/withdrawal-methods
+   * @body userId - User ID
+   * @body methodType - BANK or MOBILE_MONEY
+   * @body accountName - Account holder name
+   * @body accountDetails - { providerCode, accountNumber, bankName?, phoneNumber? }
+   * @body isDefault - Set as default withdrawal method
    */
   async addWithdrawalMethod(req: Request, res: Response): Promise<void> {
     try {
       const { userId, methodType, accountName, accountDetails, isDefault } = req.body;
 
       if (!userId || !methodType || !accountName || !accountDetails) {
-        res.status(400).json({ success: false, message: 'Missing required fields: userId, methodType, accountName, accountDetails' });
+        res.status(400).json({
+          success: false,
+          message: 'Missing required fields: userId, methodType, accountName, accountDetails'
+        });
         return;
       }
+
+      // Validate methodType
+      if (!['BANK', 'MOBILE_MONEY'].includes(methodType)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid methodType. Must be either BANK or MOBILE_MONEY'
+        });
+        return;
+      }
+
+      // Validate account details structure
+      const { providerCode, accountNumber } = accountDetails;
+      if (!providerCode || !accountNumber) {
+        res.status(400).json({
+          success: false,
+          message: 'accountDetails must include providerCode and accountNumber'
+        });
+        return;
+      }
+
+      // Validate provider code and account number format
+      const { getProviderByCode, validateAccountNumber } = require('../types/withdrawal-providers.types');
+      const provider = getProviderByCode(providerCode);
+
+      if (!provider) {
+        res.status(400).json({
+          success: false,
+          message: `Invalid provider code: ${providerCode}. Please use a valid Rwanda bank or mobile money provider code.`
+        });
+        return;
+      }
+
+      // Validate that methodType matches provider type
+      if (provider.type !== methodType) {
+        res.status(400).json({
+          success: false,
+          message: `Provider type mismatch. Provider ${provider.name} is of type ${provider.type}, but you specified ${methodType}`
+        });
+        return;
+      }
+
+      // Validate account number format
+      const isValidAccountNumber = validateAccountNumber(providerCode, accountNumber);
+      if (!isValidAccountNumber) {
+        res.status(400).json({
+          success: false,
+          message: `Invalid account number format for ${provider.name}. ${provider.accountFormat?.label || 'Account number'} should match: ${provider.accountFormat?.example || 'valid format'}`,
+          accountFormat: provider.accountFormat
+        });
+        return;
+      }
+
+      // Enhance account details with provider information
+      const enhancedAccountDetails = {
+        ...accountDetails,
+        providerName: provider.name,
+        providerType: provider.type,
+        currency: provider.currency,
+        country: provider.country
+      };
 
       // If setting as default, unset other defaults first
       if (isDefault) {
@@ -539,7 +1332,7 @@ export class UnifiedTransactionController {
           userId: parseInt(userId),
           methodType,
           accountName,
-          accountDetails,
+          accountDetails: enhancedAccountDetails,
           isDefault: isDefault || false,
           isVerified: false,
           isApproved: false,
@@ -547,12 +1340,26 @@ export class UnifiedTransactionController {
         }
       });
 
-      logger.info('Withdrawal method added', 'UnifiedTransactionController', { userId, methodId: method.id, methodType });
+      logger.info('Withdrawal method added', 'UnifiedTransactionController', {
+        userId,
+        methodId: method.id,
+        methodType,
+        providerCode,
+        providerName: provider.name
+      });
 
       res.status(201).json({
         success: true,
-        message: 'Withdrawal method added successfully (pending approval)',
-        data: method
+        message: `${provider.name} withdrawal method added successfully (pending approval)`,
+        data: {
+          ...method,
+          providerInfo: {
+            code: provider.code,
+            name: provider.name,
+            type: provider.type,
+            currency: provider.currency
+          }
+        }
       });
     } catch (error: any) {
       logger.error('Failed to add withdrawal method', 'UnifiedTransactionController', error);
@@ -934,6 +1741,206 @@ export class UnifiedTransactionController {
     } catch (error: any) {
       logger.error('Failed to fetch account info', 'UnifiedTransactionController', error);
       res.status(500).json({ success: false, message: 'Failed to fetch account info', error: error.message });
+    }
+  }
+
+  // ==================== PROPERTY PAYMENT COLLECTION ====================
+
+  /**
+   * Mark property payment as collected (host/owner only)
+   * POST /api/transactions/property-payment/collect/:bookingId
+   * @body collectedBy - ID of host/admin who collected payment
+   * @body collectedAmount - Amount collected in RWF
+   */
+  async collectPropertyPayment(req: Request, res: Response): Promise<void> {
+    try {
+      const bookingId = req.params.bookingId;
+      const { collectedBy, collectedAmount } = req.body;
+
+      if (!collectedBy) {
+        res.status(400).json({
+          success: false,
+          message: 'Missing required field: collectedBy (host/admin ID)'
+        });
+        return;
+      }
+
+      // Fetch booking to verify it exists and is a property payment
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        include: {
+          property: {
+            select: {
+              id: true,
+              name: true,
+              hostId: true
+            }
+          },
+          guest: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true
+            }
+          }
+        }
+      });
+
+      if (!booking) {
+        res.status(404).json({
+          success: false,
+          message: 'Booking not found'
+        });
+        return;
+      }
+
+      if (booking.paymentMethod !== 'property' || !booking.payAtProperty) {
+        res.status(400).json({
+          success: false,
+          message: 'This booking is not set for property payment'
+        });
+        return;
+      }
+
+      if (booking.propertyPaymentCollected) {
+        res.status(400).json({
+          success: false,
+          message: 'Property payment has already been collected'
+        });
+        return;
+      }
+
+      // Verify the collectedBy user is the property owner
+      if (booking.property.hostId !== parseInt(collectedBy)) {
+        logger.warn('Unauthorized attempt to collect property payment', 'UnifiedTransactionController', {
+          bookingId,
+          propertyOwnerId: booking.property.hostId,
+          attemptedBy: collectedBy
+        });
+        // Still allow admin to collect, but log the warning
+      }
+
+      const amount = collectedAmount ? parseFloat(collectedAmount) : booking.totalPrice;
+
+      // Update booking
+      const updatedBooking = await prisma.booking.update({
+        where: { id: bookingId },
+        data: {
+          propertyPaymentCollected: true,
+          propertyPaymentCollectedAt: new Date(),
+          propertyPaymentCollectedBy: parseInt(collectedBy),
+          propertyPaymentAmount: amount,
+          paymentStatus: 'collected'
+        }
+      });
+
+      // Update transaction status
+      if (booking.transactionId) {
+        await prisma.transaction.update({
+          where: { id: booking.transactionId },
+          data: {
+            status: 'COMPLETED',
+            completedAt: new Date(),
+            metadata: {
+              ...((booking as any).metadata || {}),
+              collectedBy,
+              collectedAt: new Date().toISOString(),
+              collectedAmount: amount
+            }
+          }
+        });
+      }
+
+      logger.info('Property payment collected', 'UnifiedTransactionController', {
+        bookingId,
+        propertyId: booking.property.id,
+        collectedBy,
+        amount
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'Property payment marked as collected successfully',
+        data: {
+          bookingId: updatedBooking.id,
+          propertyPaymentCollected: true,
+          collectedAt: updatedBooking.propertyPaymentCollectedAt,
+          collectedBy: updatedBooking.propertyPaymentCollectedBy,
+          collectedAmount: amount,
+          paymentStatus: updatedBooking.paymentStatus
+        }
+      });
+    } catch (error: any) {
+      logger.error('Failed to collect property payment', 'UnifiedTransactionController', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to mark property payment as collected',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get pending property payments for a host
+   * GET /api/transactions/property-payments/pending/:hostId
+   */
+  async getPendingPropertyPayments(req: Request, res: Response): Promise<void> {
+    try {
+      const hostId = parseInt(req.params.hostId);
+
+      if (isNaN(hostId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid host ID'
+        });
+        return;
+      }
+
+      const pendingPayments = await prisma.booking.findMany({
+        where: {
+          property: {
+            hostId
+          },
+          payAtProperty: true,
+          propertyPaymentCollected: false,
+          paymentStatus: 'pending_property'
+        },
+        include: {
+          property: {
+            select: {
+              id: true,
+              name: true,
+              location: true
+            }
+          },
+          guest: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true
+            }
+          }
+        },
+        orderBy: {
+          checkIn: 'asc'
+        }
+      });
+
+      res.status(200).json({
+        success: true,
+        count: pendingPayments.length,
+        data: pendingPayments
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch pending property payments', 'UnifiedTransactionController', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch pending property payments',
+        error: error.message
+      });
     }
   }
 }

@@ -10,8 +10,6 @@ import withdrawalRoutes from './routes/withdrawal.routes';
 import notificationRoutes from './routes/notification.routes';
 import helpRoutes from './routes/help.routes';
 import settingsRoutes from './routes/settings.routes';
-import smsTestRoutes from './routes/sms.test.routes';
-import emailTestRoutes from './routes/email.test.routes';
 import adminRoutes from './routes/admin.routes';
 import publicRoutes from './routes/public.routes';
 import XentriPayRoutes from './routes/xentripay.routes';
@@ -23,9 +21,7 @@ import agentCommissionRoutes from './routes/agent-commission.routes'; // NEW
 import bookingLeadsRoutes from './routes/booking-leads.routes'; // NEW - Booking leads/archive management
 import { ReminderSchedulerService } from './services/reminder-scheduler.service'; // NEW
 import { BookingCleanupSchedulerService } from './services/booking-cleanup-scheduler.service'; // NEW
-import { PesapalService } from './services/pesapal.service';
 import { EmailService } from './services/email.service';
-import { EscrowService } from './services/escrow.service';
 import { StatusPollerService } from './services/status-poller.service';
 import { PawaPayService } from './services/pawapay.service';
 import { XentriPayService } from './services/xentripay.service';
@@ -38,6 +34,7 @@ app.use(cors({
   origin: [
     'http://localhost:3000',
     'http://localhost:3001',
+    'http://localhost:3002',
     'https://jambolush.com',
     'https://app.jambolush.com',
     'http://jambolush.com',
@@ -70,23 +67,6 @@ if (process.env.NODE_ENV === 'development') {
   });
 }
 
-// Initialize services
-const pesapalService = new PesapalService({
-  consumerKey: config.pesapal.consumerKey,
-  consumerSecret: config.pesapal.consumerSecret,
-  baseUrl: config.pesapal.baseUrl,
-  environment: config.pesapal.environment,
-  timeout: config.pesapal.timeout,
-  retryAttempts: config.pesapal.retryAttempts,
-  webhookSecret: config.pesapal.webhookSecret,
-  callbackUrl: config.pesapal.callbackUrl,
-  defaultCurrency: config.escrow.defaultCurrency,
-  merchantAccount: config.pesapal.merchantAccount
-});
-
-const emailService = new EmailService();
-const escrowService = new EscrowService(pesapalService, emailService);
-
 // Initialize PawaPay service
 const pawaPayService = new PawaPayService({
   apiKey: config.pawapay.apiKey,
@@ -103,8 +83,6 @@ const xentriPayService = new XentriPayService({
 
 // Initialize status poller with all payment services
 const statusPoller = new StatusPollerService(
-  pesapalService,
-  escrowService,
   pawaPayService,
   xentriPayService
 );
@@ -120,7 +98,6 @@ if (process.env.ENABLE_BOOKING_CLEANUP !== 'false') bookingCleanupScheduler.star
 // Routes
 app.use('/api/public', publicRoutes); // Public routes (no auth required)
 app.use('/api/auth', authRoutes);
-app.use('/api/payments', require('./routes/escrow.routes').default);
 app.use('/api/payments/withdrawal', withdrawalRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/upload', uploadRoutes);
@@ -129,7 +106,6 @@ app.use('/api/tours', require('./routes/tours.routes').default);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/help', helpRoutes);
 app.use('/api/settings', settingsRoutes);
-app.use('/api/pesapal', require('./routes/pesapal.callback').default);
 app.use('/api/xentripay', require('./routes/xentripay.callback').default);
 app.use('/api/pawapay', pawaPayRoutes); // PawaPay API routes
 app.use('/api/pawapay/callback', pawaPayCallbackRoutes); // PawaPay callback/webhook
@@ -146,8 +122,6 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     services: {
-      pesapal: 'initialized',
-      escrow: 'initialized',
       xentripay: 'initialized',
       pawapay: 'initialized', // PawaPay integration
       statusPoller: process.env.ENABLE_STATUS_POLLING !== 'false' ? 'running' : 'disabled',
@@ -186,7 +160,8 @@ process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 app.listen(config.port, () => {
-  console.log(`Server running on port ${config.port} [${config.pesapal.environment}]`);
+  console.log(`Server running on port ${config.port} [${process.env.NODE_ENV || 'development'}]`);
+  console.log(`XentriPay Base URL: ${config.xentripay.baseUrl}`);
 });
 
 export default app;

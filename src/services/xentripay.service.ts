@@ -36,8 +36,9 @@ export interface CollectionRequest {
   cnumber: string; // 10 digits, customer phone without country code
   msisdn: string; // Full phone with country code e.g. 250780371519
   currency: string; // Currency of the amount (USD)
-  pmethod: string; // e.g. "momo"
+  pmethod: string; // e.g. "momo", "cc" (for card payments)
   chargesIncluded?: string; // "true" or "false"
+  redirecturl?: string; // Optional redirect URL after payment completion (lowercase as per provider spec)
 }
 
 export interface CollectionResponse {

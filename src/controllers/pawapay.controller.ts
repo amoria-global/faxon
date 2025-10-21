@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import { pawaPayService } from '../services/pawapay.service';
 import { currencyExchangeService } from '../services/currency-exchange.service';
 import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
+import config from '../config/config';
 import {
   DepositRequest,
   PayoutRequest,
@@ -125,23 +126,31 @@ export class PawaPayController {
 
       const response = await pawaPayService.initiateDeposit(depositRequest);
 
-      // Store in database with both USD and RWF amounts
-      await prisma.pawaPayTransaction.create({
+      // Store in unified Transaction table
+      await prisma.transaction.create({
         data: {
-          userId,
-          transactionId: depositId,
+          reference: depositId,
+          provider: 'PAWAPAY',
           transactionType: 'DEPOSIT',
-          status: response.status,
-          amount: amountInSmallestUnit, // RWF amount
+          paymentMethod: 'mobile_money',
+          userId,
+          amount: parseFloat(amountInSmallestUnit),
           currency: 'RWF',
-          country: countryISO3,
-          correspondent: providerCode,
-          payerPhone: formattedPhone,
-          customerTimestamp: response.customerTimestamp ? new Date(response.customerTimestamp) : new Date(),
-          statementDescription: description,
-          requestedAmount: amountInSmallestUnit,
+          requestedAmount: parseFloat(amountInSmallestUnit),
+          status: response.status,
+          externalId: depositId,
           providerTransactionId: response.correspondentIds?.PROVIDER_TRANSACTION_ID,
           financialTransactionId: response.correspondentIds?.FINANCIAL_TRANSACTION_ID,
+          payerPhone: formattedPhone,
+          correspondent: providerCode,
+          description: description,
+          statementDescription: description,
+          customerTimestamp: response.customerTimestamp ? new Date(response.customerTimestamp) : new Date(),
+          country: countryISO3,
+          bookingId: internalReference, // Store internal reference (booking ID) for linking
+          failureCode: response.failureReason?.failureCode,
+          failureReason: response.failureReason?.failureMessage,
+          receivedByProvider: response.receivedByPawaPay ? new Date(response.receivedByPawaPay) : undefined,
           metadata: {
             ...(metadata || {}),
             originalAmountUSD: usdAmount,
@@ -155,12 +164,14 @@ export class PawaPayController {
             userFirstName: user?.firstName,
             userLastName: user?.lastName,
             userPhone: user?.phone,
-            internalReference
-          },
-          internalReference,
-          receivedByPawaPay: response.receivedByPawaPay ? new Date(response.receivedByPawaPay) : undefined,
-          failureCode: response.failureReason?.failureCode,
-          failureMessage: response.failureReason?.failureMessage
+            internalReference,
+            // Default split percentages from config
+            splitRules: {
+              host: config.defaultSplitRules.host,
+              agent: config.defaultSplitRules.agent,
+              platform: config.defaultSplitRules.platform
+            }
+          }
         }
       });
 
@@ -211,8 +222,8 @@ export class PawaPayController {
       }
 
       // Fetch current transaction from database to compare status
-      const currentTransaction = await prisma.pawaPayTransaction.findUnique({
-        where: { transactionId: depositId }
+      const currentTransaction = await prisma.transaction.findUnique({
+        where: { reference: depositId }
       });
 
       if (!currentTransaction) {
@@ -230,15 +241,15 @@ export class PawaPayController {
       const newStatus = response.status;
 
       // Update transaction in database
-      await prisma.pawaPayTransaction.update({
-        where: { transactionId: depositId },
+      await prisma.transaction.update({
+        where: { reference: depositId },
         data: {
           status: newStatus,
-          depositedAmount: response.requestedAmount,
+          depositedAmount: response.requestedAmount ? parseFloat(response.requestedAmount) : undefined,
           providerTransactionId: response.correspondentIds?.PROVIDER_TRANSACTION_ID,
           financialTransactionId: response.correspondentIds?.FINANCIAL_TRANSACTION_ID,
           failureCode: response.failureReason?.failureCode,
-          failureMessage: response.failureReason?.failureMessage,
+          failureReason: response.failureReason?.failureMessage,
           completedAt: newStatus === 'COMPLETED' ? new Date() : undefined
         }
       });
@@ -247,10 +258,10 @@ export class PawaPayController {
       if (newStatus !== previousStatus) {
         console.log(`[PAWAPAY_STATUS_CHECK] Status changed for ${depositId}: ${previousStatus} → ${newStatus}`);
 
-        const internalRef = currentTransaction.internalReference || (currentTransaction.metadata as any)?.internalReference;
+        const internalRef = currentTransaction.bookingId || (currentTransaction.metadata as any)?.internalReference;
 
         console.log(`[PAWAPAY_STATUS_CHECK] Internal reference: ${internalRef || 'NOT FOUND'}`);
-        console.log(`[PAWAPAY_STATUS_CHECK] Transaction internalReference field: ${currentTransaction.internalReference || 'null'}`);
+        console.log(`[PAWAPAY_STATUS_CHECK] Transaction bookingId field: ${currentTransaction.bookingId || 'null'}`);
         console.log(`[PAWAPAY_STATUS_CHECK] Transaction metadata: ${JSON.stringify(currentTransaction.metadata)}`);
 
         if (internalRef) {
@@ -366,24 +377,31 @@ export class PawaPayController {
 
       const response = await pawaPayService.initiatePayout(payoutRequest);
 
-      // Store in database with both USD and RWF amounts
-      await prisma.pawaPayTransaction.create({
+      // Store in unified Transaction table
+      await prisma.transaction.create({
         data: {
-          userId,
-          transactionId: payoutId,
+          reference: payoutId,
+          provider: 'PAWAPAY',
           transactionType: 'PAYOUT',
-          status: response.status,
-          amount: amountInSmallestUnit, // RWF amount
+          paymentMethod: 'mobile_money',
+          userId,
+          amount: parseFloat(amountInSmallestUnit),
           currency: 'RWF',
-          country: countryISO3,
-          correspondent: providerCode,
-          recipientPhone: formattedPhone,
-          customerTimestamp: response.customerTimestamp ? new Date(response.customerTimestamp) : new Date(),
-          statementDescription: statementDesc,
-          requestedAmount: amountInSmallestUnit,
-          depositedAmount: response.depositedAmount,
+          requestedAmount: parseFloat(amountInSmallestUnit),
+          depositedAmount: response.depositedAmount ? parseFloat(response.depositedAmount) : undefined,
+          status: response.status,
+          externalId: payoutId,
           providerTransactionId: response.correspondentIds?.PROVIDER_TRANSACTION_ID,
           financialTransactionId: response.correspondentIds?.FINANCIAL_TRANSACTION_ID,
+          recipientPhone: formattedPhone,
+          correspondent: providerCode,
+          description: statementDesc,
+          statementDescription: statementDesc,
+          customerTimestamp: response.customerTimestamp ? new Date(response.customerTimestamp) : new Date(),
+          country: countryISO3,
+          failureCode: response.failureReason?.failureCode,
+          failureReason: response.failureReason?.failureMessage,
+          receivedByProvider: response.receivedByPawaPay ? new Date(response.receivedByPawaPay) : undefined,
           metadata: {
             ...(metadata || {}),
             originalAmountUSD: usdAmount,
@@ -398,11 +416,7 @@ export class PawaPayController {
             userLastName: user?.lastName,
             userPhone: user?.phone,
             internalReference
-          },
-          internalReference,
-          receivedByPawaPay: response.receivedByPawaPay ? new Date(response.receivedByPawaPay) : undefined,
-          failureCode: response.failureReason?.failureCode,
-          failureMessage: response.failureReason?.failureMessage
+          }
         }
       });
 
@@ -453,15 +467,15 @@ export class PawaPayController {
 
       const response = await pawaPayService.getPayoutStatus(payoutId);
 
-      await prisma.pawaPayTransaction.update({
-        where: { transactionId: payoutId },
+      await prisma.transaction.update({
+        where: { reference: payoutId },
         data: {
           status: response.status,
-          depositedAmount: response.depositedAmount,
+          depositedAmount: response.depositedAmount ? parseFloat(response.depositedAmount) : undefined,
           providerTransactionId: response.correspondentIds?.PROVIDER_TRANSACTION_ID,
           financialTransactionId: response.correspondentIds?.FINANCIAL_TRANSACTION_ID,
           failureCode: response.failureReason?.failureCode,
-          failureMessage: response.failureReason?.failureMessage,
+          failureReason: response.failureReason?.failureMessage,
           completedAt: response.status === 'COMPLETED' ? new Date() : undefined
         }
       });
@@ -540,46 +554,37 @@ export class PawaPayController {
 
       const response = await pawaPayService.initiateBulkPayout(bulkRequest);
 
-      const totalAmount = payoutRequests.reduce((sum, p) => sum + parseFloat(p.amount), 0).toString();
-
-      await prisma.pawaPayBulkPayout.create({
-        data: {
-          userId,
-          bulkPayoutId,
-          totalPayouts: response.totalPayouts,
-          successfulPayouts: response.successfulPayouts,
-          failedPayouts: response.failedPayouts,
-          status: response.status,
-          totalAmount,
-          currency: payoutRequests[0]?.currency,
-          description,
-          metadata: { payoutIds: payoutRequests.map(p => p.payoutId) },
-          completedAt: response.status === 'COMPLETED' ? new Date() : undefined
-        }
-      });
-
+      // Create individual payout transactions in unified Transaction model
       for (const payoutResponse of response.payouts) {
-        await prisma.pawaPayTransaction.create({
+        await prisma.transaction.create({
           data: {
-            userId,
-            transactionId: payoutResponse.payoutId,
+            reference: payoutResponse.payoutId,
+            provider: 'PAWAPAY',
             transactionType: 'PAYOUT',
-            status: payoutResponse.status,
-            amount: payoutResponse.requestedAmount,
+            paymentMethod: 'mobile_money',
+            userId,
+            amount: parseFloat(payoutResponse.requestedAmount),
             currency: payoutResponse.currency,
-            country: payoutResponse.country,
-            correspondent: payoutResponse.recipient.accountDetails?.provider || '',
-            recipientPhone: payoutResponse.recipient.accountDetails?.phoneNumber || '',
-            customerTimestamp: payoutResponse.customerTimestamp ? new Date(payoutResponse.customerTimestamp) : new Date(),
-            statementDescription: payoutResponse.statementDescription,
-            requestedAmount: payoutResponse.requestedAmount,
-            depositedAmount: payoutResponse.depositedAmount,
+            requestedAmount: parseFloat(payoutResponse.requestedAmount),
+            depositedAmount: payoutResponse.depositedAmount ? parseFloat(payoutResponse.depositedAmount) : undefined,
+            status: payoutResponse.status,
+            externalId: payoutResponse.payoutId,
             providerTransactionId: payoutResponse.correspondentIds?.PROVIDER_TRANSACTION_ID,
             financialTransactionId: payoutResponse.correspondentIds?.FINANCIAL_TRANSACTION_ID,
-            metadata: { bulkPayoutId },
-            receivedByPawaPay: payoutResponse.receivedByPawaPay ? new Date(payoutResponse.receivedByPawaPay) : undefined,
+            recipientPhone: payoutResponse.recipient.accountDetails?.phoneNumber || '',
+            correspondent: payoutResponse.recipient.accountDetails?.provider || '',
+            statementDescription: payoutResponse.statementDescription,
+            customerTimestamp: payoutResponse.customerTimestamp ? new Date(payoutResponse.customerTimestamp) : new Date(),
+            country: payoutResponse.country,
             failureCode: payoutResponse.failureReason?.failureCode,
-            failureMessage: payoutResponse.failureReason?.failureMessage
+            failureReason: payoutResponse.failureReason?.failureMessage,
+            receivedByProvider: payoutResponse.receivedByPawaPay ? new Date(payoutResponse.receivedByPawaPay) : undefined,
+            metadata: {
+              bulkPayoutId,
+              bulkPayoutStatus: response.status,
+              bulkPayoutTotalPayouts: response.totalPayouts,
+              bulkPayoutDescription: description
+            }
           }
         });
       }
@@ -622,8 +627,8 @@ export class PawaPayController {
         return;
       }
 
-      const deposit = await prisma.pawaPayTransaction.findUnique({
-        where: { transactionId: depositId }
+      const deposit = await prisma.transaction.findUnique({
+        where: { reference: depositId }
       });
 
       if (!deposit) {
@@ -634,7 +639,7 @@ export class PawaPayController {
         return;
       }
 
-      const refundAmount = amount ? pawaPayService.convertToSmallestUnit(amount, deposit.currency) : deposit.amount;
+      const refundAmount = amount ? pawaPayService.convertToSmallestUnit(amount, deposit.currency) : deposit.amount.toString();
       const refundId = pawaPayService.generateTransactionId();
 
       const refundRequest: RefundRequest = {
@@ -645,25 +650,29 @@ export class PawaPayController {
 
       const response = await pawaPayService.initiateRefund(refundRequest);
 
-      await prisma.pawaPayTransaction.create({
+      await prisma.transaction.create({
         data: {
-          userId,
-          transactionId: refundId,
+          reference: refundId,
+          provider: 'PAWAPAY',
           transactionType: 'REFUND',
-          status: response.status,
-          amount: refundAmount,
+          paymentMethod: 'mobile_money',
+          userId,
+          amount: parseFloat(refundAmount),
           currency: response.currency,
-          country: response.country,
-          correspondent: response.correspondent,
-          relatedDepositId: depositId,
-          requestedAmount: refundAmount,
-          refundedAmount: response.refundedAmount,
+          requestedAmount: parseFloat(refundAmount),
+          refundedAmount: response.refundedAmount ? parseFloat(response.refundedAmount) : undefined,
+          status: response.status,
+          externalId: refundId,
           providerTransactionId: response.correspondentIds?.PROVIDER_TRANSACTION_ID,
           financialTransactionId: response.correspondentIds?.FINANCIAL_TRANSACTION_ID,
-          metadata: { originalDepositId: depositId },
-          receivedByPawaPay: response.receivedByPawaPay ? new Date(response.receivedByPawaPay) : undefined,
+          correspondent: response.correspondent,
+          country: response.country,
+          isRefund: true,
+          relatedTransactionId: depositId,
           failureCode: response.failureReason?.failureCode,
-          failureMessage: response.failureReason?.failureMessage
+          failureReason: response.failureReason?.failureMessage,
+          receivedByProvider: response.receivedByPawaPay ? new Date(response.receivedByPawaPay) : undefined,
+          metadata: { originalDepositId: depositId }
         }
       });
 
@@ -705,15 +714,15 @@ export class PawaPayController {
 
       const response = await pawaPayService.getRefundStatus(refundId);
 
-      await prisma.pawaPayTransaction.update({
-        where: { transactionId: refundId },
+      await prisma.transaction.update({
+        where: { reference: refundId },
         data: {
           status: response.status,
-          refundedAmount: response.refundedAmount,
+          refundedAmount: response.refundedAmount ? parseFloat(response.refundedAmount) : undefined,
           providerTransactionId: response.correspondentIds?.PROVIDER_TRANSACTION_ID,
           financialTransactionId: response.correspondentIds?.FINANCIAL_TRANSACTION_ID,
           failureCode: response.failureReason?.failureCode,
-          failureMessage: response.failureReason?.failureMessage,
+          failureReason: response.failureReason?.failureMessage,
           completedAt: response.status === 'COMPLETED' ? new Date() : undefined
         }
       });
@@ -810,14 +819,17 @@ export class PawaPayController {
         if (endDate) where.createdAt.lte = new Date(endDate as string);
       }
 
+      // Filter for PawaPay transactions only
+      const pawaPayWhere = { ...where, provider: 'PAWAPAY' };
+
       const [transactions, total] = await Promise.all([
-        prisma.pawaPayTransaction.findMany({
-          where,
+        prisma.transaction.findMany({
+          where: pawaPayWhere,
           orderBy: { createdAt: 'desc' },
           take: parseInt(limit as string),
           skip: (parseInt(page as string) - 1) * parseInt(limit as string)
         }),
-        prisma.pawaPayTransaction.count({ where })
+        prisma.transaction.count({ where: pawaPayWhere })
       ]);
 
       res.status(200).json({
@@ -884,6 +896,9 @@ export class PawaPayController {
         if (endDate) where.createdAt.lte = new Date(endDate as string);
       }
 
+      // Filter for PawaPay transactions only
+      const pawaPayWhere = { ...where, provider: 'PAWAPAY' };
+
       const [
         totalTransactions,
         totalDeposits,
@@ -893,13 +908,13 @@ export class PawaPayController {
         failedTransactions,
         pendingTransactions
       ] = await Promise.all([
-        prisma.pawaPayTransaction.count({ where }),
-        prisma.pawaPayTransaction.count({ where: { ...where, transactionType: 'DEPOSIT' } }),
-        prisma.pawaPayTransaction.count({ where: { ...where, transactionType: 'PAYOUT' } }),
-        prisma.pawaPayTransaction.count({ where: { ...where, transactionType: 'REFUND' } }),
-        prisma.pawaPayTransaction.count({ where: { ...where, status: 'COMPLETED' } }),
-        prisma.pawaPayTransaction.count({ where: { ...where, status: 'FAILED' } }),
-        prisma.pawaPayTransaction.count({ where: { ...where, status: { in: ['PENDING', 'ACCEPTED', 'SUBMITTED'] } } })
+        prisma.transaction.count({ where: pawaPayWhere }),
+        prisma.transaction.count({ where: { ...pawaPayWhere, transactionType: 'DEPOSIT' } }),
+        prisma.transaction.count({ where: { ...pawaPayWhere, transactionType: 'PAYOUT' } }),
+        prisma.transaction.count({ where: { ...pawaPayWhere, transactionType: 'REFUND' } }),
+        prisma.transaction.count({ where: { ...pawaPayWhere, status: 'COMPLETED' } }),
+        prisma.transaction.count({ where: { ...pawaPayWhere, status: 'FAILED' } }),
+        prisma.transaction.count({ where: { ...pawaPayWhere, status: { in: ['PENDING', 'ACCEPTED', 'SUBMITTED'] } } })
       ]);
 
       res.status(200).json({

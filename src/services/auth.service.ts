@@ -1042,7 +1042,7 @@ export class AuthService {
         data: {
           userId: user.id,
           balance: 0,
-          currency: config.escrow.defaultCurrency,
+          currency: config.payment.defaultCurrency,
           isActive: true
         }
       });

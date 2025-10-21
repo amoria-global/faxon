@@ -1,10 +1,9 @@
 // routes/xentripay.routes.ts - Regenerated with added routes for bulk admin, cancellations, payment methods, and user collections/payouts
+// NOTE: Escrow functionality has been deprecated and removed
 
 import { Router } from 'express';
 import { XentriPayController } from '../controllers/xentripay.controller';
-import { XentriPayEscrowService } from '../services/xentripay-escrow.service';
 import { XentriPayService } from '../services/xentripay.service';
-import { BrevoMailingService } from '../utils/brevo.xentripay';
 import { PhoneUtils } from '../utils/phone.utils';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import {
@@ -27,8 +26,8 @@ const router = Router();
 
 // Determine base URL based on environment
 const isProduction = process.env.NODE_ENV === 'production';
-const baseUrl = isProduction 
-  ? 'https://xentripay.com' 
+const baseUrl = isProduction
+  ? 'https://xentripay.com'
   : 'https://test.xentripay.com';
 
 const xentriPayService = new XentriPayService({
@@ -38,14 +37,7 @@ const xentriPayService = new XentriPayService({
   timeout: 30000
 });
 
-const brevoMailingService = new BrevoMailingService();
-const xentriPayEscrowService = new XentriPayEscrowService(
-  xentriPayService, 
-  brevoMailingService
-);
-
 const xentriPayController = new XentriPayController(
-  xentriPayEscrowService,
   xentriPayService
 );
 

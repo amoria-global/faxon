@@ -9,57 +9,52 @@ datasource db {
 }
 
 model User {
-  id               Int     @id @default(autoincrement())
-  email            String  @unique
-  firstName        String
-  lastName         String
-  password         String?
-  provider         String  @default("manual")
-  providerId       String?
-  phone            String?
-  phoneCountryCode String?
-  profileImage     String?
-  passportPhotoUrl String? // Added from the second version
-
-  // Granular address fields
-  district   String?
-  sector     String?
-  street     String?
-  province   String?
-  state      String?
-  country    String?
-  county     String?
-  region     String?
-  city       String?
-  zipCode    String?
-  postalCode String?
-  postcode   String?
-  pinCode    String?
-  eircode    String?
-  cep        String?
-
-  status                 String    @default("pending")
-  userType               String    @default("guest")
+  id                     Int                      @id @default(autoincrement())
+  email                  String                   @unique
+  firstName              String
+  lastName               String
+  password               String?
+  provider               String                   @default("manual")
+  providerId             String?
+  phone                  String?
+  phoneCountryCode       String?
+  profileImage           String?
+  country                String?
+  state                  String?
+  province               String?
+  city                   String?
+  street                 String?
+  zipCode                String?
+  postalCode             String?
+  postcode               String?
+  pinCode                String?
+  eircode                String?
+  cep                    String?
+  status                 String                   @default("pending")
+  userType               String                   @default("guest")
   bio                    String?
   experience             Int?
   languages              Json?
   specializations        Json?
-  rating                 Float     @default(0)
-  averageRating          Float     @default(0)
-  totalTours             Int       @default(0)
-  isVerified             Boolean   @default(false)
+  rating                 Float                    @default(0)
+  totalTours             Int                      @default(0)
+  isVerified             Boolean                  @default(false)
   licenseNumber          String?
   certifications         Json?
-  totalSessions          Int       @default(0)
-  twoFactorEnabled       Boolean   @default(false)
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  totalSessions          Int                      @default(0)
+  twoFactorEnabled       Boolean                  @default(false)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
   lastLogin              DateTime?
   resetPasswordOtp       String?
   resetPasswordExpires   DateTime?
-  verificationStatus     String?   @default("unverified")
-  preferredCommunication String?   @default("email")
+  verificationStatus     String?                  @default("unverified")
+  preferredCommunication String?                  @default("email")
   hostNotes              String?
+  averageRating          Float                    @default(0)
+  county                 String?
+  district               String?
+  region                 String?
   companyName            String?
   companyTIN             String?
   employmentContract     String?
@@ -67,66 +62,61 @@ model User {
   tourGuideType          String?
   verificationDocument   String?
   addressDocument        String?
-  kycCompleted           Boolean   @default(false)
-  kycStatus              String    @default("pending")
+  kycCompleted           Boolean                  @default(false)
+  kycStatus              String                   @default("pending")
   kycSubmittedAt         DateTime?
-
-  // Referral system fields
-  referredBy     Int?
-  referralCode   String?
-  referralStatus String    @default("Pending")
-  referredAt     DateTime?
-
-  // Relations
-  agentBookings                 AgentBooking[]           @relation("AgentBookings")
-  clientBookings                AgentBooking[]           @relation("ClientBookings")
-  agentMetrics                  AgentPerformanceMetric[] @relation("AgentMetrics")
-  agentReviews                  AgentReview[]            @relation("AgentReviews")
-  clientReviews                 AgentReview[]            @relation("ClientReviews")
-  bankAccounts                  BankAccount[]
-  bookingsAsGuest               Booking[]                @relation("GuestBookings")
-  agentInteractions             ClientInteraction[]      @relation("AgentInteractions")
-  clientInteractions            ClientInteraction[]      @relation("ClientInteractions")
-  escrowNotifications           EscrowNotification[]
-  escrowTransactionsAsRecipient EscrowTransaction[]      @relation("RecipientEscrowTransactions")
-  escrowTransactions            EscrowTransaction[]      @relation("UserEscrowTransactions")
-  ownerEarnings                 OwnerEarning[]           @relation("OwnerEarnings")
-  hostEarnings                  HostEarning[]            @relation("HostEarnings")
-  agentInquiries                Inquiry[]                @relation("AgentInquiries")
-  clientInquiries               Inquiry[]                @relation("ClientInquiries")
-  agentLeads                    Lead[]                   @relation("AgentLeads")
-  mobileMoneyAccounts           MobileMoneyAccount[]
-  paymentSettings               PaymentSettings?
-  paymentTransactions           PaymentTransaction[]
-  hostPayouts                   Payout[]                 @relation("HostPayouts")
-  ownedProperties               Property[]               @relation("OwnedProperties")
-  agentManagedProperties        Property[]               @relation("AgentProperties")
-  propertyViews                 PropertyView[]           @relation("UserPropertyViews")
-  reviews                       Review[]
-  tourBookingsAsGuest           TourBooking[]            @relation("GuestTourBookings")
-  tourEarnings                  TourEarnings[]
-  receivedTourMessages          TourMessage[]            @relation("TourMessageReceiver")
-  sentTourMessages              TourMessage[]            @relation("TourMessageSender")
-  tourNotifications             TourNotification[]
-  tourReviews                   TourReview[]
-  toursAsGuide                  Tour[]                   @relation("TourGuideToTours")
-  sessions                      UserSession[]
-  wallet                        Wallet?
-  wishlists                     Wishlist[]
-  withdrawalRequests            WithdrawalRequest[]
-  withdrawalMethods             WithdrawalMethod[]
-  activityLogs                  ActivityLog[]
-  contactMessages               ContactMessage[]
-  connected_accounts            connected_accounts[]
-  user_settings                 user_settings?
-  user_verifications            user_verifications[]
-  agentCommissions              AgentCommission[]        @relation("AgentCommissions")
-  ownerPayments                 OwnerPayment[]           @relation("OwnerPayments")
-  hostPayments                  HostPayment[]            @relation("HostPayments")
-
-  // Referral self-relation
-  referrer  User?  @relation("UserReferrals", fields: [referredBy], references: [id])
-  referrals User[] @relation("UserReferrals")
+  sector                 String?
+  referralCode           String?
+  referralStatus         String                   @default("Pending")
+  referredAt             DateTime?
+  referredBy             Int?
+  passportPhotoUrl       String?
+  activityLogs           ActivityLog[]
+  agentBookings          AgentBooking[]           @relation("AgentBookings")
+  clientBookings         AgentBooking[]           @relation("ClientBookings")
+  agentCommissions       AgentCommission[]        @relation("AgentCommissions")
+  agentMetrics           AgentPerformanceMetric[] @relation("AgentMetrics")
+  agentReviews           AgentReview[]            @relation("AgentReviews")
+  clientReviews          AgentReview[]            @relation("ClientReviews")
+  bankAccounts           BankAccount[]
+  bookingsAsGuest        Booking[]                @relation("GuestBookings")
+  agentInteractions      ClientInteraction[]      @relation("AgentInteractions")
+  clientInteractions     ClientInteraction[]      @relation("ClientInteractions")
+  connected_accounts     connected_accounts[]
+  contactMessages        ContactMessage[]
+  hostEarnings           HostEarning[]            @relation("HostEarnings")
+  hostPayments           HostPayment[]            @relation("HostPayments")
+  agentInquiries         Inquiry[]                @relation("AgentInquiries")
+  clientInquiries        Inquiry[]                @relation("ClientInquiries")
+  agentLeads             Lead[]                   @relation("AgentLeads")
+  mobileMoneyAccounts    MobileMoneyAccount[]
+  ownerEarnings          OwnerEarning[]           @relation("OwnerEarnings")
+  ownerPayments          OwnerPayment[]           @relation("OwnerPayments")
+  paymentSettings        PaymentSettings?
+  paymentTransactions    PaymentTransaction[]
+  hostPayouts            Payout[]                 @relation("HostPayouts")
+  agentManagedProperties Property[]               @relation("AgentProperties")
+  ownedProperties        Property[]               @relation("OwnedProperties")
+  propertyViews          PropertyView[]           @relation("UserPropertyViews")
+  reviews                Review[]
+  tourBookingsAsGuest    TourBooking[]            @relation("GuestTourBookings")
+  tourEarnings           TourEarnings[]
+  receivedTourMessages   TourMessage[]            @relation("TourMessageReceiver")
+  sentTourMessages       TourMessage[]            @relation("TourMessageSender")
+  tourNotifications      TourNotification[]
+  tourReviews            TourReview[]
+  toursAsGuide           Tour[]                   @relation("TourGuideToTours")
+  receivedTransactions   Transaction[]            @relation("RecipientTransactions")
+  transactions           Transaction[]            @relation("UserTransactions")
+  sessions               UserSession[]
+  user_settings          user_settings?
+  user_verifications     user_verifications[]
+  referrer               User?                    @relation("UserReferrals", fields: [referredBy], references: [id])
+  referrals              User[]                   @relation("UserReferrals")
+  wallet                 Wallet?
+  wishlists              Wishlist[]
+  withdrawalMethods      WithdrawalMethod[]
+  withdrawalRequests     WithdrawalRequest[]
 
   @@map("users")
 }
@@ -151,83 +141,26 @@ model UserSession {
   @@map("user_sessions")
 }
 
-model EscrowTransaction {
-  id                 String               @id @default(cuid())
-  userId             Int
-  recipientId        Int?
-  type               String
-  amount             Float
-  currency           String               @default("RWF")
-  status             String               @default("PENDING")
-  reference          String               @unique
-  description        String?
-  escrowId           String?
-  externalId         String?
-  paymentUrl         String?
-  sourceEscrowId     String?
-  transferType       String?
-  isP2P              Boolean              @default(false)
-  notifyBySMS        Boolean              @default(false)
-  fundedAt           DateTime?
-  releasedAt         DateTime?
-  releasedBy         Int?
-  releaseReason      String?
-  disputedAt         DateTime?
-  disputedBy         Int?
-  disputeReason      String?
-  resolvedAt         DateTime?
-  resolvedBy         Int?
-  resolutionReason   String?
-  cancelledAt        DateTime?
-  cancellationReason String?
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
-  metadata           Json?
-  refundedAt         DateTime?
-  pesapalOrderId     String?
-  pesapalTrackingId  String?
-  // Status check tracking
-  statusCheckCount   Int                  @default(0) // Number of times status has been checked
-  lastStatusCheck    DateTime? // Last time status was checked
-  notificationSentAt DateTime? // Last time notification was sent
-  notificationCount  Int                  @default(0) // Number of notifications sent
-  notifications      EscrowNotification[]
-  recipient          User?                @relation("RecipientEscrowTransactions", fields: [recipientId], references: [id])
-  user               User                 @relation("UserEscrowTransactions", fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([recipientId])
-  @@index([status])
-  @@index([type])
-  @@index([currency])
-  @@index([escrowId])
-  @@index([reference])
-  @@index([createdAt])
-  @@index([lastStatusCheck])
-  @@map("escrow_transactions")
-}
-
 model WithdrawalRequest {
   id                 String            @id @default(cuid())
   userId             Int
   amount             Float
   currency           String            @default("RWF")
-  withdrawalMethodId String? // Links to approved withdrawal method
-  method             String // Type: bank, mobile_money, etc
-  status             String            @default("PENDING") // PENDING, APPROVED, PROCESSING, COMPLETED, REJECTED, CANCELLED
-  destination        Json // Account details
-  pesapalPayoutId    String?
+  method             String
+  status             String            @default("PENDING")
+  destination        Json
   reference          String            @unique
   failureReason      String?
-  adminNotes         String?
-  approvedBy         Int? // Admin who approved
-  approvedAt         DateTime?
-  rejectedBy         Int?
-  rejectedAt         DateTime?
-  processedBy        Int?
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
   completedAt        DateTime?
+  adminNotes         String?
+  approvedAt         DateTime?
+  approvedBy         Int?
+  processedBy        Int?
+  rejectedAt         DateTime?
+  rejectedBy         Int?
+  withdrawalMethodId String?
   user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   withdrawalMethod   WithdrawalMethod? @relation(fields: [withdrawalMethodId], references: [id])
 
@@ -239,46 +172,18 @@ model WithdrawalRequest {
   @@map("withdrawal_requests")
 }
 
-model EscrowNotification {
-  id                  String             @id @default(cuid())
-  userId              Int
-  escrowTransactionId String?
-  type                String
-  title               String
-  message             String
-  data                Json?
-  channels            Json
-  isRead              Boolean            @default(false)
-  readAt              DateTime?
-  sentAt              DateTime?
-  emailSent           Boolean            @default(false)
-  smsSent             Boolean            @default(false)
-  pushSent            Boolean            @default(false)
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-  escrowTransaction   EscrowTransaction? @relation(fields: [escrowTransactionId], references: [id])
-  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([escrowTransactionId])
-  @@index([type])
-  @@index([isRead])
-  @@index([createdAt])
-  @@map("escrow_notifications")
-}
-
 model Wallet {
   id             String              @id @default(cuid())
   userId         Int                 @unique
   balance        Float               @default(0)
-  pendingBalance Float               @default(0) // Balance pending approval/release
   currency       String              @default("USD")
-  walletNumber   String?             @unique // Unique wallet identifier for transfers
   accountNumber  String?
   isActive       Boolean             @default(true)
   isVerified     Boolean             @default(false)
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
+  pendingBalance Float               @default(0)
+  walletNumber   String?             @unique
   transactions   WalletTransaction[]
   user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -338,8 +243,6 @@ model Property {
   features           Json
   images             Json
   video3D            String?
-  hostId             Int? // Property host
-  agentId            Int? // Agent who uploaded/manages the property
   availableFrom      DateTime?
   availableTo        DateTime?
   minStay            Int               @default(1)
@@ -355,19 +258,21 @@ model Property {
   updatedAt          DateTime          @updatedAt
   propertyAddress    String?
   upiNumber          String?
-  commissionRate     Float?            @default(0.10) // Agent commission rate (default 10%)
+  agentId            Int?
+  commissionRate     Float?            @default(0.10)
+  hostId             Int?
+  agentCommissions   AgentCommission[]
   blockedDates       BlockedDate[]
   bookings           Booking[]
-  ownerEarnings      OwnerEarning[]    @relation("PropertyEarnings")
   legacyHostEarnings HostEarning[]     @relation("LegacyPropertyEarnings")
+  ownerEarnings      OwnerEarning[]    @relation("PropertyEarnings")
+  ownerPayments      OwnerPayment[]
   pricingRules       PricingRule[]
+  agent              User?             @relation("AgentProperties", fields: [agentId], references: [id])
   host               User?             @relation("OwnedProperties", fields: [hostId], references: [id], onDelete: Cascade)
-  agent              User?             @relation("AgentProperties", fields: [agentId], references: [id], onDelete: SetNull)
   propertyViews      PropertyView[]    @relation("PropertyViews")
   reviews            Review[]
   wishlistedBy       Wishlist[]
-  agentCommissions   AgentCommission[]
-  ownerPayments      OwnerPayment[]
 
   @@index([hostId])
   @@index([agentId])
@@ -376,50 +281,53 @@ model Property {
 }
 
 model Booking {
-  id                   String            @id @default(cuid())
-  propertyId           Int
-  guestId              Int
-  checkIn              DateTime
-  checkOut             DateTime
-  guests               Int
-  totalPrice           Float
-  message              String?
-  ownerResponse        String?
-  status               String            @default("pending")
-  paymentStatus        String            @default("pending")
-  paymentMethod        String?
-  transactionId        String?
-  notes                String?
-  specialRequests      String?
-  checkInInstructions  String?
-  checkOutInstructions String?
-  guestNotes           String?
-  // Check-in/Check-out validation - ONLY OWNER can approve
-  checkInValidated     Boolean           @default(false)
-  checkInValidatedAt   DateTime?
-  checkInValidatedBy   Int? // Must be property owner
-  checkOutValidated    Boolean           @default(false)
-  checkOutValidatedAt  DateTime?
-  checkOutValidatedBy  Int? // Must be property owner
-  checkInCode          String? // Optional: Code for guest to provide at check-in
-  checkOutCode         String? // Optional: Code for guest to provide at check-out
-  // Wallet distribution tracking
-  walletDistributed    Boolean           @default(false) // Track if funds have been distributed to wallets
-  walletDistributedAt  DateTime? // When wallet distribution occurred
-  distributionAttempts Int               @default(0) // Number of distribution attempts
-  distributionError    String? // Last distribution error if any
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-  cancellationReason   String?
-  cancelledAt          DateTime?
-  guest                User              @relation("GuestBookings", fields: [guestId], references: [id], onDelete: Cascade)
-  property             Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  ownerEarning         OwnerEarning?     @relation("BookingEarning")
-  legacyHostEarning    HostEarning?      @relation("LegacyBookingEarning")
-  reviews              Review[]
-  agentCommissions     AgentCommission[]
-  ownerPayments        OwnerPayment[]
-  legacyHostPayments   HostPayment[]
+  id                         String            @id @default(cuid())
+  propertyId                 Int
+  guestId                    Int
+  checkIn                    DateTime
+  checkOut                   DateTime
+  guests                     Int
+  totalPrice                 Float
+  message                    String?
+  status                     String            @default("pending")
+  paymentStatus              String            @default("pending")
+  paymentMethod              String?
+  transactionId              String?
+  notes                      String?
+  specialRequests            String?
+  checkInInstructions        String?
+  checkOutInstructions       String?
+  guestNotes                 String?
+  createdAt                  DateTime          @default(now())
+  updatedAt                  DateTime          @updatedAt
+  cancellationReason         String?
+  cancelledAt                DateTime?
+  checkInCode                String?
+  checkInValidated           Boolean           @default(false)
+  checkInValidatedAt         DateTime?
+  checkInValidatedBy         Int?
+  checkOutCode               String?
+  checkOutValidated          Boolean           @default(false)
+  checkOutValidatedAt        DateTime?
+  checkOutValidatedBy        Int?
+  ownerResponse              String?
+  distributionAttempts       Int               @default(0)
+  distributionError          String?
+  walletDistributed          Boolean           @default(false)
+  walletDistributedAt        DateTime?
+  payAtProperty              Boolean           @default(false)
+  propertyPaymentAmount      Float?
+  propertyPaymentCollected   Boolean           @default(false)
+  propertyPaymentCollectedAt DateTime?
+  propertyPaymentCollectedBy Int?
+  agentCommissions           AgentCommission[]
+  guest                      User              @relation("GuestBookings", fields: [guestId], references: [id], onDelete: Cascade)
+  property                   Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  legacyHostEarning          HostEarning?      @relation("LegacyBookingEarning")
+  legacyHostPayments         HostPayment[]
+  ownerEarning               OwnerEarning?     @relation("BookingEarning")
+  ownerPayments              OwnerPayment[]
+  reviews                    Review[]
 
   @@index([propertyId])
   @@index([guestId])
@@ -612,14 +520,13 @@ model TourBooking {
   refundAmount         Float?
   refundReason         String?
   guestNotes           String?
-  // Wallet distribution tracking
-  walletDistributed    Boolean        @default(false) // Track if funds have been distributed to wallets
-  walletDistributedAt  DateTime? // When wallet distribution occurred
-  distributionAttempts Int            @default(0) // Number of distribution attempts
-  distributionError    String? // Last distribution error if any
   bookingDate          DateTime       @default(now())
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
+  distributionAttempts Int            @default(0)
+  distributionError    String?
+  walletDistributed    Boolean        @default(false)
+  walletDistributedAt  DateTime?
   schedule             TourSchedule   @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
   tour                 Tour           @relation(fields: [tourId], references: [id], onDelete: Cascade)
   user                 User           @relation("GuestTourBookings", fields: [userId], references: [id], onDelete: Cascade)
@@ -738,34 +645,31 @@ model TourEarnings {
 }
 
 model PaymentTransaction {
-  id                  String    @id @default(cuid())
-  userId              Int
-  type                String
-  method              String
-  amount              Float
-  currency            String    @default("KES")
-  status              String    @default("pending")
-  reference           String    @unique
-  externalId          String?
-  jengaTransactionId  String?
-  description         String?
-  metadata            Json?
-  charges             Float?
-  netAmount           Float?
-  sourceAccount       String?
-  destinationAccount  String?
-  phoneNumber         String?
-  bankCode            String?
-  accountName         String?
-  failureReason       String?
-  callbackUrl         String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  completedAt         DateTime?
-  escrowStatus        String?
-  escrowTransactionId String?
-  isEscrowBased       Boolean   @default(false)
-  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String    @id @default(cuid())
+  userId             Int
+  type               String
+  method             String
+  amount             Float
+  currency           String    @default("KES")
+  status             String    @default("pending")
+  reference          String    @unique
+  externalId         String?
+  jengaTransactionId String?
+  description        String?
+  metadata           Json?
+  charges            Float?
+  netAmount          Float?
+  sourceAccount      String?
+  destinationAccount String?
+  phoneNumber        String?
+  bankCode           String?
+  accountName        String?
+  failureReason      String?
+  callbackUrl        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  completedAt        DateTime?
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([status])
@@ -846,8 +750,8 @@ model Payout {
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   processedAt        DateTime?
-  ownerEarnings      OwnerEarning[] @relation("PayoutEarnings")
   legacyHostEarnings HostEarning[]  @relation("LegacyPayoutEarnings")
+  ownerEarnings      OwnerEarning[] @relation("PayoutEarnings")
   host               User           @relation("HostPayouts", fields: [hostId], references: [id], onDelete: Cascade)
 
   @@index([hostId])
@@ -881,7 +785,6 @@ model OwnerEarning {
   @@map("owner_earnings")
 }
 
-// Legacy model - kept for backward compatibility
 model HostEarning {
   id          String    @id @default(cuid())
   hostId      Int
@@ -1125,9 +1028,6 @@ model MarketData {
   @@map("market_data")
 }
 
-// ================================================================= //
-//                            ADMIN & SITE MODELS                    //
-// ================================================================= //
 model VisitorTracking {
   id        Int       @id @default(autoincrement())
   ipAddress String?
@@ -1204,7 +1104,7 @@ model ContactMessage {
   repliedAt   DateTime? @map("replied_at") @db.Timestamptz(6)
   createdAt   DateTime? @default(now()) @db.Timestamptz(6)
   updatedAt   DateTime? @updatedAt @db.Timestamptz(6)
-  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user        User?     @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([isResolved])
@@ -1235,7 +1135,7 @@ model ActivityLog {
   durationMs   Int?      @map("duration_ms")
   createdAt    DateTime? @default(now()) @db.Timestamptz(6)
   updatedAt    DateTime? @updatedAt @db.Timestamptz(6)
-  user         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user         User?     @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([action])
@@ -1301,7 +1201,6 @@ model user_verifications {
   @@index([userId])
 }
 
-// --- AGENT COMMISSION MODEL ---
 model AgentCommission {
   id             String    @id @default(cuid())
   agentId        Int
@@ -1309,7 +1208,7 @@ model AgentCommission {
   bookingId      String
   amount         Float
   commissionRate Float
-  status         String    @default("pending") // pending, earned, paid, cancelled
+  status         String    @default("pending")
   earnedAt       DateTime?
   paidAt         DateTime?
   payoutMethod   String?
@@ -1318,8 +1217,8 @@ model AgentCommission {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   agent          User      @relation("AgentCommissions", fields: [agentId], references: [id], onDelete: Cascade)
-  property       Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   booking        Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  property       Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@index([agentId])
   @@index([propertyId])
@@ -1328,7 +1227,6 @@ model AgentCommission {
   @@map("agent_commissions")
 }
 
-// --- OWNER PAYMENT MODEL ---
 model OwnerPayment {
   id                 String    @id @default(cuid())
   ownerId            Int
@@ -1338,7 +1236,7 @@ model OwnerPayment {
   platformFee        Float     @default(0)
   netAmount          Float
   currency           String    @default("USD")
-  status             String    @default("pending") // pending, approved, paid, cancelled
+  status             String    @default("pending")
   checkInRequired    Boolean   @default(true)
   checkInValidated   Boolean   @default(false)
   checkInValidatedAt DateTime?
@@ -1349,9 +1247,9 @@ model OwnerPayment {
   notes              String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
+  booking            Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   owner              User      @relation("OwnerPayments", fields: [ownerId], references: [id], onDelete: Cascade)
   property           Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  booking            Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@index([ownerId])
   @@index([propertyId])
@@ -1361,7 +1259,6 @@ model OwnerPayment {
   @@map("owner_payments")
 }
 
-// --- HOST PAYMENT MODEL (LEGACY) ---
 model HostPayment {
   id                 String    @id @default(cuid())
   hostId             Int
@@ -1370,7 +1267,7 @@ model HostPayment {
   platformFee        Float     @default(0)
   netAmount          Float
   currency           String    @default("USD")
-  status             String    @default("pending") // pending, approved, paid, cancelled
+  status             String    @default("pending")
   checkInRequired    Boolean   @default(true)
   checkInValidated   Boolean   @default(false)
   checkInValidatedAt DateTime?
@@ -1381,8 +1278,8 @@ model HostPayment {
   notes              String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
-  host               User      @relation("HostPayments", fields: [hostId], references: [id], onDelete: Cascade)
   booking            Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  host               User      @relation("HostPayments", fields: [hostId], references: [id], onDelete: Cascade)
 
   @@index([hostId])
   @@index([bookingId])
@@ -1391,22 +1288,21 @@ model HostPayment {
   @@map("host_payments")
 }
 
-// --- WITHDRAWAL METHOD MODEL ---
 model WithdrawalMethod {
   id                 String              @id @default(cuid())
   userId             Int
-  methodType         String // bank_account, mobile_money, crypto, paypal, etc
+  methodType         String
   accountName        String
-  accountDetails     Json // Flexible storage for different method types
+  accountDetails     Json
   isDefault          Boolean             @default(false)
   isVerified         Boolean             @default(false)
-  isApproved         Boolean             @default(false) // Admin approval required
+  isApproved         Boolean             @default(false)
   approvedBy         Int?
   approvedAt         DateTime?
   rejectedBy         Int?
   rejectedAt         DateTime?
   rejectionReason    String?
-  verificationStatus String              @default("pending") // pending, verified, rejected
+  verificationStatus String              @default("pending")
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1418,133 +1314,93 @@ model WithdrawalMethod {
   @@map("withdrawal_methods")
 }
 
-// --- PAWAPAY TRANSACTION MODEL ---
-model PawaPayTransaction {
-  id              String  @id @default(cuid())
-  userId          Int?
-  transactionId   String  @unique // depositId, payoutId, or refundId from PawaPay
-  transactionType String // DEPOSIT, PAYOUT, REFUND
-  status          String  @default("PENDING") // ACCEPTED, SUBMITTED, COMPLETED, FAILED, REJECTED, CANCELLED
-  amount          String // Amount in smallest currency unit
-  currency        String // ISO 4217 currency code
-  country         String? // ISO 3166-1 alpha-3 country code
-  correspondent   String // MNO provider code (e.g., MTN_MOMO_RWA)
-
-  // Payer/Recipient information
-  payerPhone     String?
-  recipientPhone String?
-
-  // Transaction details
-  customerTimestamp    DateTime?
-  statementDescription String?
-  requestedAmount      String?
-  depositedAmount      String?
-  refundedAmount       String?
-
-  // PawaPay specific IDs
+model Transaction {
+  id                     String    @id @default(cuid())
+  reference              String    @unique
+  provider               String
+  transactionType        String
+  paymentMethod          String?
+  userId                 Int?
+  recipientId            Int?
+  amount                 Float
+  currency               String    @default("USD")
+  requestedAmount        Float?
+  netAmount              Float?
+  charges                Float?
+  platformFee            Float?
+  agentCommission        Float?
+  hostShare              Float?
+  status                 String    @default("PENDING")
+  failureReason          String?
+  failureCode            String?
+  externalId             String?
   providerTransactionId  String?
   financialTransactionId String?
-  relatedDepositId       String? // For refunds, link to original deposit
-
-  // Failure information
-  failureCode    String?
-  failureMessage String?
-
-  // Metadata and tracking
-  metadata           Json?
-  internalReference  String? // Your internal reference (e.g., booking ID, escrow ID)
-  callbackReceived   Boolean   @default(false)
-  callbackReceivedAt DateTime?
-
-  // Status check tracking
-  statusCheckCount   Int       @default(0) // Number of times status has been checked
-  lastStatusCheck    DateTime? // Last time status was checked
-  notificationSentAt DateTime? // Last time notification was sent
-  notificationCount  Int       @default(0) // Number of notifications sent
-
-  // Timestamps
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  receivedByPawaPay DateTime?
-  completedAt       DateTime?
+  recipientPhone         String?
+  payerPhone             String?
+  recipientEmail         String?
+  payerEmail             String?
+  accountName            String?
+  sourceAccount          String?
+  destinationAccount     String?
+  bankCode               String?
+  correspondent          String?
+  description            String?
+  statementDescription   String?
+  customerTimestamp      DateTime?
+  paymentUrl             String?
+  callbackUrl            String?
+  webhookUrl             String?
+  callbackReceived       Boolean   @default(false)
+  callbackReceivedAt     DateTime?
+  isRefund               Boolean   @default(false)
+  refundedAt             DateTime?
+  relatedTransactionId   String?
+  refundedAmount         Float?
+  depositedAmount        Float?
+  isP2P                  Boolean   @default(false)
+  transferType           String?
+  bookingId              String?
+  propertyId             Int?
+  tourId                 String?
+  notifyBySMS            Boolean   @default(false)
+  notificationSentAt     DateTime?
+  notificationCount      Int       @default(0)
+  statusCheckCount       Int       @default(0)
+  lastStatusCheck        DateTime?
+  cancelledAt            DateTime?
+  cancellationReason     String?
+  metadata               Json?
+  country                String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  completedAt            DateTime?
+  processedAt            DateTime?
+  receivedByProvider     DateTime?
+  recipient              User?     @relation("RecipientTransactions", fields: [recipientId], references: [id])
+  user                   User?     @relation("UserTransactions", fields: [userId], references: [id])
 
   @@index([userId])
-  @@index([transactionId])
+  @@index([recipientId])
+  @@index([provider])
   @@index([transactionType])
   @@index([status])
   @@index([currency])
-  @@index([country])
-  @@index([correspondent])
-  @@index([internalReference])
+  @@index([reference])
+  @@index([externalId])
+  @@index([providerTransactionId])
+  @@index([bookingId])
+  @@index([propertyId])
+  @@index([tourId])
   @@index([createdAt])
+  @@index([completedAt])
+  @@index([lastStatusCheck])
+  @@index([isRefund])
   @@index([payerPhone])
   @@index([recipientPhone])
-  @@index([lastStatusCheck])
-  @@map("pawapay_transactions")
+  @@map("transactions")
 }
 
-// --- PAWAPAY BULK PAYOUT MODEL ---
-model PawaPayBulkPayout {
-  id                String @id @default(cuid())
-  bulkPayoutId      String @unique
-  userId            Int?
-  totalPayouts      Int
-  successfulPayouts Int    @default(0)
-  failedPayouts     Int    @default(0)
-  status            String @default("PENDING") // ACCEPTED, PROCESSING, COMPLETED, PARTIAL_SUCCESS, FAILED
-
-  // Transaction details
-  totalAmount String?
-  currency    String?
-
-  // Metadata
-  metadata    Json?
-  description String?
-
-  // Timestamps
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  completedAt DateTime?
-
-  @@index([userId])
-  @@index([bulkPayoutId])
-  @@index([status])
-  @@index([createdAt])
-  @@map("pawapay_bulk_payouts")
-}
-
-// --- PAWAPAY WEBHOOK LOG MODEL ---
-model PawaPayWebhookLog {
-  id              String  @id @default(cuid())
-  transactionId   String? // depositId, payoutId, or refundId
-  transactionType String? // DEPOSIT, PAYOUT, REFUND
-
-  // Webhook details
-  payload        Json
-  signature      String?
-  signatureValid Boolean @default(false)
-
-  // Processing status
-  processed       Boolean   @default(false)
-  processedAt     DateTime?
-  processingError String?
-
-  // Request details
-  ipAddress String?
-  userAgent String?
-
-  // Timestamps
-  createdAt DateTime @default(now())
-
-  @@index([transactionId])
-  @@index([transactionType])
-  @@index([processed])
-  @@index([createdAt])
-  @@map("pawapay_webhook_logs")
-}
-
-// --- BOOKING ARCHIVE MODELS ---
-// Store deleted booking data for admin tracking and lead generation
 model BookingArchive {
   id                 String    @id @default(cuid())
   originalBookingId  String
@@ -1569,7 +1425,7 @@ model BookingArchive {
   adminNotified      Boolean   @default(false)
   adminNotifiedAt    DateTime?
   adminNotes         String?
-  leadStatus         String    @default("new") // new, contacted, qualified, converted, lost
+  leadStatus         String    @default("new")
   contactedAt        DateTime?
   convertedToBooking Boolean   @default(false)
   metadata           Json?
@@ -1609,7 +1465,7 @@ model TourBookingArchive {
   adminNotified        Boolean   @default(false)
   adminNotifiedAt      DateTime?
   adminNotes           String?
-  leadStatus           String    @default("new") // new, contacted, qualified, converted, lost
+  leadStatus           String    @default("new")
   contactedAt          DateTime?
   convertedToBooking   Boolean   @default(false)
   metadata             Json?

@@ -5,31 +5,10 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import smsService from '../services/sms.service';
-import { EscrowService } from '../services/escrow.service';
-import { PesapalService } from '../services/pesapal.service';
-import { EmailService } from '../services/email.service';
 import rateLimit from 'express-rate-limit';
-import { config } from '../config/config';
 
 const router = Router();
 const prisma = new PrismaClient();
-
-// Initialize services
-const pesapalService = new PesapalService({
-  consumerKey: config.pesapal.consumerKey,
-  consumerSecret: config.pesapal.consumerSecret,
-  baseUrl: config.pesapal.baseUrl,
-  environment: config.pesapal.environment,
-  timeout: 30000,
-  retryAttempts: 3,
-  webhookSecret: config.pesapal.webhookSecret,
-  callbackUrl: config.pesapal.callbackUrl,
-  defaultCurrency: 'RWF',
-  merchantAccount: config.pesapal.merchantAccount
-});
-
-const emailService = new EmailService();
-const escrowService = new EscrowService(pesapalService, emailService);
 
 // Rate limiting for OTP requests
 const otpRateLimit = rateLimit({
@@ -146,8 +125,10 @@ router.post('/request-otp',
       }
 
       // Check user wallet balance
-      const wallet = await escrowService.getUserWallet(userId);
-      
+      const wallet = await prisma.wallet.findUnique({
+        where: { userId }
+      });
+
       if (!wallet || wallet.balance < amount) {
         return res.status(400).json({
           success: false,
@@ -158,9 +139,9 @@ router.post('/request-otp',
 
       // Send OTP
       const result = await smsService.sendWithdrawalOTP(
-        userId, 
-        user.phone, 
-        amount, 
+        userId,
+        user.phone,
+        amount,
         wallet.currency
       );
 
@@ -205,7 +186,7 @@ router.post('/verify-and-withdraw',
   withdrawalRateLimit,
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { otp, amount, accountId, method = 'MOBILE', destination } = req.body;
+      const { otp, amount, withdrawalMethodId, method = 'MOBILE', destination } = req.body;
       const userId = parseInt(req.user!.userId);
 
       // Validation
@@ -216,10 +197,10 @@ router.post('/verify-and-withdraw',
         });
       }
 
-      if (!['MOBILE', 'BANK'].includes(method)) {
+      if (!['MOBILE', 'BANK', 'MOBILE_MONEY'].includes(method)) {
         return res.status(400).json({
           success: false,
-          message: 'Invalid withdrawal method. Use MOBILE or BANK'
+          message: 'Invalid withdrawal method. Use MOBILE, BANK, or MOBILE_MONEY'
         });
       }
 
@@ -246,8 +227,10 @@ router.post('/verify-and-withdraw',
       }
 
       // Check wallet balance again
-      const wallet = await escrowService.getUserWallet(userId);
-      
+      const wallet = await prisma.wallet.findUnique({
+        where: { userId }
+      });
+
       if (!wallet || wallet.balance < amount) {
         return res.status(400).json({
           success: false,
@@ -257,10 +240,49 @@ router.post('/verify-and-withdraw',
 
       // Prepare withdrawal destination
       let withdrawalDestination = destination;
-      
-      if (!withdrawalDestination) {
+      let savedMethodId = withdrawalMethodId;
+
+      // If withdrawalMethodId is provided, use the saved withdrawal method
+      if (withdrawalMethodId) {
+        const savedMethod = await prisma.withdrawalMethod.findUnique({
+          where: { id: withdrawalMethodId }
+        });
+
+        if (!savedMethod) {
+          return res.status(404).json({
+            success: false,
+            message: 'Withdrawal method not found'
+          });
+        }
+
+        if (savedMethod.userId !== userId) {
+          return res.status(403).json({
+            success: false,
+            message: 'Unauthorized: This withdrawal method does not belong to you'
+          });
+        }
+
+        if (!savedMethod.isApproved) {
+          return res.status(400).json({
+            success: false,
+            message: 'Withdrawal method is not yet approved by admin. Please wait for approval or use a different method.'
+          });
+        }
+
+        // Extract account details from saved method
+        const accountDetails = savedMethod.accountDetails as any;
+        withdrawalDestination = {
+          holderName: savedMethod.accountName,
+          accountNumber: accountDetails.accountNumber,
+          providerCode: accountDetails.providerCode,
+          providerName: accountDetails.providerName,
+          providerType: accountDetails.providerType || savedMethod.methodType,
+          countryCode: accountDetails.country || 'RWA',
+          currency: accountDetails.currency || 'RWF'
+        };
+      } else if (!withdrawalDestination) {
         // Use user's phone as default for mobile withdrawal
-        if (method === 'MOBILE' && user.phone) {
+        if ((method === 'MOBILE' || method === 'MOBILE_MONEY') && user.phone) {
           withdrawalDestination = {
             holderName: `${user.firstName} ${user.lastName}`,
             accountNumber: user.phone,
@@ -270,21 +292,48 @@ router.post('/verify-and-withdraw',
         } else {
           return res.status(400).json({
             success: false,
-            message: 'Withdrawal destination details are required'
+            message: 'Withdrawal destination details are required. Please provide withdrawalMethodId or destination details.'
           });
         }
       }
 
-      // Create withdrawal using escrow service
-      const withdrawalData = {
-        amount,
-        method: method as 'MOBILE' | 'BANK',
-        destination: withdrawalDestination,
-        reference: `WD-${Date.now()}-${userId}`,
-        particulars: `Wallet withdrawal - ${amount} ${wallet.currency}`
-      };
+      // Create withdrawal request with link to saved withdrawal method
+      const reference = `WD-${Date.now()}-${userId}`;
+      const withdrawal = await prisma.withdrawalRequest.create({
+        data: {
+          userId,
+          amount,
+          currency: wallet.currency,
+          method: method as 'MOBILE' | 'BANK',
+          destination: JSON.stringify(withdrawalDestination),
+          reference,
+          status: 'PENDING',
+          withdrawalMethodId: savedMethodId || undefined
+        }
+      });
 
-      const withdrawal = await escrowService.createWithdrawal(userId, withdrawalData);
+      // Update wallet balance
+      await prisma.wallet.update({
+        where: { id: wallet.id },
+        data: {
+          balance: wallet.balance - amount,
+          pendingBalance: wallet.pendingBalance + amount
+        }
+      });
+
+      // Create wallet transaction record
+      await prisma.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'WITHDRAWAL',
+          amount: -amount,
+          balanceBefore: wallet.balance,
+          balanceAfter: wallet.balance - amount,
+          reference,
+          description: `Withdrawal request - ${method}`,
+          transactionId: withdrawal.id
+        }
+      });
 
       // Send confirmation SMS
       try {
@@ -355,12 +404,21 @@ router.post('/resend-otp',
         });
       }
 
-      const wallet = await escrowService.getUserWallet(userId);
-      
+      const wallet = await prisma.wallet.findUnique({
+        where: { userId }
+      });
+
+      if (!wallet) {
+        return res.status(404).json({
+          success: false,
+          message: 'Wallet not found'
+        });
+      }
+
       const result = await smsService.resendWithdrawalOTP(
-        userId, 
-        user.phone, 
-        amount, 
+        userId,
+        user.phone,
+        amount,
         wallet.currency
       );
 
@@ -406,6 +464,16 @@ router.get('/history',
       const [withdrawals, total] = await Promise.all([
         prisma.withdrawalRequest.findMany({
           where: { userId },
+          include: {
+            withdrawalMethod: {
+              select: {
+                id: true,
+                methodType: true,
+                accountName: true,
+                accountDetails: true
+              }
+            }
+          },
           orderBy: { createdAt: 'desc' },
           skip,
           take: limit
@@ -420,18 +488,37 @@ router.get('/history',
       res.status(200).json({
         success: true,
         data: {
-          withdrawals: withdrawals.map(w => ({
-            id: w.id,
-            amount: w.amount,
-            currency: w.currency,
-            method: w.method,
-            status: w.status,
-            reference: w.reference,
-            destination: JSON.parse(w.destination as string),
-            failureReason: w.failureReason,
-            createdAt: w.createdAt,
-            completedAt: w.completedAt
-          })),
+          withdrawals: withdrawals.map(w => {
+            let destination: any = {};
+            try {
+              destination = typeof w.destination === 'string'
+                ? JSON.parse(w.destination)
+                : w.destination;
+            } catch (e) {
+              destination = w.destination;
+            }
+
+            return {
+              id: w.id,
+              amount: w.amount,
+              currency: w.currency,
+              method: w.method,
+              status: w.status,
+              reference: w.reference,
+              destination: destination,
+              withdrawalMethod: w.withdrawalMethod ? {
+                id: w.withdrawalMethod.id,
+                methodType: w.withdrawalMethod.methodType,
+                accountName: w.withdrawalMethod.accountName,
+                providerName: (w.withdrawalMethod.accountDetails as any)?.providerName,
+                providerCode: (w.withdrawalMethod.accountDetails as any)?.providerCode,
+                accountNumber: (w.withdrawalMethod.accountDetails as any)?.accountNumber,
+              } : null,
+              failureReason: w.failureReason,
+              createdAt: w.createdAt,
+              completedAt: w.completedAt
+            };
+          }),
           pagination: {
             page,
             limit,
@@ -473,13 +560,22 @@ router.get('/info',
             phoneCountryCode: true
           }
         }),
-        escrowService.getUserWallet(userId)
+        prisma.wallet.findUnique({
+          where: { userId }
+        })
       ]);
 
       if (!user) {
         return res.status(404).json({
           success: false,
           message: 'User not found'
+        });
+      }
+
+      if (!wallet) {
+        return res.status(404).json({
+          success: false,
+          message: 'Wallet not found'
         });
       }
 

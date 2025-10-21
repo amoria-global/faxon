@@ -1144,7 +1144,7 @@ export class AdminController {
   async getPaymentTransaction(req: Request, res: Response, next: NextFunction) {
     try {
       const transactionId = req.params.id;
-      
+
       if (!transactionId) {
         return res.status(400).json({
           success: false,
@@ -1156,13 +1156,24 @@ export class AdminController {
         });
       }
 
-      // This would need to be implemented in the admin service
+      const transaction = await adminService.getPaymentTransactionById(transactionId);
+
       res.json({
         success: true,
-        message: 'Get payment transaction details not implemented yet',
+        data: transaction,
         timestamp: new Date().toISOString()
       });
     } catch (error: any) {
+      if (error.message === 'Transaction not found') {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'TRANSACTION_NOT_FOUND',
+            message: 'Transaction not found'
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
       next(error);
     }
   }

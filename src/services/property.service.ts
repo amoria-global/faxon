@@ -3721,7 +3721,7 @@ export class PropertyService {
 
   private async getAgentCommissionRateFromConfig(): Promise<number> {
     // Get agent commission from config defaultSplitRules
-    return config.escrow.defaultSplitRules.agent || 4.38;
+    return config.defaultSplitRules.agent || 4.38;
   }
 
   private calculateBookingCommission(bookingValue: number, agentId: number): number {

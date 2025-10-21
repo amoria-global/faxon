@@ -139,6 +139,122 @@ export class BrevoPropertyMailingService {
     console.log(`New review notification email sent to ${context.host.email}`);
   }
 
+  /**
+   * Notifies a guest about their booking (all payment methods)
+   */
+  async sendBookingNotificationToGuest(data: {
+    user: UserInfo;
+    company: CompanyInfo;
+    booking: {
+      id: string;
+      propertyName: string;
+      checkIn: string;
+      checkOut: string;
+      totalPrice: number;
+      currency: string;
+      transactionReference: string;
+      paymentMethod: string;
+      paymentInstructions: string;
+    };
+  }): Promise<void> {
+    const isPropertyPayment = data.booking.paymentMethod === 'Pay at Property' || data.booking.paymentMethod === 'cash_at_property';
+
+    const emailData: BrevoEmailData = {
+      sender: this.defaultSender,
+      to: [{ email: data.user.email, name: `${data.user.firstName} ${data.user.lastName}` }],
+      subject: isPropertyPayment
+        ? `Booking Confirmed: Pay at ${data.booking.propertyName}`
+        : `Booking Confirmed: ${data.booking.propertyName}`,
+      htmlContent: isPropertyPayment
+        ? this.getPropertyPaymentGuestTemplate(data)
+        : this.getOnlinePaymentGuestTemplate(data),
+      textContent: isPropertyPayment
+        ? this.getPropertyPaymentGuestTextTemplate(data)
+        : this.getOnlinePaymentGuestTextTemplate(data)
+    };
+
+    await this.makeRequest('/smtp/email', emailData);
+    console.log(`Booking notification sent to guest ${data.user.email} (${data.booking.paymentMethod})`);
+  }
+
+  /**
+   * Notifies a host about a new booking (all payment methods)
+   */
+  async sendBookingNotificationToHost(data: {
+    user: UserInfo;
+    company: CompanyInfo;
+    booking: {
+      id: string;
+      propertyName: string;
+      guestName: string;
+      guestEmail: string;
+      guestPhone: string;
+      checkIn: string;
+      checkOut: string;
+      totalPrice: number;
+      currency: string;
+      transactionReference: string;
+      paymentMethod: string;
+      collectionInstructions: string;
+    };
+  }): Promise<void> {
+    const isPropertyPayment = data.booking.paymentMethod === 'Pay at Property' || data.booking.paymentMethod === 'cash_at_property';
+
+    const emailData: BrevoEmailData = {
+      sender: this.defaultSender,
+      to: [{ email: data.user.email, name: `${data.user.firstName} ${data.user.lastName}` }],
+      subject: isPropertyPayment
+        ? `New Booking: Collect Payment from ${data.booking.guestName}`
+        : `New Booking Received: ${data.booking.guestName}`,
+      htmlContent: isPropertyPayment
+        ? this.getPropertyPaymentHostTemplate(data)
+        : this.getOnlinePaymentHostTemplate(data),
+      textContent: isPropertyPayment
+        ? this.getPropertyPaymentHostTextTemplate(data)
+        : this.getOnlinePaymentHostTextTemplate(data)
+    };
+
+    await this.makeRequest('/smtp/email', emailData);
+    console.log(`Booking notification sent to host ${data.user.email} (${data.booking.paymentMethod})`);
+  }
+
+  /**
+   * Notifies an agent about a new booking (all payment methods)
+   */
+  async sendBookingNotificationToAgent(data: {
+    user: UserInfo;
+    company: CompanyInfo;
+    booking: {
+      id: string;
+      propertyName: string;
+      hostName: string;
+      guestName: string;
+      checkIn: string;
+      checkOut: string;
+      totalPrice: number;
+      currency: string;
+      transactionReference: string;
+      paymentMethod: string;
+    };
+  }): Promise<void> {
+    const isPropertyPayment = data.booking.paymentMethod === 'Pay at Property' || data.booking.paymentMethod === 'cash_at_property';
+
+    const emailData: BrevoEmailData = {
+      sender: this.defaultSender,
+      to: [{ email: data.user.email, name: `${data.user.firstName} ${data.user.lastName}` }],
+      subject: `New Booking Alert: ${data.booking.propertyName}`,
+      htmlContent: isPropertyPayment
+        ? this.getPropertyPaymentAgentTemplate(data)
+        : this.getOnlinePaymentAgentTemplate(data),
+      textContent: isPropertyPayment
+        ? this.getPropertyPaymentAgentTextTemplate(data)
+        : this.getOnlinePaymentAgentTextTemplate(data)
+    };
+
+    await this.makeRequest('/smtp/email', emailData);
+    console.log(`Booking notification sent to agent ${data.user.email} (${data.booking.paymentMethod})`);
+  }
+
 
   // --- MODERNIZED EMAIL TEMPLATES ---
 
@@ -318,6 +434,278 @@ export class BrevoPropertyMailingService {
   }
 
 
+  private getPropertyPaymentGuestTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      <!DOCTYPE html><html><head>${this.getBaseTemplate()}</head><body>
+        <div class="email-wrapper"><div class="email-container">
+          <div class="header">
+            <div class="logo">${data.company.name}</div><div class="header-subtitle">Booking Confirmed - Pay at Property</div>
+          </div>
+          <div class="content">
+            <div class="greeting">Great news, ${data.user.firstName}!</div>
+            <div class="message">
+              Your booking at "<strong>${data.booking.propertyName}</strong>" has been confirmed! You've selected to pay at the property when you check in.
+            </div>
+            <div class="alert-box alert-success">
+              <div class="alert-title">✅ Booking Confirmed</div>
+              <div class="alert-text">Your reservation is secured. Please bring cash payment when you check in.</div>
+            </div>
+            <div class="info-card">
+              <div class="info-card-header"><span class="info-card-icon">🏠</span>Booking Details</div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Property</span><span class="info-value">${data.booking.propertyName}</span></div>
+              <div class="info-row"><span class="info-label">Check-In</span><span class="info-value">${checkInDate}</span></div>
+              <div class="info-row"><span class="info-label">Check-Out</span><span class="info-value">${checkOutDate}</span></div>
+              <div class="info-row"><span class="info-label">Total Amount</span><span class="info-value"><strong>${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}</strong></span></div>
+              <div class="info-row"><span class="info-label">Payment Method</span><span class="info-value">${data.booking.paymentMethod}</span></div>
+            </div>
+            <div class="alert-box alert-warning">
+              <div class="alert-title">💰 Payment Instructions</div>
+              <div class="alert-text">${data.booking.paymentInstructions}</div>
+            </div>
+            <div class="message">
+              The host has been notified and is expecting your payment at check-in. We hope you have a wonderful stay!
+            </div>
+          </div>
+          <div class="footer">
+            <div class="footer-text">Questions? Contact us at ${data.company.supportEmail}<br>© ${new Date().getFullYear()} ${data.company.name}</div>
+          </div>
+        </div></div>
+      </body></html>
+    `;
+  }
+
+  private getPropertyPaymentHostTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      <!DOCTYPE html><html><head>${this.getBaseTemplate()}</head><body>
+        <div class="email-wrapper"><div class="email-container">
+          <div class="header">
+            <div class="logo">${data.company.name}</div><div class="header-subtitle">New Booking - Collect Payment at Check-In</div>
+          </div>
+          <div class="content">
+            <div class="greeting">New booking received!</div>
+            <div class="message">
+              Hi ${data.user.firstName}, you have a new booking at "<strong>${data.booking.propertyName}</strong>". The guest has selected to pay at the property.
+            </div>
+            <div class="alert-box alert-warning">
+              <div class="alert-title">💰 Action Required: Collect Payment</div>
+              <div class="alert-text">${data.booking.collectionInstructions}</div>
+            </div>
+            <div class="info-card">
+              <div class="info-card-header"><span class="info-card-icon">📋</span>Booking Details</div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Guest Name</span><span class="info-value">${data.booking.guestName}</span></div>
+              <div class="info-row"><span class="info-label">Guest Email</span><span class="info-value">${data.booking.guestEmail}</span></div>
+              <div class="info-row"><span class="info-label">Guest Phone</span><span class="info-value">${data.booking.guestPhone}</span></div>
+              <div class="info-row"><span class="info-label">Check-In</span><span class="info-value">${checkInDate}</span></div>
+              <div class="info-row"><span class="info-label">Check-Out</span><span class="info-value">${checkOutDate}</span></div>
+              <div class="info-row"><span class="info-label">Amount to Collect</span><span class="info-value"><strong>${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}</strong></span></div>
+              <div class="info-row"><span class="info-label">Reference</span><span class="info-value">${data.booking.transactionReference}</span></div>
+            </div>
+            <div class="message">
+              <strong>Important:</strong> After collecting the payment, please mark it as collected in your host dashboard to complete the transaction.
+            </div>
+            <div class="button-center">
+              <a href="${data.company.website}/host/bookings" class="button">Manage Booking</a>
+            </div>
+          </div>
+          <div class="footer">
+            <div class="footer-text">Need help? Contact support at ${data.company.supportEmail}<br>© ${new Date().getFullYear()} ${data.company.name}</div>
+          </div>
+        </div></div>
+      </body></html>
+    `;
+  }
+
+  private getPropertyPaymentAgentTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      <!DOCTYPE html><html><head>${this.getBaseTemplate()}</head><body>
+        <div class="email-wrapper"><div class="email-container">
+          <div class="header">
+            <div class="logo">${data.company.name}</div><div class="header-subtitle">New Booking Notification</div>
+          </div>
+          <div class="content">
+            <div class="greeting">New booking alert!</div>
+            <div class="message">
+              Hi ${data.user.firstName}, a new booking has been made for a property you manage. The guest will pay at the property.
+            </div>
+            <div class="info-card">
+              <div class="info-card-header"><span class="info-card-icon">🏠</span>Booking Information</div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Property</span><span class="info-value">${data.booking.propertyName}</span></div>
+              <div class="info-row"><span class="info-label">Host</span><span class="info-value">${data.booking.hostName}</span></div>
+              <div class="info-row"><span class="info-label">Guest</span><span class="info-value">${data.booking.guestName}</span></div>
+              <div class="info-row"><span class="info-label">Check-In</span><span class="info-value">${checkInDate}</span></div>
+              <div class="info-row"><span class="info-label">Check-Out</span><span class="info-value">${checkOutDate}</span></div>
+              <div class="info-row"><span class="info-label">Total Amount</span><span class="info-value"><strong>${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}</strong></span></div>
+              <div class="info-row"><span class="info-label">Payment</span><span class="info-value">${data.booking.paymentMethod}</span></div>
+            </div>
+            <div class="alert-box alert-info">
+              <div class="alert-title">ℹ️ Payment Details</div>
+              <div class="alert-text">The guest will pay cash at check-in. The host will collect and confirm payment.</div>
+            </div>
+            <div class="message">
+              You can monitor this booking and your commission in the agent dashboard.
+            </div>
+            <div class="button-center">
+              <a href="${data.company.website}/agent/bookings" class="button">View Dashboard</a>
+            </div>
+          </div>
+          <div class="footer">
+            <div class="footer-text">Questions? Contact us at ${data.company.supportEmail}<br>© ${new Date().getFullYear()} ${data.company.name}</div>
+          </div>
+        </div></div>
+      </body></html>
+    `;
+  }
+
+  // === ONLINE PAYMENT TEMPLATES (Mobile Money, Card) ===
+
+  private getOnlinePaymentGuestTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      <!DOCTYPE html><html><head>${this.getBaseTemplate()}</head><body>
+        <div class="email-wrapper"><div class="email-container">
+          <div class="header">
+            <div class="logo">${data.company.name}</div><div class="header-subtitle">Booking Confirmed - Payment Processing</div>
+          </div>
+          <div class="content">
+            <div class="greeting">Great news, ${data.user.firstName}!</div>
+            <div class="message">
+              Your booking at "<strong>${data.booking.propertyName}</strong>" has been confirmed! We're currently processing your payment.
+            </div>
+            <div class="alert-box alert-success">
+              <div class="alert-title">✅ Booking Confirmed</div>
+              <div class="alert-text">Your reservation is secured. We'll notify you once your payment is complete.</div>
+            </div>
+            <div class="info-card">
+              <div class="info-card-header"><span class="info-card-icon">🏠</span>Booking Details</div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Property</span><span class="info-value">${data.booking.propertyName}</span></div>
+              <div class="info-row"><span class="info-label">Check-In</span><span class="info-value">${checkInDate}</span></div>
+              <div class="info-row"><span class="info-label">Check-Out</span><span class="info-value">${checkOutDate}</span></div>
+              <div class="info-row"><span class="info-label">Total Amount</span><span class="info-value"><strong>${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}</strong></span></div>
+              <div class="info-row"><span class="info-label">Payment Method</span><span class="info-value">${data.booking.paymentMethod}</span></div>
+              <div class="info-row"><span class="info-label">Reference</span><span class="info-value">${data.booking.transactionReference}</span></div>
+            </div>
+            <div class="alert-box alert-warning">
+              <div class="alert-title">💳 Payment Status</div>
+              <div class="alert-text">${data.booking.paymentInstructions}</div>
+            </div>
+            <div class="message">
+              The host has been notified of your booking. We hope you have a wonderful stay!
+            </div>
+          </div>
+          <div class="footer">
+            <div class="footer-text">Questions? Contact us at ${data.company.supportEmail}<br>© ${new Date().getFullYear()} ${data.company.name}</div>
+          </div>
+        </div></div>
+      </body></html>
+    `;
+  }
+
+  private getOnlinePaymentHostTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      <!DOCTYPE html><html><head>${this.getBaseTemplate()}</head><body>
+        <div class="email-wrapper"><div class="email-container">
+          <div class="header">
+            <div class="logo">${data.company.name}</div><div class="header-subtitle">New Booking - Payment Processing</div>
+          </div>
+          <div class="content">
+            <div class="greeting">New booking received!</div>
+            <div class="message">
+              Hi ${data.user.firstName}, you have a new booking at "<strong>${data.booking.propertyName}</strong>". The guest is paying online via ${data.booking.paymentMethod}.
+            </div>
+            <div class="alert-box alert-success">
+              <div class="alert-title">💳 Online Payment</div>
+              <div class="alert-text">${data.booking.collectionInstructions}</div>
+            </div>
+            <div class="info-card">
+              <div class="info-card-header"><span class="info-card-icon">📋</span>Booking Details</div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Guest Name</span><span class="info-value">${data.booking.guestName}</span></div>
+              <div class="info-row"><span class="info-label">Guest Email</span><span class="info-value">${data.booking.guestEmail}</span></div>
+              <div class="info-row"><span class="info-label">Guest Phone</span><span class="info-value">${data.booking.guestPhone}</span></div>
+              <div class="info-row"><span class="info-label">Check-In</span><span class="info-value">${checkInDate}</span></div>
+              <div class="info-row"><span class="info-label">Check-Out</span><span class="info-value">${checkOutDate}</span></div>
+              <div class="info-row"><span class="info-label">Total Amount</span><span class="info-value"><strong>${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}</strong></span></div>
+              <div class="info-row"><span class="info-label">Payment Method</span><span class="info-value">${data.booking.paymentMethod}</span></div>
+              <div class="info-row"><span class="info-label">Reference</span><span class="info-value">${data.booking.transactionReference}</span></div>
+            </div>
+            <div class="message">
+              You'll be notified once the payment is confirmed. Prepare to welcome your guest!
+            </div>
+            <div class="button-center">
+              <a href="${data.company.website}/host/bookings" class="button">Manage Booking</a>
+            </div>
+          </div>
+          <div class="footer">
+            <div class="footer-text">Need help? Contact support at ${data.company.supportEmail}<br>© ${new Date().getFullYear()} ${data.company.name}</div>
+          </div>
+        </div></div>
+      </body></html>
+    `;
+  }
+
+  private getOnlinePaymentAgentTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      <!DOCTYPE html><html><head>${this.getBaseTemplate()}</head><body>
+        <div class="email-wrapper"><div class="email-container">
+          <div class="header">
+            <div class="logo">${data.company.name}</div><div class="header-subtitle">New Booking Notification</div>
+          </div>
+          <div class="content">
+            <div class="greeting">New booking alert!</div>
+            <div class="message">
+              Hi ${data.user.firstName}, a new booking has been made for a property you manage. The guest is paying online via ${data.booking.paymentMethod}.
+            </div>
+            <div class="info-card">
+              <div class="info-card-header"><span class="info-card-icon">🏠</span>Booking Information</div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Property</span><span class="info-value">${data.booking.propertyName}</span></div>
+              <div class="info-row"><span class="info-label">Host</span><span class="info-value">${data.booking.hostName}</span></div>
+              <div class="info-row"><span class="info-label">Guest</span><span class="info-value">${data.booking.guestName}</span></div>
+              <div class="info-row"><span class="info-label">Check-In</span><span class="info-value">${checkInDate}</span></div>
+              <div class="info-row"><span class="info-label">Check-Out</span><span class="info-value">${checkOutDate}</span></div>
+              <div class="info-row"><span class="info-label">Total Amount</span><span class="info-value"><strong>${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}</strong></span></div>
+              <div class="info-row"><span class="info-label">Payment</span><span class="info-value">${data.booking.paymentMethod}</span></div>
+            </div>
+            <div class="alert-box alert-success">
+              <div class="alert-title">💳 Payment Details</div>
+              <div class="alert-text">Payment is being processed online. You'll be notified when it's complete.</div>
+            </div>
+            <div class="message">
+              You can monitor this booking and your commission in the agent dashboard.
+            </div>
+            <div class="button-center">
+              <a href="${data.company.website}/agent/bookings" class="button">View Dashboard</a>
+            </div>
+          </div>
+          <div class="footer">
+            <div class="footer-text">Questions? Contact us at ${data.company.supportEmail}<br>© ${new Date().getFullYear()} ${data.company.name}</div>
+          </div>
+        </div></div>
+      </body></html>
+    `;
+  }
+
   // --- TEXT TEMPLATES FOR FALLBACK ---
 
   private getPropertySubmissionTextTemplate(context: PropertyMailingContext): string {
@@ -377,6 +765,190 @@ export class BrevoPropertyMailingService {
       Respond to this review here: https://app.jambolush.com
 
       The ${context.company.name} Team
+    `.trim();
+  }
+
+  private getPropertyPaymentGuestTextTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      Booking Confirmed - Pay at Property
+
+      Hi ${data.user.firstName},
+
+      Your booking at ${data.booking.propertyName} has been confirmed!
+
+      Booking Details:
+      - Booking ID: ${data.booking.id}
+      - Check-In: ${checkInDate}
+      - Check-Out: ${checkOutDate}
+      - Total Amount: ${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}
+      - Payment Method: ${data.booking.paymentMethod}
+
+      Payment Instructions:
+      ${data.booking.paymentInstructions}
+
+      The host has been notified and is expecting your payment at check-in.
+
+      Questions? Contact us at ${data.company.supportEmail}
+
+      The ${data.company.name} Team
+    `.trim();
+  }
+
+  private getPropertyPaymentHostTextTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      New Booking - Collect Payment at Check-In
+
+      Hi ${data.user.firstName},
+
+      You have a new booking at ${data.booking.propertyName}!
+
+      Booking Details:
+      - Booking ID: ${data.booking.id}
+      - Guest: ${data.booking.guestName}
+      - Guest Email: ${data.booking.guestEmail}
+      - Guest Phone: ${data.booking.guestPhone}
+      - Check-In: ${checkInDate}
+      - Check-Out: ${checkOutDate}
+      - Amount to Collect: ${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}
+      - Reference: ${data.booking.transactionReference}
+
+      Collection Instructions:
+      ${data.booking.collectionInstructions}
+
+      IMPORTANT: After collecting the payment, please mark it as collected in your host dashboard.
+
+      Manage booking: ${data.company.website}/host/bookings
+
+      The ${data.company.name} Team
+    `.trim();
+  }
+
+  private getPropertyPaymentAgentTextTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      New Booking Alert
+
+      Hi ${data.user.firstName},
+
+      A new booking has been made for a property you manage!
+
+      Booking Details:
+      - Booking ID: ${data.booking.id}
+      - Property: ${data.booking.propertyName}
+      - Host: ${data.booking.hostName}
+      - Guest: ${data.booking.guestName}
+      - Check-In: ${checkInDate}
+      - Check-Out: ${checkOutDate}
+      - Total Amount: ${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}
+      - Payment: ${data.booking.paymentMethod}
+
+      The guest will pay cash at check-in, and the host will collect and confirm payment.
+
+      View dashboard: ${data.company.website}/agent/bookings
+
+      The ${data.company.name} Team
+    `.trim();
+  }
+
+  // === ONLINE PAYMENT TEXT TEMPLATES ===
+
+  private getOnlinePaymentGuestTextTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      Booking Confirmed - Payment Processing
+
+      Hi ${data.user.firstName},
+
+      Your booking at ${data.booking.propertyName} has been confirmed!
+
+      Booking Details:
+      - Booking ID: ${data.booking.id}
+      - Check-In: ${checkInDate}
+      - Check-Out: ${checkOutDate}
+      - Total Amount: ${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}
+      - Payment Method: ${data.booking.paymentMethod}
+      - Reference: ${data.booking.transactionReference}
+
+      Payment Status:
+      ${data.booking.paymentInstructions}
+
+      The host has been notified of your booking. We'll send you a confirmation once your payment is complete.
+
+      Questions? Contact us at ${data.company.supportEmail}
+
+      The ${data.company.name} Team
+    `.trim();
+  }
+
+  private getOnlinePaymentHostTextTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      New Booking - Online Payment Processing
+
+      Hi ${data.user.firstName},
+
+      You have a new booking at ${data.booking.propertyName}!
+
+      Booking Details:
+      - Booking ID: ${data.booking.id}
+      - Guest: ${data.booking.guestName}
+      - Guest Email: ${data.booking.guestEmail}
+      - Guest Phone: ${data.booking.guestPhone}
+      - Check-In: ${checkInDate}
+      - Check-Out: ${checkOutDate}
+      - Total Amount: ${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}
+      - Payment Method: ${data.booking.paymentMethod}
+      - Reference: ${data.booking.transactionReference}
+
+      Payment Status:
+      ${data.booking.collectionInstructions}
+
+      You'll be notified once the payment is confirmed. Prepare to welcome your guest!
+
+      Manage booking: ${data.company.website}/host/bookings
+
+      The ${data.company.name} Team
+    `.trim();
+  }
+
+  private getOnlinePaymentAgentTextTemplate(data: any): string {
+    const checkInDate = new Date(data.booking.checkIn).toLocaleDateString();
+    const checkOutDate = new Date(data.booking.checkOut).toLocaleDateString();
+
+    return `
+      New Booking Alert
+
+      Hi ${data.user.firstName},
+
+      A new booking has been made for a property you manage!
+
+      Booking Details:
+      - Booking ID: ${data.booking.id}
+      - Property: ${data.booking.propertyName}
+      - Host: ${data.booking.hostName}
+      - Guest: ${data.booking.guestName}
+      - Check-In: ${checkInDate}
+      - Check-Out: ${checkOutDate}
+      - Total Amount: ${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}
+      - Payment: ${data.booking.paymentMethod}
+
+      Payment is being processed online. You'll be notified when it's complete.
+
+      View dashboard: ${data.company.website}/agent/bookings
+
+      The ${data.company.name} Team
     `.trim();
   }
 }
