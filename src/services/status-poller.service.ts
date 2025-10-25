@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { PawaPayService } from './pawapay.service';
 import { XentriPayService } from './xentripay.service';
 import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
+import withdrawalNotificationService from './withdrawal-notification.service';
 
 const prisma = new PrismaClient();
 const paymentEmailService = new BrevoPaymentStatusMailingService();
@@ -79,7 +80,8 @@ export class StatusPollerService {
       // Run all checks in parallel
       await Promise.allSettled([
         this.pollCompletedAndFailedPawaPayTransactions(minDate, maxDate),
-        this.pollCompletedAndFailedXentriPayTransactions(minDate, maxDate)
+        this.pollCompletedAndFailedXentriPayTransactions(minDate, maxDate),
+        this.pollWithdrawalRequests()
       ]);
 
       console.log('[STATUS_POLLER] ✅ Comprehensive polling cycle complete');
@@ -637,6 +639,7 @@ export class StatusPollerService {
 
   /**
    * Process XentriPay payout (withdrawal/refund) status
+   * This handles withdrawals from PaymentTransaction table
    */
   private async processXentriPayPayout(transaction: any): Promise<void> {
     try {
@@ -679,6 +682,721 @@ export class StatusPollerService {
       throw error;
     }
   }
+
+  /**
+   * Poll APPROVED and FAILED withdrawal requests directly from withdrawal_requests table
+   * Handles:
+   * - APPROVED withdrawals (check status from XentriPay)
+   * - FAILED withdrawals (ensure wallet refund processed)
+   * - 24-hour expiry for APPROVED withdrawals
+   * - Wallet updates and notifications for status changes
+   *
+   * Note: PENDING withdrawals are left alone - they await admin approval
+   */
+  async pollWithdrawalRequests(): Promise<void> {
+    try {
+      console.log('[STATUS_POLLER] Checking APPROVED and FAILED withdrawal requests...');
+
+      const now = new Date();
+      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000); // Changed from 2 hours to 30 minutes
+      const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+
+      // Get APPROVED and FAILED withdrawal requests
+      const activeWithdrawals = await prisma.withdrawalRequest.findMany({
+        where: {
+          status: {
+            in: ['APPROVED', 'FAILED']
+          },
+          createdAt: {
+            gte: tenDaysAgo // Last 10 days
+          }
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true
+            }
+          }
+        },
+        orderBy: {
+          createdAt: 'asc'
+        },
+        take: 100
+      });
+
+      console.log(`[STATUS_POLLER] Found ${activeWithdrawals.length} withdrawal requests to process (APPROVED + FAILED)`);
+
+      let approvedCount = 0;
+      let failedCount = 0;
+      let expiredCount = 0;
+      let processedCount = 0;
+      let skippedCount = 0;
+      let refundedCount = 0;
+
+      for (const withdrawal of activeWithdrawals) {
+        try {
+          if (withdrawal.status === 'APPROVED') {
+            approvedCount++;
+
+            // Check if approved more than 24 hours ago (expired)
+            if (withdrawal.approvedAt && withdrawal.approvedAt < twentyFourHoursAgo) {
+              expiredCount++;
+              await this.handleExpiredWithdrawal(withdrawal);
+            }
+            // Check if approved more than 30 minutes ago (check status from provider)
+            else if (withdrawal.approvedAt && withdrawal.approvedAt < thirtyMinutesAgo) {
+              await this.checkWithdrawalStatusFromProvider(withdrawal);
+              processedCount++;
+            } else {
+              skippedCount++;
+              console.log(`[STATUS_POLLER] Withdrawal ${withdrawal.reference} recently approved (< 30 minutes) - skipping`);
+            }
+
+          } else if (withdrawal.status === 'FAILED') {
+            failedCount++;
+
+            // Check if this FAILED withdrawal has been refunded
+            const wallet = await prisma.wallet.findUnique({
+              where: { userId: withdrawal.userId }
+            });
+
+            if (!wallet) {
+              console.warn(`[STATUS_POLLER] No wallet found for user ${withdrawal.userId} - skipping refund check`);
+              continue;
+            }
+
+            // Check if refund has been processed by looking for wallet transaction
+            const refundTransaction = await prisma.walletTransaction.findFirst({
+              where: {
+                walletId: wallet.id,
+                reference: `REFUND-${withdrawal.reference}`,
+                type: 'credit'
+              }
+            });
+
+            if (!refundTransaction) {
+              // Refund not yet processed - process it now
+              console.log(`[STATUS_POLLER] Processing refund for FAILED withdrawal ${withdrawal.reference}`);
+
+              await this.refundWalletForFailedWithdrawal(
+                withdrawal.userId,
+                withdrawal.amount,
+                withdrawal.currency,
+                withdrawal.reference,
+                withdrawal.failureReason || 'Withdrawal failed'
+              );
+
+              // Send failure notification if not already sent
+              await withdrawalNotificationService.notifyWithdrawalFailed({
+                withdrawalId: withdrawal.id,
+                userId: withdrawal.userId,
+                userEmail: withdrawal.user.email,
+                userFirstName: withdrawal.user.firstName,
+                userLastName: withdrawal.user.lastName,
+                userPhone: withdrawal.user.phone,
+                amount: withdrawal.amount,
+                currency: withdrawal.currency,
+                method: withdrawal.method,
+                status: 'FAILED',
+                reference: withdrawal.reference,
+                failureReason: withdrawal.failureReason || 'Withdrawal processing failed'
+              });
+
+              refundedCount++;
+            } else {
+              console.log(`[STATUS_POLLER] Withdrawal ${withdrawal.reference} already refunded - skipping`);
+            }
+          }
+
+          await this.delay(500); // Rate limiting
+        } catch (error: any) {
+          console.error(`[STATUS_POLLER] Error processing withdrawal ${withdrawal.reference}:`, error);
+        }
+      }
+
+      console.log('[STATUS_POLLER] ✅ Withdrawal polling complete:', {
+        total: activeWithdrawals.length,
+        approved: approvedCount,
+        failed: failedCount,
+        expired: expiredCount,
+        processed: processedCount,
+        refunded: refundedCount,
+        skipped: skippedCount
+      });
+
+    } catch (error: any) {
+      console.error('[STATUS_POLLER] ❌ Withdrawal polling error:', error);
+    }
+  }
+
+  /**
+   * Handle expired withdrawal (APPROVED > 24 hours)
+   */
+  private async handleExpiredWithdrawal(withdrawal: any): Promise<void> {
+    try {
+      console.log(`[STATUS_POLLER] Marking withdrawal ${withdrawal.id} as expired`);
+
+      // Update withdrawal request as failed
+      await prisma.withdrawalRequest.update({
+        where: { id: withdrawal.id },
+        data: {
+          status: 'FAILED',
+          failureReason: 'Withdrawal expired after 24 hours',
+          updatedAt: new Date()
+        }
+      });
+
+      // Find associated payment transaction and mark as failed
+      const paymentTransaction = await prisma.paymentTransaction.findFirst({
+        where: {
+          metadata: {
+            path: ['withdrawalRequestId'],
+            equals: withdrawal.id
+          }
+        }
+      });
+
+      if (paymentTransaction && paymentTransaction.status === 'PROCESSING') {
+        await prisma.paymentTransaction.update({
+          where: { id: paymentTransaction.id },
+          data: {
+            status: 'FAILED',
+            failureReason: 'Withdrawal expired after 24 hours'
+          }
+        });
+      }
+
+      // Refund wallet for expired withdrawal
+      await this.refundWalletForFailedWithdrawal(
+        withdrawal.userId,
+        withdrawal.amount,
+        withdrawal.currency,
+        withdrawal.reference,
+        'Withdrawal expired after 24 hours'
+      );
+
+      // Send expiry notification using withdrawal notification service
+      await withdrawalNotificationService.notifyWithdrawalExpired({
+        withdrawalId: withdrawal.id,
+        userId: withdrawal.userId,
+        userEmail: withdrawal.user.email,
+        userFirstName: withdrawal.user.firstName,
+        userLastName: withdrawal.user.lastName,
+        userPhone: withdrawal.user.phone,
+        amount: withdrawal.amount,
+        currency: withdrawal.currency,
+        method: withdrawal.method,
+        status: 'EXPIRED',
+        reference: withdrawal.reference,
+        failureReason: 'Withdrawal expired after 24 hours without processing'
+      });
+
+      console.log(`[STATUS_POLLER] ✅ Withdrawal ${withdrawal.id} marked as expired and refunded`);
+
+    } catch (error: any) {
+      console.error(`[STATUS_POLLER] Error handling expired withdrawal:`, error);
+    }
+  }
+
+  /**
+   * Check withdrawal status from XentriPay provider
+   * Works directly with withdrawal_requests table
+   */
+  private async checkWithdrawalStatusFromProvider(withdrawal: any): Promise<void> {
+    try {
+      console.log(`[STATUS_POLLER] Checking withdrawal ${withdrawal.reference} status from provider`);
+
+      // Check status from XentriPay using withdrawal reference
+      const providerStatus = await this.xentriPayService.getPayoutStatus(withdrawal.reference);
+      console.log(`[STATUS_POLLER] XentriPay status for ${withdrawal.reference}:`, providerStatus.data?.status);
+
+      const newStatus = this.mapXentriPayStatus(providerStatus.data?.status);
+
+      if (newStatus !== withdrawal.status) {
+        console.log(`[STATUS_POLLER] Status changed: ${withdrawal.status} → ${newStatus}`);
+
+        // Update withdrawal request
+        await prisma.withdrawalRequest.update({
+          where: { id: withdrawal.id },
+          data: {
+            status: newStatus,
+            completedAt: newStatus === 'COMPLETED' ? new Date() : null,
+            failureReason: newStatus === 'FAILED' ? (providerStatus.message || 'Provider reported failure') : undefined,
+            updatedAt: new Date()
+          }
+        });
+
+        // Process wallet changes and notifications based on new status
+        if (newStatus === 'COMPLETED') {
+          // Finalize successful withdrawal - reduce pending balance
+          await this.finalizeSuccessfulWithdrawal(
+            withdrawal.userId,
+            withdrawal.amount,
+            withdrawal.currency,
+            withdrawal.reference
+          );
+
+          // Send completion notification
+          await withdrawalNotificationService.notifyWithdrawalCompleted({
+            withdrawalId: withdrawal.id,
+            userId: withdrawal.userId,
+            userEmail: withdrawal.user.email,
+            userFirstName: withdrawal.user.firstName,
+            userLastName: withdrawal.user.lastName,
+            userPhone: withdrawal.user.phone,
+            amount: withdrawal.amount,
+            currency: withdrawal.currency,
+            method: withdrawal.method,
+            status: 'COMPLETED',
+            reference: withdrawal.reference
+          });
+
+        } else if (newStatus === 'FAILED') {
+          // Refund wallet for failed withdrawal
+          await this.refundWalletForFailedWithdrawal(
+            withdrawal.userId,
+            withdrawal.amount,
+            withdrawal.currency,
+            withdrawal.reference,
+            providerStatus.message || 'Provider reported failure'
+          );
+
+          // Send failure notification
+          await withdrawalNotificationService.notifyWithdrawalFailed({
+            withdrawalId: withdrawal.id,
+            userId: withdrawal.userId,
+            userEmail: withdrawal.user.email,
+            userFirstName: withdrawal.user.firstName,
+            userLastName: withdrawal.user.lastName,
+            userPhone: withdrawal.user.phone,
+            amount: withdrawal.amount,
+            currency: withdrawal.currency,
+            method: withdrawal.method,
+            status: 'FAILED',
+            reference: withdrawal.reference,
+            failureReason: providerStatus.message || 'Provider reported failure'
+          });
+        }
+
+        console.log(`[STATUS_POLLER] ✅ Updated withdrawal ${withdrawal.reference}: ${withdrawal.status} → ${newStatus}`);
+      } else {
+        console.log(`[STATUS_POLLER] No status change for ${withdrawal.reference} - still ${withdrawal.status}`);
+      }
+
+    } catch (error: any) {
+      // Handle case where XentriPay doesn't have the payment record
+      if (error.message?.includes('not found') || error.response?.status === 404) {
+        console.warn(`[STATUS_POLLER] ⚠️ Withdrawal ${withdrawal.reference} not found at XentriPay - payout may not have been sent`);
+
+        // Check if approved more than 1 hour ago - if so, mark as failed
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+        if (withdrawal.approvedAt && withdrawal.approvedAt < oneHourAgo) {
+          console.log(`[STATUS_POLLER] Marking withdrawal ${withdrawal.reference} as FAILED - not found at provider after 1 hour`);
+
+          // Update withdrawal as failed
+          await prisma.withdrawalRequest.update({
+            where: { id: withdrawal.id },
+            data: {
+              status: 'FAILED',
+              failureReason: 'Payment not found at provider - payout may not have been sent',
+              updatedAt: new Date()
+            }
+          });
+
+          // Refund wallet
+          await this.refundWalletForFailedWithdrawal(
+            withdrawal.userId,
+            withdrawal.amount,
+            withdrawal.currency,
+            withdrawal.reference,
+            'Payment not found at provider - payout may not have been sent'
+          );
+
+          // Send failure notification
+          await withdrawalNotificationService.notifyWithdrawalFailed({
+            withdrawalId: withdrawal.id,
+            userId: withdrawal.userId,
+            userEmail: withdrawal.user.email,
+            userFirstName: withdrawal.user.firstName,
+            userLastName: withdrawal.user.lastName,
+            userPhone: withdrawal.user.phone,
+            amount: withdrawal.amount,
+            currency: withdrawal.currency,
+            method: withdrawal.method,
+            status: 'FAILED',
+            reference: withdrawal.reference,
+            failureReason: 'Payment not found at provider - payout may not have been sent'
+          });
+        } else {
+          console.log(`[STATUS_POLLER] Withdrawal ${withdrawal.reference} recently approved - will retry later`);
+        }
+      } else {
+        console.error(`[STATUS_POLLER] ❌ Error checking withdrawal status from provider:`, error);
+      }
+    }
+  }
+
+  /**
+   * DEPRECATED: Check withdrawal payment status from XentriPay
+   * Use checkWithdrawalStatusFromProvider instead
+   */
+  private async checkWithdrawalPaymentStatus(payment: any): Promise<void> {
+    try {
+      console.log(`[STATUS_POLLER] Checking withdrawal payment status: ${payment.reference}`);
+
+      const metadata = payment.metadata as any;
+      const withdrawalReference = metadata?.withdrawalReference;
+
+      if (!withdrawalReference) {
+        console.warn(`[STATUS_POLLER] No withdrawal reference found for payment ${payment.id}`);
+        return;
+      }
+
+      // Check status from XentriPay
+      const providerStatus = await this.xentriPayService.getPayoutStatus(withdrawalReference);
+      console.log(`[STATUS_POLLER] XentriPay status for ${withdrawalReference}:`, providerStatus.data?.status);
+
+      const newStatus = this.mapXentriPayStatus(providerStatus.data?.status);
+
+      if (newStatus !== payment.status) {
+        // Update payment transaction
+        await prisma.paymentTransaction.update({
+          where: { id: payment.id },
+          data: {
+            status: newStatus,
+            completedAt: newStatus === 'COMPLETED' ? new Date() : null,
+            failureReason: newStatus === 'FAILED' ? providerStatus.message : undefined,
+            metadata: {
+              ...metadata,
+              lastProviderCheck: {
+                checkedAt: new Date().toISOString(),
+                response: providerStatus
+              }
+            }
+          }
+        });
+
+        // Update associated withdrawal request
+        const withdrawalRequestId = metadata?.withdrawalRequestId;
+        if (withdrawalRequestId) {
+          await prisma.withdrawalRequest.update({
+            where: { id: withdrawalRequestId },
+            data: {
+              status: newStatus === 'COMPLETED' ? 'COMPLETED' : newStatus === 'FAILED' ? 'FAILED' : 'APPROVED',
+              completedAt: newStatus === 'COMPLETED' ? new Date() : null,
+              failureReason: newStatus === 'FAILED' ? providerStatus.message : undefined,
+              updatedAt: new Date()
+            }
+          });
+        }
+
+        console.log(`[STATUS_POLLER] ✅ Updated withdrawal payment ${payment.reference}: ${payment.status} → ${newStatus}`);
+      }
+
+    } catch (error: any) {
+      console.error(`[STATUS_POLLER] Error checking withdrawal payment status:`, error);
+    }
+  }
+
+  /**
+   * DEPRECATED: Process withdrawal payment completion (refund wallet if failed)
+   * Now handled by checkWithdrawalStatusFromProvider which works directly with withdrawal_requests
+   */
+  private async processWithdrawalPaymentCompletion(payment: any): Promise<void> {
+    try {
+      console.log(`[STATUS_POLLER] Processing withdrawal payment completion: ${payment.reference} (${payment.status})`);
+
+      const metadata = payment.metadata as any;
+      const withdrawalRequestId = metadata?.withdrawalRequestId;
+
+      // Get withdrawal request and user
+      const withdrawal = withdrawalRequestId ? await prisma.withdrawalRequest.findUnique({
+        where: { id: withdrawalRequestId },
+        include: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true
+            }
+          }
+        }
+      }) : null;
+
+      if (!withdrawal) {
+        console.warn(`[STATUS_POLLER] No withdrawal request found for payment ${payment.id}`);
+        // Mark as processed even if not found
+        await prisma.paymentTransaction.update({
+          where: { id: payment.id },
+          data: {
+            metadata: {
+              ...metadata,
+              walletProcessed: true,
+              processedAt: new Date().toISOString()
+            }
+          }
+        });
+        return;
+      }
+
+      if (payment.status === 'FAILED') {
+        // Refund wallet for failed withdrawal
+        console.log(`[STATUS_POLLER] Refunding wallet for failed withdrawal: ${payment.amount} ${payment.currency}`);
+
+        await this.refundWalletForFailedWithdrawal(
+          withdrawal.userId,
+          payment.amount,
+          payment.currency,
+          payment.reference,
+          payment.failureReason || 'Withdrawal failed'
+        );
+
+        // Update withdrawal request status to FAILED
+        await prisma.withdrawalRequest.update({
+          where: { id: withdrawal.id },
+          data: {
+            status: 'FAILED',
+            failureReason: payment.failureReason || 'Withdrawal processing failed',
+            updatedAt: new Date()
+          }
+        });
+
+        // Send failure notification using withdrawal notification service
+        await withdrawalNotificationService.notifyWithdrawalFailed({
+          withdrawalId: withdrawal.id,
+          userId: withdrawal.userId,
+          userEmail: withdrawal.user.email,
+          userFirstName: withdrawal.user.firstName,
+          userLastName: withdrawal.user.lastName,
+          userPhone: withdrawal.user.phone,
+          amount: payment.amount,
+          currency: payment.currency,
+          method: withdrawal.method,
+          status: 'FAILED',
+          reference: withdrawal.reference,
+          failureReason: payment.failureReason || 'Withdrawal processing failed'
+        });
+
+      } else if (payment.status === 'COMPLETED') {
+        // Reduce pending balance for successful withdrawal
+        console.log(`[STATUS_POLLER] Finalizing successful withdrawal: ${payment.amount} ${payment.currency}`);
+
+        await this.finalizeSuccessfulWithdrawal(
+          withdrawal.userId,
+          payment.amount,
+          payment.currency,
+          payment.reference
+        );
+
+        // Update withdrawal request status to COMPLETED
+        await prisma.withdrawalRequest.update({
+          where: { id: withdrawal.id },
+          data: {
+            status: 'COMPLETED',
+            completedAt: new Date(),
+            updatedAt: new Date()
+          }
+        });
+
+        // Send success notification using withdrawal notification service
+        await withdrawalNotificationService.notifyWithdrawalCompleted({
+          withdrawalId: withdrawal.id,
+          userId: withdrawal.userId,
+          userEmail: withdrawal.user.email,
+          userFirstName: withdrawal.user.firstName,
+          userLastName: withdrawal.user.lastName,
+          userPhone: withdrawal.user.phone,
+          amount: payment.amount,
+          currency: payment.currency,
+          method: withdrawal.method,
+          status: 'COMPLETED',
+          reference: withdrawal.reference
+        });
+      }
+
+      // Mark as processed
+      await prisma.paymentTransaction.update({
+        where: { id: payment.id },
+        data: {
+          metadata: {
+            ...metadata,
+            walletProcessed: true,
+            processedAt: new Date().toISOString()
+          }
+        }
+      });
+
+      console.log(`[STATUS_POLLER] ✅ Withdrawal payment completion processed`);
+
+    } catch (error: any) {
+      console.error(`[STATUS_POLLER] Error processing withdrawal completion:`, error);
+    }
+  }
+
+  /**
+   * Finalize successful withdrawal
+   * Reduces pendingBalance since money has been sent out
+   */
+  private async finalizeSuccessfulWithdrawal(
+    userId: number,
+    amount: number,
+    currency: string,
+    reference: string
+  ): Promise<void> {
+    try {
+      console.log(`[STATUS_POLLER] Finalizing successful withdrawal: ${amount} ${currency} for user ${userId}`);
+
+      // Get wallet
+      const wallet = await prisma.wallet.findUnique({
+        where: { userId }
+      });
+
+      if (!wallet) {
+        console.warn(`[STATUS_POLLER] Wallet not found for user ${userId} during withdrawal finalization`);
+        return;
+      }
+
+      // Calculate new pending balance (reduce by withdrawal amount)
+      const newPendingBalance = Math.max(0, wallet.pendingBalance - amount);
+
+      console.log(`[STATUS_POLLER] Finalizing withdrawal for user ${userId}:`, {
+        balance: wallet.balance,
+        oldPending: wallet.pendingBalance,
+        newPending: newPendingBalance,
+        withdrawalAmount: amount
+      });
+
+      // Update wallet - reduce pending balance
+      await prisma.wallet.update({
+        where: { userId },
+        data: {
+          pendingBalance: newPendingBalance
+        }
+      });
+
+      // Create wallet transaction record for completed withdrawal
+      await prisma.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'debit',
+          amount: amount,
+          balanceBefore: wallet.balance,
+          balanceAfter: wallet.balance, // Balance doesn't change (was already deducted)
+          reference: `WITHDRAWAL-COMPLETE-${reference}`,
+          description: `Withdrawal completed - funds sent successfully (pending balance reduced)`,
+          transactionId: reference
+        }
+      });
+
+      console.log(`[STATUS_POLLER] ✅ Withdrawal finalized: pending reduced by ${amount} ${currency}`);
+
+    } catch (error: any) {
+      console.error(`[STATUS_POLLER] Error finalizing successful withdrawal:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Refund wallet for failed withdrawal
+   * Moves money from pendingBalance back to balance
+   */
+  private async refundWalletForFailedWithdrawal(
+    userId: number,
+    amount: number,
+    currency: string,
+    reference: string,
+    failureReason: string
+  ): Promise<void> {
+    try {
+      console.log(`[STATUS_POLLER] Refunding ${amount} ${currency} to user ${userId}'s wallet`);
+
+      // Get or create wallet
+      let wallet = await prisma.wallet.findUnique({
+        where: { userId }
+      });
+
+      if (!wallet) {
+        console.warn(`[STATUS_POLLER] Wallet not found for user ${userId}, creating new wallet`);
+        wallet = await prisma.wallet.create({
+          data: {
+            userId,
+            balance: amount, // Set initial balance to refund amount
+            pendingBalance: 0,
+            currency: currency,
+            isActive: true
+          }
+        });
+
+        // Create initial wallet transaction
+        await prisma.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: 'credit',
+            amount: amount,
+            balanceBefore: 0,
+            balanceAfter: amount,
+            reference: `REFUND-${reference}`,
+            description: `Withdrawal refund - ${failureReason}`,
+            transactionId: reference
+          }
+        });
+
+        console.log(`[STATUS_POLLER] ✅ New wallet created and funded with refund: ${amount} ${currency}`);
+        return;
+      }
+
+      // Calculate new balances
+      // Move from pendingBalance back to balance
+      const newPendingBalance = Math.max(0, wallet.pendingBalance - amount);
+      const newBalance = wallet.balance + amount;
+
+      console.log(`[STATUS_POLLER] Wallet balances for user ${userId}:`, {
+        oldBalance: wallet.balance,
+        oldPending: wallet.pendingBalance,
+        newBalance,
+        newPending: newPendingBalance,
+        refundAmount: amount
+      });
+
+      // Update wallet - move from pending to balance
+      await prisma.wallet.update({
+        where: { userId },
+        data: {
+          balance: newBalance,
+          pendingBalance: newPendingBalance
+        }
+      });
+
+      // Create wallet transaction record for refund
+      // This shows the money moving from pending back to available balance
+      await prisma.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'credit',
+          amount: amount,
+          balanceBefore: wallet.balance,
+          balanceAfter: newBalance,
+          reference: `REFUND-${reference}`,
+          description: `Withdrawal refund - ${failureReason} (moved from pending to balance)`,
+          transactionId: reference
+        }
+      });
+
+      console.log(`[STATUS_POLLER] ✅ Wallet refunded: +${amount} to balance, -${amount} from pending (Reason: ${failureReason})`);
+
+    } catch (error: any) {
+      console.error(`[STATUS_POLLER] Error refunding wallet:`, error);
+      throw error;
+    }
+  }
+
 
   /**
    * Handle successful payment - confirm booking and send notifications

@@ -949,6 +949,133 @@ Need help? Contact us at ${this.companyInfo.supportEmail}
 
   // === UTILITY METHODS ===
 
+  // === WITHDRAWAL OTP ===
+  async sendWithdrawalOTPEmail(data: {
+    userEmail: string;
+    userName: string;
+    otp: string;
+    amount: number;
+    currency: string;
+    expiresIn: number; // in seconds
+  }): Promise<void> {
+    try {
+      const template = this.generateWithdrawalOTPTemplate(data);
+
+      await this.sendEmail({
+        to: data.userEmail,
+        subject: template.subject,
+        html: template.html,
+        text: template.text
+      });
+
+      console.log(`Withdrawal OTP email sent to ${data.userEmail}`);
+    } catch (error: any) {
+      console.error('Failed to send withdrawal OTP email:', error);
+      throw error;
+    }
+  }
+
+  private generateWithdrawalOTPTemplate(data: {
+    userName: string;
+    otp: string;
+    amount: number;
+    currency: string;
+    expiresIn: number;
+  }): EmailTemplate {
+    const expiresInMinutes = Math.floor(data.expiresIn / 60);
+
+    const subject = `Withdrawal OTP - ${data.amount.toLocaleString()} ${data.currency}`;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .content { background: white; padding: 30px; border: 1px solid #ddd; border-top: none; }
+          .otp-box { background: #f8f9fa; border: 2px dashed #667eea; padding: 25px; text-align: center; margin: 25px 0; border-radius: 8px; }
+          .otp-code { font-size: 36px; font-weight: bold; color: #667eea; letter-spacing: 8px; font-family: 'Courier New', monospace; }
+          .amount-box { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 15px; margin: 20px 0; }
+          .warning-box { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+          .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; font-size: 12px; color: #666; }
+          .security-tips { background: #f1f3f4; padding: 15px; border-radius: 5px; margin-top: 20px; }
+          .security-tips ul { margin: 10px 0; padding-left: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1 style="margin: 0; font-size: 28px;">Withdrawal Verification</h1>
+        </div>
+        <div class="content">
+          <p>Hello ${data.userName},</p>
+
+          <p>You have requested to withdraw funds from your ${this.companyInfo.name} wallet. Please use the One-Time Password (OTP) below to complete your withdrawal:</p>
+
+          <div class="otp-box">
+            <div style="font-size: 14px; color: #666; margin-bottom: 10px;">Your OTP Code:</div>
+            <div class="otp-code">${data.otp}</div>
+            <div style="font-size: 12px; color: #999; margin-top: 10px;">Valid for ${expiresInMinutes} minutes</div>
+          </div>
+
+          <div class="amount-box">
+            <strong>Withdrawal Amount:</strong> ${data.amount.toLocaleString()} ${data.currency}
+          </div>
+
+          <div class="warning-box">
+            <strong>⚠️ Security Alert:</strong><br>
+            If you did not request this withdrawal, please ignore this email and secure your account immediately.
+          </div>
+
+          <div class="security-tips">
+            <strong>Security Tips:</strong>
+            <ul>
+              <li>Never share your OTP with anyone, including ${this.companyInfo.name} staff</li>
+              <li>This OTP will expire in ${expiresInMinutes} minutes</li>
+              <li>Only enter this code on the official ${this.companyInfo.name} website/app</li>
+              <li>Beware of phishing attempts</li>
+            </ul>
+          </div>
+
+          <p style="margin-top: 30px;">If you need assistance, please contact our support team at <a href="mailto:${this.companyInfo.supportEmail}">${this.companyInfo.supportEmail}</a></p>
+        </div>
+        <div class="footer">
+          <p>This is an automated security message from ${this.companyInfo.name}</p>
+          <p>&copy; ${new Date().getFullYear()} ${this.companyInfo.name}. All rights reserved.</p>
+          <p><a href="${this.companyInfo.website}" style="color: #667eea; text-decoration: none;">${this.companyInfo.website}</a></p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const text = `
+      Withdrawal Verification - ${this.companyInfo.name}
+
+      Hello ${data.userName},
+
+      You have requested to withdraw ${data.amount.toLocaleString()} ${data.currency} from your wallet.
+
+      Your OTP Code: ${data.otp}
+      Valid for: ${expiresInMinutes} minutes
+
+      SECURITY ALERT: If you did not request this withdrawal, please ignore this email and secure your account immediately.
+
+      Security Tips:
+      - Never share your OTP with anyone
+      - This OTP will expire in ${expiresInMinutes} minutes
+      - Only enter this code on the official ${this.companyInfo.name} website/app
+
+      For assistance, contact: ${this.companyInfo.supportEmail}
+
+      ${this.companyInfo.name}
+      ${this.companyInfo.website}
+    `;
+
+    return { subject, html, text };
+  }
+
   private async sendEmail(options: {
     to: string;
     subject: string;

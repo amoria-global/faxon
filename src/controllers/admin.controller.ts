@@ -2,20 +2,121 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { AdminService } from '../services/admin.service';
-import { 
-  AdminUserFilters, 
-  AdminPropertyFilters, 
-  AdminTourFilters, 
-  AdminBookingFilters, 
+import { XentriPayService } from '../services/xentripay.service';
+import {
+  AdminUserFilters,
+  AdminPropertyFilters,
+  AdminTourFilters,
+  AdminBookingFilters,
   AdminQueryParams,
   AdminBulkUpdateRequest,
   AdminBulkDeleteRequest,
   AdminExportRequest
 } from '../types/admin.types';
 
-const adminService = new AdminService();
-
 export class AdminController {
+  private adminService: AdminService;
+
+  constructor(xentriPayService?: XentriPayService) {
+    this.adminService = new AdminService(xentriPayService);
+
+    // Bind all methods to maintain 'this' context when used as Express route handlers
+    this.getDashboard = this.getDashboard.bind(this);
+    this.getSystemStatus = this.getSystemStatus.bind(this);
+    this.healthCheck = this.healthCheck.bind(this);
+    this.getUsers = this.getUsers.bind(this);
+    this.getUserDetails = this.getUserDetails.bind(this);
+    this.createUser = this.createUser.bind(this);
+    this.updateUser = this.updateUser.bind(this);
+    this.deleteUser = this.deleteUser.bind(this);
+    this.suspendUser = this.suspendUser.bind(this);
+    this.activateUser = this.activateUser.bind(this);
+    this.approveKYC = this.approveKYC.bind(this);
+    this.rejectKYC = this.rejectKYC.bind(this);
+    this.getUserSessions = this.getUserSessions.bind(this);
+    this.terminateUserSession = this.terminateUserSession.bind(this);
+    this.terminateAllUserSessions = this.terminateAllUserSessions.bind(this);
+    this.getProperties = this.getProperties.bind(this);
+    this.getPropertyDetails = this.getPropertyDetails.bind(this);
+    this.updateProperty = this.updateProperty.bind(this);
+    this.approveProperty = this.approveProperty.bind(this);
+    this.rejectProperty = this.rejectProperty.bind(this);
+    this.suspendProperty = this.suspendProperty.bind(this);
+    this.getTours = this.getTours.bind(this);
+    this.getTourDetails = this.getTourDetails.bind(this);
+    this.updateTour = this.updateTour.bind(this);
+    this.approveTour = this.approveTour.bind(this);
+    this.suspendTour = this.suspendTour.bind(this);
+    this.bulkUpdateTours = this.bulkUpdateTours.bind(this);
+    this.getBookings = this.getBookings.bind(this);
+    this.getBookingDetails = this.getBookingDetails.bind(this);
+    this.updateBooking = this.updateBooking.bind(this);
+    this.cancelBooking = this.cancelBooking.bind(this);
+    this.getReviews = this.getReviews.bind(this);
+    this.moderateReview = this.moderateReview.bind(this);
+    this.getPaymentTransactions = this.getPaymentTransactions.bind(this);
+    this.getPaymentTransaction = this.getPaymentTransaction.bind(this);
+    this.processPaymentAction = this.processPaymentAction.bind(this);
+    this.getEscrowTransactions = this.getEscrowTransactions.bind(this);
+    this.getEscrowTransaction = this.getEscrowTransaction.bind(this);
+    this.releaseEscrow = this.releaseEscrow.bind(this);
+    this.disputeEscrow = this.disputeEscrow.bind(this);
+    this.getWithdrawalRequests = this.getWithdrawalRequests.bind(this);
+    this.approveWithdrawal = this.approveWithdrawal.bind(this);
+    this.rejectWithdrawal = this.rejectWithdrawal.bind(this);
+    this.getWallets = this.getWallets.bind(this);
+    this.adjustWalletBalance = this.adjustWalletBalance.bind(this);
+    this.getSystemAnalytics = this.getSystemAnalytics.bind(this);
+    this.generateFinancialReport = this.generateFinancialReport.bind(this);
+    this.generateReport = this.generateReport.bind(this);
+    this.exportData = this.exportData.bind(this);
+    this.bulkUpdateUsers = this.bulkUpdateUsers.bind(this);
+    this.bulkDeleteUsers = this.bulkDeleteUsers.bind(this);
+    this.bulkUpdateProperties = this.bulkUpdateProperties.bind(this);
+    this.getSystemSettings = this.getSystemSettings.bind(this);
+    this.updateSystemSettings = this.updateSystemSettings.bind(this);
+    this.getActivityLogs = this.getActivityLogs.bind(this);
+    this.getAuditLogs = this.getAuditLogs.bind(this);
+    this.getContactRequests = this.getContactRequests.bind(this);
+    this.respondToContact = this.respondToContact.bind(this);
+    this.submitContactMessage = this.submitContactMessage.bind(this);
+    this.getNotifications = this.getNotifications.bind(this);
+    this.markNotificationRead = this.markNotificationRead.bind(this);
+    this.markAllNotificationsRead = this.markAllNotificationsRead.bind(this);
+    this.validateDataIntegrity = this.validateDataIntegrity.bind(this);
+    this.fixDataIntegrityIssue = this.fixDataIntegrityIssue.bind(this);
+    this.globalSearch = this.globalSearch.bind(this);
+    this.clearCache = this.clearCache.bind(this);
+    this.refreshCache = this.refreshCache.bind(this);
+    this.toggleMaintenanceMode = this.toggleMaintenanceMode.bind(this);
+    this.forceLogoutAllUsers = this.forceLogoutAllUsers.bind(this);
+    this.sendAnnouncement = this.sendAnnouncement.bind(this);
+    this.getQuickStats = this.getQuickStats.bind(this);
+    this.getUserGrowthStats = this.getUserGrowthStats.bind(this);
+    this.getRevenueStats = this.getRevenueStats.bind(this);
+    this.getIntegrationStatus = this.getIntegrationStatus.bind(this);
+    this.testIntegration = this.testIntegration.bind(this);
+    this.trackVisitor = this.trackVisitor.bind(this);
+    this.getVisitorAnalytics = this.getVisitorAnalytics.bind(this);
+    this.subscribeNewsletter = this.subscribeNewsletter.bind(this);
+    this.getNewsletterSubscriptions = this.getNewsletterSubscriptions.bind(this);
+    this.updateNewsletterStatus = this.updateNewsletterStatus.bind(this);
+    this.getPartners = this.getPartners.bind(this);
+    this.createPartner = this.createPartner.bind(this);
+    this.updatePartner = this.updatePartner.bind(this);
+    this.deletePartner = this.deletePartner.bind(this);
+    this.getProducts = this.getProducts.bind(this);
+    this.createProduct = this.createProduct.bind(this);
+    this.updateProduct = this.updateProduct.bind(this);
+    this.deleteProduct = this.deleteProduct.bind(this);
+    this.getServices = this.getServices.bind(this);
+    this.createService = this.createService.bind(this);
+    this.updateService = this.updateService.bind(this);
+    this.deleteService = this.deleteService.bind(this);
+    this.getMarketData = this.getMarketData.bind(this);
+    this.createMarketData = this.createMarketData.bind(this);
+    this.updateMarketData = this.updateMarketData.bind(this);
+  }
 
   // === DASHBOARD & OVERVIEW ===
 
@@ -23,7 +124,7 @@ export class AdminController {
     try {
       const { period = '30d' } = req.query;
       
-      const dashboard = await adminService.getDashboardOverview(period as string);
+      const dashboard = await this.adminService.getDashboardOverview(period as string);
       
       res.json({
         success: true,
@@ -123,7 +224,7 @@ export class AdminController {
         search: req.query.search as string
       };
 
-      const result = await adminService.getUsers(filters, pagination);
+      const result = await this.adminService.getUsers(filters, pagination);
       
       res.json({
         success: true,
@@ -152,7 +253,7 @@ export class AdminController {
         });
       }
 
-      const user = await adminService.getUserDetails(userId);
+      const user = await this.adminService.getUserDetails(userId);
       
       res.json({
         success: true,
@@ -178,7 +279,7 @@ export class AdminController {
     try {
       const userData = req.body;
       
-      const user = await adminService.createUser(userData);
+      const user = await this.adminService.createUser(userData);
       
       res.status(201).json({
         success: true,
@@ -217,7 +318,7 @@ export class AdminController {
         });
       }
 
-      const user = await adminService.updateUser(userId, updateData);
+      const user = await this.adminService.updateUser(userId, updateData);
       
       res.json({
         success: true,
@@ -256,7 +357,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.deleteUser(userId, permanent);
+      const result = await this.adminService.deleteUser(userId, permanent);
       
       res.json({
         success: true,
@@ -294,7 +395,7 @@ export class AdminController {
         });
       }
 
-      const user = await adminService.suspendUser(userId, reason);
+      const user = await this.adminService.suspendUser(userId, reason);
       
       res.json({
         success: true,
@@ -332,7 +433,7 @@ export class AdminController {
         });
       }
 
-      const user = await adminService.activateUser(userId);
+      const user = await this.adminService.activateUser(userId);
       
       res.json({
         success: true,
@@ -371,7 +472,7 @@ export class AdminController {
         });
       }
 
-      const user = await adminService.approveKYC(userId, notes);
+      const user = await this.adminService.approveKYC(userId, notes);
       
       res.json({
         success: true,
@@ -411,7 +512,7 @@ export class AdminController {
         });
       }
 
-      const user = await adminService.rejectKYC(userId, reason);
+      const user = await this.adminService.rejectKYC(userId, reason);
       
       res.json({
         success: true,
@@ -437,7 +538,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getUserSessions(userId, pagination);
+      const result = await this.adminService.getUserSessions(userId, pagination);
       
       res.json({
         success: true,
@@ -465,7 +566,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.terminateUserSession(sessionId);
+      const result = await this.adminService.terminateUserSession(sessionId);
       
       res.json({
         success: true,
@@ -492,7 +593,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.terminateAllUserSessions(userId);
+      const result = await this.adminService.terminateAllUserSessions(userId);
       
       res.json({
         success: true,
@@ -536,7 +637,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getProperties(filters, pagination);
+      const result = await this.adminService.getProperties(filters, pagination);
       
       res.json({
         success: true,
@@ -565,7 +666,7 @@ export class AdminController {
         });
       }
 
-      const property = await adminService.getPropertyDetails(propertyId);
+      const property = await this.adminService.getPropertyDetails(propertyId);
       
       res.json({
         success: true,
@@ -631,7 +732,7 @@ export class AdminController {
         });
       }
 
-      const property = await adminService.approveProperty(propertyId, notes);
+      const property = await this.adminService.approveProperty(propertyId, notes);
       
       res.json({
         success: true,
@@ -671,7 +772,7 @@ export class AdminController {
         });
       }
 
-      const property = await adminService.rejectProperty(propertyId, reason);
+      const property = await this.adminService.rejectProperty(propertyId, reason);
       
       res.json({
         success: true,
@@ -700,7 +801,7 @@ export class AdminController {
         });
       }
 
-      const property = await adminService.suspendProperty(propertyId, reason);
+      const property = await this.adminService.suspendProperty(propertyId, reason);
       
       res.json({
         success: true,
@@ -744,7 +845,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getTours(filters, pagination);
+      const result = await this.adminService.getTours(filters, pagination);
       
       res.json({
         success: true,
@@ -773,7 +874,7 @@ export class AdminController {
         });
       }
 
-      const tour = await adminService.getTourDetails(tourId);
+      const tour = await this.adminService.getTourDetails(tourId);
       
       res.json({
         success: true,
@@ -838,7 +939,7 @@ export class AdminController {
         });
       }
 
-      const tour = await adminService.approveTour(tourId, notes);
+      const tour = await this.adminService.approveTour(tourId, notes);
       
       res.json({
         success: true,
@@ -867,7 +968,7 @@ export class AdminController {
         });
       }
 
-      const tour = await adminService.suspendTour(tourId, reason);
+      const tour = await this.adminService.suspendTour(tourId, reason);
       
       res.json({
         success: true,
@@ -904,7 +1005,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getBookings(filters, pagination);
+      const result = await this.adminService.getBookings(filters, pagination);
       
       res.json({
         success: true,
@@ -945,7 +1046,7 @@ export class AdminController {
         });
       }
 
-      const booking = await adminService.getBookingDetails(bookingId, type);
+      const booking = await this.adminService.getBookingDetails(bookingId, type);
       
       res.json({
         success: true,
@@ -1012,7 +1113,7 @@ export class AdminController {
         });
       }
 
-      const booking = await adminService.cancelBooking(bookingId, type, reason, refundAmount);
+      const booking = await this.adminService.cancelBooking(bookingId, type, reason, refundAmount);
       
       res.json({
         success: true,
@@ -1049,7 +1150,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getReviews(filters, pagination);
+      const result = await this.adminService.getReviews(filters, pagination);
       
       res.json({
         success: true,
@@ -1090,7 +1191,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.moderateReview(reviewId, type, action, reason);
+      const result = await this.adminService.moderateReview(reviewId, type, action, reason);
       
       res.json({
         success: true,
@@ -1128,7 +1229,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getPaymentTransactions(filters, pagination);
+      const result = await this.adminService.getPaymentTransactions(filters, pagination);
       
       res.json({
         success: true,
@@ -1156,7 +1257,7 @@ export class AdminController {
         });
       }
 
-      const transaction = await adminService.getPaymentTransactionById(transactionId);
+      const transaction = await this.adminService.getPaymentTransactionById(transactionId);
 
       res.json({
         success: true,
@@ -1232,7 +1333,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getEscrowTransactions(filters, pagination);
+      const result = await this.adminService.getEscrowTransactions(filters, pagination);
       
       res.json({
         success: true,
@@ -1288,7 +1389,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.releaseEscrow(transactionId, reason, adminId);
+      const result = await this.adminService.releaseEscrow(transactionId, reason, adminId);
       
       res.json({
         success: true,
@@ -1317,7 +1418,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.disputeEscrow(transactionId, reason);
+      const result = await this.adminService.disputeEscrow(transactionId, reason);
       
       res.json({
         success: true,
@@ -1355,7 +1456,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getWithdrawalRequests(filters, pagination);
+      const result = await this.adminService.getWithdrawalRequests(filters, pagination);
       
       res.json({
         success: true,
@@ -1383,7 +1484,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.approveWithdrawal(withdrawalId);
+      const result = await this.adminService.approveWithdrawal(withdrawalId);
       
       res.json({
         success: true,
@@ -1423,7 +1524,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.rejectWithdrawal(withdrawalId, reason);
+      const result = await this.adminService.rejectWithdrawal(withdrawalId, reason);
       
       res.json({
         success: true,
@@ -1453,7 +1554,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getWallets(filters, pagination);
+      const result = await this.adminService.getWallets(filters, pagination);
       
       res.json({
         success: true,
@@ -1494,7 +1595,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.adjustWalletBalance(walletId, amount, reason, adminId);
+      const result = await this.adminService.adjustWalletBalance(walletId, amount, reason, adminId);
       
       res.json({
         success: true,
@@ -1518,7 +1619,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getServices(pagination);
+      const result = await this.adminService.getServices(pagination);
       
       res.json({
         success: true,
@@ -1536,7 +1637,7 @@ export class AdminController {
       const serviceData: any = req.body;
       const adminId = (req as any).user?.id;
 
-      const result = await adminService.createService(serviceData);
+      const result = await this.adminService.createService(serviceData);
       
       res.status(201).json({
         success: true,
@@ -1574,7 +1675,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getPartners(pagination);
+      const result = await this.adminService.getPartners(pagination);
       
       res.json({
         success: true,
@@ -1603,7 +1704,7 @@ export class AdminController {
         });
       }
 
-      await adminService.deleteService(serviceId);
+      await this.adminService.deleteService(serviceId);
       
       res.json({
         success: true,
@@ -1621,7 +1722,7 @@ export class AdminController {
       const partnerData: any = req.body;
       const adminId = (req as any).user?.id;
 
-      const result = await adminService.createPartner(partnerData, adminId);
+      const result = await this.adminService.createPartner(partnerData, adminId);
       
       res.status(201).json({
         success: true,
@@ -1667,7 +1768,7 @@ export class AdminController {
         });
       }
 
-      await adminService.deletePartner(partnerId, adminId);
+      await this.adminService.deletePartner(partnerId, adminId);
       
       res.json({
         success: true,
@@ -1696,7 +1797,7 @@ export class AdminController {
         search: req.query.search
       };
 
-      const result = await adminService.getProducts(filters, pagination);
+      const result = await this.adminService.getProducts(filters, pagination);
       
       res.json({
         success: true,
@@ -1715,7 +1816,7 @@ export class AdminController {
       const productData: any = req.body;
       const adminId = (req as any).user?.id;
 
-      const result = await adminService.createProduct(productData);
+      const result = await this.adminService.createProduct(productData);
       
       res.status(201).json({
         success: true,
@@ -1745,7 +1846,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.updateProduct(productId, updateData);
+      const result = await this.adminService.updateProduct(productId, updateData);
       
       res.json({
         success: true,
@@ -1774,7 +1875,7 @@ export class AdminController {
         });
       }
 
-      await adminService.deleteProduct(productId, adminId);
+      await this.adminService.deleteProduct(productId, adminId);
       
       res.json({
         success: true,
@@ -1795,7 +1896,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getContactMessages(pagination);
+      const result = await this.adminService.getContactMessages(pagination);
       
       res.json({
         success: true,
@@ -1825,7 +1926,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.respondToContact(contactId, response, adminId);
+      const result = await this.adminService.respondToContact(contactId, response, adminId);
       
       res.json({
         success: true,
@@ -1847,7 +1948,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getNewsletterSubscriptions(pagination);
+      const result = await this.adminService.getNewsletterSubscriptions(pagination);
       
       res.json({
         success: true,
@@ -1876,7 +1977,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.updateNewsletterStatus(subscriptionId, isActive);
+      const result = await this.adminService.updateNewsletterStatus(subscriptionId, isActive);
       
       res.json({
         success: true,
@@ -1903,7 +2004,7 @@ export class AdminController {
         groupBy: req.query.groupBy ? (req.query.groupBy as string).split(',') : undefined
       };
 
-      const analytics = await adminService.getSystemAnalytics(period as string, filters);
+      const analytics = await this.adminService.getSystemAnalytics(period as string, filters);
       
       res.json({
         success: true,
@@ -1952,7 +2053,7 @@ export class AdminController {
         period = '30d'; // default
       }
       
-      const analytics = await adminService.getTestAllFetch(period);
+      const analytics = await this.adminService.getTestAllFetch(period);
       
       res.json({
         success: true,
@@ -1968,7 +2069,7 @@ export class AdminController {
     try {
       const { period = '30d', type = 'revenue' } = req.query;
       
-      const report = await adminService.generateFinancialReport(
+      const report = await this.adminService.generateFinancialReport(
         period as string, 
         type as 'revenue' | 'earnings' | 'payouts'
       );
@@ -2061,7 +2162,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getMarketData(filters, pagination);
+      const result = await this.adminService.getMarketData(filters, pagination);
       
       res.json({
         success: true,
@@ -2078,7 +2179,7 @@ export class AdminController {
     try {
       const marketData = req.body;
       
-      const result = await adminService.createMarketData(marketData);
+      const result = await this.adminService.createMarketData(marketData);
       
       res.status(201).json({
         success: true,
@@ -2096,7 +2197,7 @@ export class AdminController {
       const marketDataId = req.params.id;
       const updateData = req.body;
       
-      const result = await adminService.updateMarketData(marketDataId, updateData);
+      const result = await this.adminService.updateMarketData(marketDataId, updateData);
       
       res.json({
         success: true,
@@ -2126,7 +2227,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.bulkUpdateUsers(bulkRequest);
+      const result = await this.adminService.bulkUpdateUsers(bulkRequest);
       
       res.json({
         success: true,
@@ -2153,7 +2254,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.bulkDeleteUsers(bulkRequest);
+      const result = await this.adminService.bulkDeleteUsers(bulkRequest);
       
       res.json({
         success: true,
@@ -2208,7 +2309,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.exportData(exportRequest);
+      const result = await this.adminService.exportData(exportRequest);
       
       res.json({
         success: true,
@@ -2224,7 +2325,7 @@ export class AdminController {
 
   async getSystemSettings(req: Request, res: Response, next: NextFunction) {
     try {
-      const settings = await adminService.getSystemSettings();
+      const settings = await this.adminService.getSystemSettings();
       
       res.json({
         success: true,
@@ -2240,7 +2341,7 @@ export class AdminController {
     try {
       const settings = req.body;
       
-      const updatedSettings = await adminService.updateSystemSettings(settings);
+      const updatedSettings = await this.adminService.updateSystemSettings(settings);
       
       res.json({
         success: true,
@@ -2274,7 +2375,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getAuditLogs(filters, pagination);
+      const result = await this.adminService.getAuditLogs(filters, pagination);
       
       res.json({
         success: true,
@@ -2306,7 +2407,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getAuditLogs(filters, pagination);
+      const result = await this.adminService.getAuditLogs(filters, pagination);
       
       res.json({
         success: true,
@@ -2330,7 +2431,7 @@ export class AdminController {
         order: (req.query.order as 'asc' | 'desc') || 'desc'
       };
 
-      const result = await adminService.getNotifications(pagination);
+      const result = await this.adminService.getNotifications(pagination);
       
       res.json({
         success: true,
@@ -2390,7 +2491,7 @@ export class AdminController {
 
   async validateDataIntegrity(req: Request, res: Response, next: NextFunction) {
     try {
-      const result = await adminService.validateDataIntegrity();
+      const result = await this.adminService.validateDataIntegrity();
       
       res.json({
         success: true,
@@ -2417,7 +2518,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.fixDataIntegrityIssue(issueType);
+      const result = await this.adminService.fixDataIntegrityIssue(issueType);
       
       res.json({
         success: true,
@@ -2446,7 +2547,7 @@ export class AdminController {
         });
       }
 
-      const results = await adminService.globalSearch(query as string, type as string);
+      const results = await this.adminService.globalSearch(query as string, type as string);
       
       res.json({
         success: true,
@@ -2630,7 +2731,7 @@ export class AdminController {
         timezone: req.body.timezone
       };
 
-      const result = await adminService.trackVisitor(visitorData);
+      const result = await this.adminService.trackVisitor(visitorData);
 
       res.status(201).json({
         success: true,
@@ -2672,7 +2773,7 @@ export class AdminController {
         });
       }
 
-      const result = await adminService.subscribeNewsletter(email);
+      const result = await this.adminService.subscribeNewsletter(email);
 
       res.status(201).json({
         success: true,
@@ -2723,7 +2824,7 @@ export class AdminController {
         message
       };
 
-      const result = await adminService.createContactMessage(contactData);
+      const result = await this.adminService.createContactMessage(contactData);
 
       res.status(201).json({
         success: true,

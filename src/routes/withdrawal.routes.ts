@@ -5,10 +5,13 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import smsService from '../services/sms.service';
+import { EmailService } from '../services/email.service';
+import withdrawalNotificationService from '../services/withdrawal-notification.service';
 import rateLimit from 'express-rate-limit';
 
 const router = Router();
 const prisma = new PrismaClient();
+const emailService = new EmailService();
 
 // Rate limiting for OTP requests
 const otpRateLimit = rateLimit({
@@ -44,7 +47,7 @@ interface AuthenticatedRequest extends Request {
  * Request withdrawal OTP
  * POST /api/payments/withdrawal/request-otp
  */
-router.post('/request-otp', 
+router.post('/request-otp',
   authenticate,
   otpRateLimit,
   async (req: AuthenticatedRequest, res: Response) => {
@@ -60,17 +63,21 @@ router.post('/request-otp',
         });
       }
 
-      if (amount < 500) {
+      // Wallet operates in USD - validate USD amount
+      const minWithdrawalUSD = 0.35; // approximately 500 RWF
+      const maxWithdrawalUSD = 3500; // approximately 5,000,000 RWF
+
+      if (amount < minWithdrawalUSD) {
         return res.status(400).json({
           success: false,
-          message: 'Minimum withdrawal amount is 500 RWF'
+          message: `Minimum withdrawal amount is ${minWithdrawalUSD} USD`
         });
       }
 
-      if (amount > 5000000) {
+      if (amount > maxWithdrawalUSD) {
         return res.status(400).json({
           success: false,
-          message: 'Maximum withdrawal amount is 5,000,000 RWF'
+          message: `Maximum withdrawal amount is ${maxWithdrawalUSD} USD`
         });
       }
 
@@ -107,7 +114,7 @@ router.post('/request-otp',
       }
 
       // Optional: Check if phone should be verified for high-value withdrawals
-      if (amount > 100000 && user.verificationStatus !== 'verified') {
+      if (amount > 100 && user.verificationStatus !== 'verified') {
         return res.status(400).json({
           success: false,
           message: 'Phone verification required for large withdrawals. Please verify your phone number first.',
@@ -124,7 +131,7 @@ router.post('/request-otp',
         });
       }
 
-      // Check user wallet balance
+      // Check user wallet balance (wallet is in USD)
       const wallet = await prisma.wallet.findUnique({
         where: { userId }
       });
@@ -133,39 +140,82 @@ router.post('/request-otp',
         return res.status(400).json({
           success: false,
           message: 'Insufficient wallet balance',
-          availableBalance: wallet?.balance || 0
+          availableBalance: wallet?.balance || 0,
+          currency: 'USD',
+          requestedAmount: amount
         });
       }
 
-      // Send OTP
-      const result = await smsService.sendWithdrawalOTP(
+      // Send OTP to phone (SMS) first - this is the primary method
+      const smsResult = await smsService.sendWithdrawalOTP(
         userId,
         user.phone,
         amount,
-        wallet.currency
+        'USD'
       );
 
-      if (result.success) {
-        // Mask phone number for security
-        const maskedPhone = maskPhoneNumber(user.phone);
+      let emailSent = false;
 
-        res.status(200).json({
-          success: true,
-          message: 'OTP sent successfully',
-          data: {
-            messageId: result.messageId,
-            expiresIn: result.expiresIn,
-            maskedPhone,
-            amount,
-            currency: wallet.currency
-          }
-        });
-      } else {
-        res.status(500).json({
-          success: false,
-          message: result.message
-        });
+      // If SMS fails, use email as fallback
+      if (!smsResult.success) {
+        console.log('SMS failed, sending OTP via email as fallback');
+
+        // Ensure we have an OTP to send
+        if (!smsResult.otp) {
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to generate OTP. Please try again later.'
+          });
+        }
+
+        try {
+          await emailService.sendWithdrawalOTPEmail({
+            userEmail: user.email,
+            userName: `${user.firstName} ${user.lastName}`,
+            otp: smsResult.otp,
+            amount: amount,
+            currency: 'USD',
+            expiresIn: smsResult.expiresIn || 300
+          });
+          emailSent = true;
+        } catch (emailError) {
+          console.error('Failed to send OTP email as fallback:', emailError);
+          // Both SMS and email failed
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to send OTP via SMS and email. Please try again later or contact support.'
+          });
+        }
       }
+
+      // Mask phone number and email for security
+      const maskedPhone = maskPhoneNumber(user.phone);
+      const maskedEmail = maskEmail(user.email);
+
+      const responseData: any = {
+        messageId: smsResult.messageId,
+        expiresIn: smsResult.expiresIn || 300,
+        maskedPhone,
+        maskedEmail,
+        sentToPhone: smsResult.success,
+        sentToEmail: emailSent,
+        amount: amount,
+        currency: 'USD'
+      };
+
+      // Different messages based on delivery method
+      let message = '';
+      if (smsResult.success) {
+        message = 'OTP sent successfully to your phone';
+      } else if (emailSent) {
+        message = 'SMS delivery failed. OTP has been sent to your email instead. Please check your email.';
+      }
+
+      res.status(200).json({
+        success: true,
+        message: message,
+        data: responseData
+      });
 
     } catch (error: any) {
       console.error('Request withdrawal OTP error:', error);
@@ -204,7 +254,7 @@ router.post('/verify-and-withdraw',
         });
       }
 
-      // Verify OTP
+      // Verify OTP with the USD amount (wallet is in USD)
       const otpResult = await smsService.verifyWithdrawalOTP(userId, otp, amount);
 
       if (!otpResult.success) {
@@ -226,7 +276,7 @@ router.post('/verify-and-withdraw',
         });
       }
 
-      // Check wallet balance again
+      // Check wallet balance again (wallet is in USD)
       const wallet = await prisma.wallet.findUnique({
         where: { userId }
       });
@@ -234,7 +284,10 @@ router.post('/verify-and-withdraw',
       if (!wallet || wallet.balance < amount) {
         return res.status(400).json({
           success: false,
-          message: 'Insufficient wallet balance'
+          message: 'Insufficient wallet balance',
+          availableBalance: wallet?.balance || 0,
+          currency: 'USD',
+          requestedAmount: amount
         });
       }
 
@@ -299,11 +352,12 @@ router.post('/verify-and-withdraw',
 
       // Create withdrawal request with link to saved withdrawal method
       const reference = `WD-${Date.now()}-${userId}`;
+
       const withdrawal = await prisma.withdrawalRequest.create({
         data: {
           userId,
-          amount,
-          currency: wallet.currency,
+          amount: amount,
+          currency: 'USD',
           method: method as 'MOBILE' | 'BANK',
           destination: JSON.stringify(withdrawalDestination),
           reference,
@@ -312,7 +366,8 @@ router.post('/verify-and-withdraw',
         }
       });
 
-      // Update wallet balance
+      // Update wallet balance (wallet is in USD)
+      // Move from balance to pendingBalance (funds are locked for withdrawal)
       await prisma.wallet.update({
         where: { id: wallet.id },
         data: {
@@ -330,38 +385,47 @@ router.post('/verify-and-withdraw',
           balanceBefore: wallet.balance,
           balanceAfter: wallet.balance - amount,
           reference,
-          description: `Withdrawal request - ${method}`,
+          description: `Withdrawal request - ${method} (moved to pending)`,
           transactionId: withdrawal.id
         }
       });
 
-      // Send confirmation SMS
+      // Send notification for withdrawal request (PENDING status)
       try {
-        await smsService.sendTransactionStatusSMS(
+        await withdrawalNotificationService.notifyWithdrawalRequested({
+          withdrawalId: withdrawal.id,
           userId,
-          user.phone!,
-          'withdrawal',
-          amount,
-          wallet.currency,
-          'pending'
-        );
-      } catch (smsError) {
-        console.error('Failed to send withdrawal confirmation SMS:', smsError);
+          userEmail: user.email,
+          userFirstName: user.firstName || 'User',
+          userLastName: user.lastName || '',
+          userPhone: user.phone,
+          amount: amount,
+          currency: 'USD',
+          method: method,
+          status: 'PENDING',
+          reference: reference,
+          destination: withdrawalDestination
+        });
+      } catch (notificationError) {
+        console.error('Failed to send withdrawal notification:', notificationError);
+        // Don't fail the request if notification fails
       }
+
+      const responseData: any = {
+        withdrawalId: withdrawal.id,
+        amount: withdrawal.amount,
+        currency: withdrawal.currency,
+        method: withdrawal.method,
+        status: withdrawal.status,
+        reference: withdrawal.reference,
+        estimatedDelivery: '1-3 business days',
+        newBalance: wallet.balance - amount
+      };
 
       res.status(200).json({
         success: true,
         message: 'Withdrawal processed successfully',
-        data: {
-          withdrawalId: withdrawal.id,
-          amount: withdrawal.amount,
-          currency: withdrawal.currency,
-          method: withdrawal.method,
-          status: withdrawal.status,
-          reference: withdrawal.reference,
-          estimatedDelivery: '1-3 business days',
-          newBalance: wallet.balance - amount
-        }
+        data: responseData
       });
 
     } catch (error: any) {
@@ -394,7 +458,14 @@ router.post('/resend-otp',
       }
 
       const user = await prisma.user.findUnique({
-        where: { id: userId }
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true
+        }
       });
 
       if (!user || !user.phone) {
@@ -415,28 +486,70 @@ router.post('/resend-otp',
         });
       }
 
-      const result = await smsService.resendWithdrawalOTP(
+      // Resend OTP to phone (wallet is in USD) - this is the primary method
+      const smsResult = await smsService.resendWithdrawalOTP(
         userId,
         user.phone,
         amount,
-        wallet.currency
+        'USD'
       );
 
-      if (result.success) {
-        res.status(200).json({
-          success: true,
-          message: 'OTP resent successfully',
-          data: {
-            messageId: result.messageId,
-            expiresIn: result.expiresIn
-          }
-        });
-      } else {
-        res.status(400).json({
-          success: false,
-          message: result.message
-        });
+      let emailSent = false;
+
+      // If SMS fails, use email as fallback
+      if (!smsResult.success) {
+        console.log('SMS resend failed, sending OTP via email as fallback');
+
+        // Ensure we have an OTP to send
+        if (!smsResult.otp) {
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to generate OTP. Please try again later.'
+          });
+        }
+
+        try {
+          await emailService.sendWithdrawalOTPEmail({
+            userEmail: user.email,
+            userName: `${user.firstName} ${user.lastName}`,
+            otp: smsResult.otp,
+            amount: amount,
+            currency: 'USD',
+            expiresIn: smsResult.expiresIn || 300
+          });
+          emailSent = true;
+        } catch (emailError) {
+          console.error('Failed to resend OTP email as fallback:', emailError);
+          // Both SMS and email failed
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to resend OTP via SMS and email. Please try again later or contact support.'
+          });
+        }
       }
+
+      const responseData: any = {
+        messageId: smsResult.messageId,
+        expiresIn: smsResult.expiresIn || 300,
+        sentToPhone: smsResult.success,
+        sentToEmail: emailSent,
+        amount: amount,
+        currency: 'USD'
+      };
+
+      // Different messages based on delivery method
+      let message = '';
+      if (smsResult.success) {
+        message = 'OTP resent successfully to your phone';
+      } else if (emailSent) {
+        message = 'SMS delivery failed. OTP has been sent to your email instead. Please check your email.';
+      }
+
+      res.status(200).json({
+        success: true,
+        message: message,
+        data: responseData
+      });
 
     } catch (error: any) {
       console.error('Resend OTP error:', error);
@@ -584,14 +697,14 @@ router.get('/info',
         data: {
           wallet: {
             balance: wallet.balance,
-            currency: wallet.currency,
+            currency: 'USD',
             isActive: wallet.isActive
           },
           limits: {
-            minimum: 500,
-            maximum: 5000000,
-            daily: 2000000,
-            monthly: 10000000
+            minimum: 0.35,  // USD
+            maximum: 3500,  // USD
+            daily: 1400,    // USD
+            monthly: 7000   // USD
           },
           kyc: {
             completed: user.kycCompleted,
@@ -600,7 +713,7 @@ router.get('/info',
           },
           phoneVerified: !!user.phone,
           supportedMethods: ['MOBILE', 'BANK'],
-          currency: wallet.currency
+          currency: 'USD'
         }
       });
 
@@ -622,6 +735,20 @@ function maskPhoneNumber(phoneNumber: string): string {
   const end = phoneNumber.substring(phoneNumber.length - 4);
   const masked = '*'.repeat(phoneNumber.length - 8);
   return start + masked + end;
+}
+
+function maskEmail(email: string): string {
+  const [username, domain] = email.split('@');
+  if (!domain) return email;
+
+  if (username.length <= 2) {
+    return `${username[0]}***@${domain}`;
+  }
+
+  const visibleChars = Math.min(3, Math.floor(username.length / 2));
+  const start = username.substring(0, visibleChars);
+  const masked = '*'.repeat(Math.min(5, username.length - visibleChars));
+  return `${start}${masked}@${domain}`;
 }
 
 // === ADMIN ROUTES ===

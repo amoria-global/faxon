@@ -3,7 +3,9 @@
 import { Router } from 'express';
 import { AdminController } from '../controllers/admin.controller';
 import { authenticate } from '../middleware/auth.middleware';
-import { 
+import { XentriPayService } from '../services/xentripay.service';
+import { config } from '../config/config';
+import {
   requireAdmin,
   requirePermissions,
   canAccessUser,
@@ -31,7 +33,15 @@ import {
 } from '../middleware/admin.middleware';
 
 const router = Router();
-const adminController = new AdminController();
+
+// Initialize XentriPay service
+const xentriPayService = new XentriPayService({
+  apiKey: config.xentripay.apiKey,
+  baseUrl: config.xentripay.baseUrl,
+  environment: config.xentripay.environment
+});
+
+const adminController = new AdminController(xentriPayService);
 
 // Apply admin-wide middleware
 router.use(authenticate);
