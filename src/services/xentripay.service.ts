@@ -141,7 +141,7 @@ export class XentriPayService {
   private client: AxiosInstance;
   private config: XentriPayConfig;
   private exchangeRateCache: { rate: number; timestamp: number } | null = null;
-  private readonly CACHE_DURATION = 3600000; // 1 hour in milliseconds
+  private readonly CACHE_DURATION = 86400000; // 1 day in milliseconds (24 hours)
 
   constructor(config: XentriPayConfig) {
     this.config = {

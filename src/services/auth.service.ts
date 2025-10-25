@@ -1923,7 +1923,7 @@ export class AuthService {
     const accessToken = jwt.sign(
       { userId: userId.toString(), email, userType } as JwtPayload,
       config.jwtSecret,
-      { expiresIn: '15m' }
+      { expiresIn: '1d' }
     );
 
     const refreshToken = jwt.sign(

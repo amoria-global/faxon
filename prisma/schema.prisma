@@ -145,7 +145,7 @@ model WithdrawalRequest {
   id                 String            @id @default(cuid())
   userId             Int
   amount             Float
-  currency           String            @default("RWF")
+  currency           String            @default("USD")
   method             String
   status             String            @default("PENDING")
   destination        Json

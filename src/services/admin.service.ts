@@ -3,6 +3,9 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { BrevoMailingService } from '../utils/brevo.admin';
+import { XentriPayService } from './xentripay.service';
+import { PhoneUtils } from '../utils/phone.utils';
+import withdrawalNotificationService from './withdrawal-notification.service';
 import {
   AdminDashboardOverview,
   AdminUserFilters,
@@ -39,10 +42,12 @@ export class AdminService {
   private mailingService: BrevoMailingService;
   private adminEmail: string;
   private companyInfo: any;
+  private xentriPayService?: XentriPayService;
 
-  constructor() {
+  constructor(xentriPayService?: XentriPayService) {
     this.mailingService = new BrevoMailingService();
     this.adminEmail = process.env.ADMIN_EMAIL || 'admin@jambolush.com';
+    this.xentriPayService = xentriPayService;
     this.companyInfo = {
       name: 'Jambolush',
       website: 'https://jambolush.com',
@@ -495,7 +500,7 @@ export class AdminService {
       data: { isActive: false }
     });
 
-    // Send high priority notification
+    // Send high priority notification to admin
     await this.sendAdminNotification({
       type: 'user_suspended',
       title: 'User Account Suspended',
@@ -511,6 +516,22 @@ export class AdminService {
         email: user.email,
         suspendedBy: adminId,
         reason
+      }
+    });
+
+    // Send notification email to user
+    await this.sendUserNotification({
+      userId,
+      email: user.email,
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      actionType: 'account_suspended',
+      title: 'Account Suspended',
+      message: 'Your account has been suspended by our administration team.',
+      reason,
+      details: {
+        suspendedAt: new Date().toISOString(),
+        contactSupport: true
       }
     });
 
@@ -534,6 +555,7 @@ export class AdminService {
       }
     });
 
+    // Send notification to admin
     await this.sendAdminNotification({
       type: 'user_activated',
       title: 'User Account Activated',
@@ -547,6 +569,20 @@ export class AdminService {
       metadata: {
         email: user.email,
         activatedBy: adminId
+      }
+    });
+
+    // Send notification email to user
+    await this.sendUserNotification({
+      userId,
+      email: user.email,
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      actionType: 'account_activated',
+      title: 'Account Reactivated',
+      message: 'Great news! Your account has been reactivated and you can now access all platform features.',
+      details: {
+        activatedAt: new Date().toISOString()
       }
     });
 
@@ -573,6 +609,7 @@ export class AdminService {
       }
     });
 
+    // Send notification to admin
     await this.sendAdminNotification({
       type: 'kyc_approved',
       title: 'KYC Verification Approved',
@@ -587,6 +624,22 @@ export class AdminService {
         email: user.email,
         approvedBy: adminId,
         notes
+      }
+    });
+
+    // Send notification email to user
+    await this.sendUserNotification({
+      userId,
+      email: user.email,
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      actionType: 'kyc_approved',
+      title: 'KYC Verification Approved',
+      message: 'Congratulations! Your KYC verification has been approved. You now have full access to all platform features.',
+      details: {
+        approvedAt: new Date().toISOString(),
+        notes: notes || 'Your documents have been verified successfully',
+        nextSteps: 'You can now list properties, book tours, and access all premium features'
       }
     });
 
@@ -611,6 +664,7 @@ export class AdminService {
       }
     });
 
+    // Send notification to admin
     await this.sendAdminNotification({
       type: 'kyc_rejected',
       title: 'KYC Verification Rejected',
@@ -626,6 +680,23 @@ export class AdminService {
         email: user.email,
         rejectedBy: adminId,
         reason
+      }
+    });
+
+    // Send notification email to user
+    await this.sendUserNotification({
+      userId,
+      email: user.email,
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      actionType: 'kyc_rejected',
+      title: 'KYC Verification Requires Update',
+      message: 'Your KYC verification submission requires additional information or corrections.',
+      reason,
+      details: {
+        rejectedAt: new Date().toISOString(),
+        nextSteps: 'Please review the reason and resubmit your KYC documents with the necessary corrections',
+        supportAvailable: true
       }
     });
 
@@ -843,6 +914,7 @@ export class AdminService {
       include: {
         host: {
           select: {
+            id: true,
             firstName: true,
             lastName: true,
             email: true
@@ -864,6 +936,7 @@ export class AdminService {
       }
     });
 
+    // Send notification to admin
     await this.sendAdminNotification({
       type: 'property_approved',
       title: 'Property Listing Approved',
@@ -882,6 +955,26 @@ export class AdminService {
       }
     });
 
+    // Send notification email to host/owner
+    if (property.host) {
+      await this.sendUserNotification({
+        userId: property.host.id,
+        email: property.host.email,
+        firstName: property.host.firstName || '',
+        lastName: property.host.lastName || '',
+        actionType: 'property_approved',
+        title: 'Property Listing Approved',
+        message: `Great news! Your property "${property.name}" has been approved and is now live on the platform.`,
+        details: {
+          propertyName: property.name,
+          propertyId: propertyId,
+          approvedAt: new Date().toISOString(),
+          notes: notes || 'Your property listing meets all our quality standards',
+          nextSteps: 'Your property is now visible to guests. Start receiving bookings!'
+        }
+      });
+    }
+
     return this.getPropertyDetails(propertyId);
   }
 
@@ -891,6 +984,7 @@ export class AdminService {
       include: {
         host: {
           select: {
+            id: true,
             firstName: true,
             lastName: true,
             email: true
@@ -912,6 +1006,7 @@ export class AdminService {
       }
     });
 
+    // Send notification to admin
     await this.sendAdminNotification({
       type: 'property_rejected',
       title: 'Property Listing Rejected',
@@ -931,6 +1026,27 @@ export class AdminService {
       }
     });
 
+    // Send notification email to host/owner
+    if (property.host) {
+      await this.sendUserNotification({
+        userId: property.host.id,
+        email: property.host.email,
+        firstName: property.host.firstName || '',
+        lastName: property.host.lastName || '',
+        actionType: 'property_rejected',
+        title: 'Property Listing Requires Updates',
+        message: `Your property "${property.name}" requires some updates before it can be published.`,
+        reason,
+        details: {
+          propertyName: property.name,
+          propertyId: propertyId,
+          rejectedAt: new Date().toISOString(),
+          nextSteps: 'Please review the reason and update your property listing accordingly',
+          supportAvailable: true
+        }
+      });
+    }
+
     return this.getPropertyDetails(propertyId);
   }
 
@@ -940,6 +1056,7 @@ export class AdminService {
       include: {
         host: {
           select: {
+            id: true,
             firstName: true,
             lastName: true,
             email: true
@@ -960,6 +1077,7 @@ export class AdminService {
       }
     });
 
+    // Send notification to admin
     await this.sendAdminNotification({
       type: 'property_suspended',
       title: 'Property Listing Suspended',
@@ -978,6 +1096,27 @@ export class AdminService {
         reason
       }
     });
+
+    // Send notification email to host/owner
+    if (property.host) {
+      await this.sendUserNotification({
+        userId: property.host.id,
+        email: property.host.email,
+        firstName: property.host.firstName || '',
+        lastName: property.host.lastName || '',
+        actionType: 'property_suspended',
+        title: 'Property Listing Suspended',
+        message: `Your property "${property.name}" has been temporarily suspended.`,
+        reason,
+        details: {
+          propertyName: property.name,
+          propertyId: propertyId,
+          suspendedAt: new Date().toISOString(),
+          contactSupport: true,
+          nextSteps: 'Please contact support to resolve this issue and restore your listing'
+        }
+      });
+    }
 
     return this.getPropertyDetails(propertyId);
   }
@@ -1195,6 +1334,7 @@ export class AdminService {
       include: {
         tourGuide: {
           select: {
+            id: true,
             firstName: true,
             lastName: true,
             email: true
@@ -1215,6 +1355,7 @@ export class AdminService {
       }
     });
 
+    // Send notification to admin
     await this.sendAdminNotification({
       type: 'tour_approved',
       title: 'Tour Approved',
@@ -1233,6 +1374,24 @@ export class AdminService {
       }
     });
 
+    // Send notification email to tour guide
+    await this.sendUserNotification({
+      userId: tour.tourGuide.id,
+      email: tour.tourGuide.email,
+      firstName: tour.tourGuide.firstName || '',
+      lastName: tour.tourGuide.lastName || '',
+      actionType: 'tour_approved',
+      title: 'Tour Approved',
+      message: `Congratulations! Your tour "${tour.title}" has been approved and is now live on the platform.`,
+      details: {
+        tourTitle: tour.title,
+        tourId: tourId,
+        approvedAt: new Date().toISOString(),
+        notes: notes || 'Your tour meets all our quality and safety standards',
+        nextSteps: 'Your tour is now visible to travelers. Start receiving bookings!'
+      }
+    });
+
     return this.getTourDetails(tourId);
   }
 
@@ -1242,6 +1401,7 @@ export class AdminService {
       include: {
         tourGuide: {
           select: {
+            id: true,
             firstName: true,
             lastName: true,
             email: true
@@ -1262,6 +1422,7 @@ export class AdminService {
       }
     });
 
+    // Send notification to admin
     await this.sendAdminNotification({
       type: 'tour_suspended',
       title: 'Tour Suspended',
@@ -1278,6 +1439,25 @@ export class AdminService {
         tourGuideEmail: tour.tourGuide.email,
         suspendedBy: adminId,
         reason
+      }
+    });
+
+    // Send notification email to tour guide
+    await this.sendUserNotification({
+      userId: tour.tourGuide.id,
+      email: tour.tourGuide.email,
+      firstName: tour.tourGuide.firstName || '',
+      lastName: tour.tourGuide.lastName || '',
+      actionType: 'tour_suspended',
+      title: 'Tour Suspended',
+      message: `Your tour "${tour.title}" has been temporarily suspended.`,
+      reason,
+      details: {
+        tourTitle: tour.title,
+        tourId: tourId,
+        suspendedAt: new Date().toISOString(),
+        contactSupport: true,
+        nextSteps: 'Please contact support to resolve this issue and restore your tour'
       }
     });
 
@@ -3122,6 +3302,10 @@ export class AdminService {
       throw new Error('Withdrawal request not found');
     }
 
+    if (withdrawal.status === 'APPROVED' || withdrawal.status === 'COMPLETED') {
+      throw new Error('Withdrawal has already been approved');
+    }
+
     // Parse destination to get account details
     let destinationDetails: any = {};
     try {
@@ -3130,6 +3314,7 @@ export class AdminService {
         : withdrawal.destination;
     } catch (error) {
       console.error('Failed to parse destination:', error);
+      throw new Error('Invalid withdrawal destination format');
     }
 
     // Validate withdrawal method if linked
@@ -3139,18 +3324,7 @@ export class AdminService {
       }
     }
 
-    const updatedWithdrawal = await prisma.withdrawalRequest.update({
-      where: { id: withdrawalId },
-      data: {
-        status: 'APPROVED',
-        approvedAt: new Date(),
-        approvedBy: adminId,
-        completedAt: new Date(),
-        updatedAt: new Date()
-      }
-    });
-
-    // Extract detailed account information for notification
+    // Extract detailed account information
     const accountInfo = withdrawal.withdrawalMethod
       ? {
           methodType: withdrawal.withdrawalMethod.methodType,
@@ -3164,46 +3338,222 @@ export class AdminService {
           accountName: destinationDetails.holderName,
           accountNumber: destinationDetails.accountNumber,
           providerName: destinationDetails.providerName || destinationDetails.mobileProvider,
+          providerCode: destinationDetails.providerCode,
         };
 
-    await this.sendAdminNotification({
-      type: 'withdrawal_approved',
-      title: 'Withdrawal Request Approved',
-      message: `Withdrawal request of RWF ${withdrawal.amount.toLocaleString()} has been approved for processing to ${accountInfo.methodType === 'BANK' ? 'bank account' : 'mobile money'}.`,
-      severity: 'low',
-      resource: {
-        id: withdrawalId,
-        name: `Withdrawal ${withdrawalId}`,
-        type: 'transaction'
-      },
-      metadata: {
-        amount: withdrawal.amount,
+    // Validate required fields for payout
+    if (!accountInfo.accountNumber) {
+      throw new Error('Account number is required for withdrawal');
+    }
+    if (!accountInfo.accountName) {
+      throw new Error('Account holder name is required for withdrawal');
+    }
+    if (!accountInfo.providerCode) {
+      throw new Error('Provider code is required for withdrawal');
+    }
+
+    // Check if XentriPay service is available
+    if (!this.xentriPayService) {
+      throw new Error('Payment service is not configured. Cannot process withdrawal.');
+    }
+
+    let payoutResponse;
+    let paymentTransaction;
+
+    try {
+      // Format phone number for mobile money withdrawals
+      let formattedPhone = accountInfo.accountNumber;
+      if (accountInfo.methodType === 'MOBILE_MONEY' || accountInfo.methodType === 'MOBILE') {
+        const phoneValidation = PhoneUtils.validateRwandaPhone(accountInfo.accountNumber);
+        if (!phoneValidation.isValid) {
+          throw new Error(`Invalid phone number: ${phoneValidation.error}`);
+        }
+        formattedPhone = phoneValidation.formattedPhone!;
+      }
+
+      // Generate unique payment transaction reference
+      const paymentReference = `PAY-${withdrawal.reference}-${Date.now()}`;
+
+      // Create payment transaction record BEFORE sending to XentriPay
+      paymentTransaction = await prisma.paymentTransaction.create({
+        data: {
+          userId: withdrawal.userId,
+          type: 'WITHDRAWAL',
+          method: accountInfo.methodType,
+          amount: withdrawal.amount,
+          currency: withdrawal.currency,
+          status: 'PROCESSING',
+          reference: paymentReference,
+          description: `Withdrawal to ${accountInfo.methodType === 'BANK' ? 'bank account' : 'mobile money'}`,
+          phoneNumber: accountInfo.methodType === 'MOBILE_MONEY' || accountInfo.methodType === 'MOBILE' ? formattedPhone : null,
+          accountName: accountInfo.accountName,
+          bankCode: accountInfo.providerCode,
+          destinationAccount: accountInfo.accountNumber,
+          metadata: {
+            withdrawalRequestId: withdrawalId,
+            withdrawalReference: withdrawal.reference,
+            providerName: accountInfo.providerName,
+            approvedBy: adminId,
+            approvedAt: new Date().toISOString()
+          }
+        }
+      });
+
+      // Send payout request to XentriPay
+      payoutResponse = await this.xentriPayService.createPayout({
+        customerReference: withdrawal.reference,
+        telecomProviderId: accountInfo.providerCode,
+        msisdn: formattedPhone,
+        name: accountInfo.accountName,
+        transactionType: 'PAYOUT',
         currency: withdrawal.currency,
-        method: withdrawal.method,
+        amount: withdrawal.amount
+      });
+
+      console.log('XentriPay payout response:', payoutResponse);
+
+      // Update payment transaction with XentriPay response
+      await prisma.paymentTransaction.update({
+        where: { id: paymentTransaction.id },
+        data: {
+          externalId: payoutResponse.internalRef,
+          status: payoutResponse.status === 'COMPLETED' ? 'COMPLETED' : 'PROCESSING',
+          metadata: {
+            ...(paymentTransaction.metadata as any),
+            xentriPayResponse: {
+              internalRef: payoutResponse.internalRef,
+              status: payoutResponse.status,
+              statusMessage: payoutResponse.statusMessage,
+              validatedAccountName: payoutResponse.validatedAccountName,
+              txnCharge: payoutResponse.txnCharge
+            }
+          },
+          completedAt: payoutResponse.status === 'COMPLETED' ? new Date() : null
+        }
+      });
+
+      // Update withdrawal request status
+      const updatedWithdrawal = await prisma.withdrawalRequest.update({
+        where: { id: withdrawalId },
+        data: {
+          status: payoutResponse.status === 'COMPLETED' ? 'COMPLETED' : 'APPROVED',
+          approvedAt: new Date(),
+          approvedBy: adminId,
+          completedAt: payoutResponse.status === 'COMPLETED' ? new Date() : null,
+          updatedAt: new Date(),
+          adminNotes: `Payout initiated via XentriPay. Internal Ref: ${payoutResponse.internalRef}`
+        }
+      });
+
+      // Send notification to admin
+      await this.sendAdminNotification({
+        type: 'withdrawal_approved',
+        title: 'Withdrawal Request Approved & Processed',
+        message: `Withdrawal request of ${withdrawal.amount.toLocaleString()} ${withdrawal.currency} has been approved and sent to XentriPay for processing.`,
+        severity: 'low',
+        resource: {
+          id: withdrawalId,
+          name: `Withdrawal ${withdrawalId}`,
+          type: 'transaction'
+        },
+        metadata: {
+          amount: withdrawal.amount,
+          currency: withdrawal.currency,
+          method: withdrawal.method,
+          userName: `${withdrawal.user.firstName} ${withdrawal.user.lastName}`,
+          userEmail: withdrawal.user.email,
+          userPhone: withdrawal.user.phone,
+          approvedBy: adminId,
+          accountInfo: accountInfo,
+          destination: destinationDetails,
+          xentriPayRef: payoutResponse.internalRef,
+          payoutStatus: payoutResponse.status
+        }
+      });
+
+      // Send notification email to user using withdrawal notification service
+      try {
+        await withdrawalNotificationService.notifyWithdrawalApproved({
+          withdrawalId: withdrawalId,
+          userId: withdrawal.userId,
+          userEmail: withdrawal.user.email,
+          userFirstName: withdrawal.user.firstName || 'User',
+          userLastName: withdrawal.user.lastName || '',
+          userPhone: withdrawal.user.phone,
+          amount: withdrawal.amount,
+          currency: withdrawal.currency,
+          method: withdrawal.method,
+          status: 'APPROVED',
+          reference: withdrawal.reference,
+          destination: destinationDetails
+        });
+        console.log(`[ADMIN_SERVICE] ✅ Withdrawal approval notifications sent for ${withdrawal.reference}`);
+      } catch (notificationError: any) {
+        console.error(`[ADMIN_SERVICE] ❌ Failed to send withdrawal approval notifications:`, notificationError);
+        // Don't fail the entire approval if notification fails
+      }
+
+      return {
+        id: updatedWithdrawal.id,
+        userId: updatedWithdrawal.userId,
         userName: `${withdrawal.user.firstName} ${withdrawal.user.lastName}`,
         userEmail: withdrawal.user.email,
-        userPhone: withdrawal.user.phone,
-        approvedBy: adminId,
-        accountInfo: accountInfo,
-        destination: destinationDetails
-      }
-    });
+        amount: updatedWithdrawal.amount,
+        currency: updatedWithdrawal.currency,
+        method: updatedWithdrawal.method,
+        status: updatedWithdrawal.status,
+        destination: updatedWithdrawal.destination,
+        reference: updatedWithdrawal.reference,
+        failureReason: updatedWithdrawal.failureReason,
+        createdAt: updatedWithdrawal.createdAt.toISOString(),
+        completedAt: updatedWithdrawal.completedAt?.toISOString()
+      };
+    } catch (error: any) {
+      console.error('Withdrawal approval error:', error);
 
-    return {
-      id: updatedWithdrawal.id,
-      userId: updatedWithdrawal.userId,
-      userName: `${withdrawal.user.firstName} ${withdrawal.user.lastName}`,
-      userEmail: withdrawal.user.email,
-      amount: updatedWithdrawal.amount,
-      currency: updatedWithdrawal.currency,
-      method: updatedWithdrawal.method,
-      status: updatedWithdrawal.status,
-      destination: updatedWithdrawal.destination,
-      reference: updatedWithdrawal.reference,
-      failureReason: updatedWithdrawal.failureReason,
-      createdAt: updatedWithdrawal.createdAt.toISOString(),
-      completedAt: updatedWithdrawal.completedAt?.toISOString()
-    };
+      // Update payment transaction as failed if it was created
+      if (paymentTransaction) {
+        await prisma.paymentTransaction.update({
+          where: { id: paymentTransaction.id },
+          data: {
+            status: 'FAILED',
+            failureReason: error.message
+          }
+        });
+      }
+
+      // Update withdrawal request as failed
+      await prisma.withdrawalRequest.update({
+        where: { id: withdrawalId },
+        data: {
+          status: 'FAILED',
+          failureReason: error.message,
+          updatedAt: new Date()
+        }
+      });
+
+      // Send failure notification to admin
+      await this.sendAdminNotification({
+        type: 'withdrawal_failed',
+        title: 'Withdrawal Processing Failed',
+        message: `Failed to process withdrawal of ${withdrawal.amount.toLocaleString()} ${withdrawal.currency}: ${error.message}`,
+        severity: 'high',
+        resource: {
+          id: withdrawalId,
+          name: `Withdrawal ${withdrawalId}`,
+          type: 'transaction'
+        },
+        metadata: {
+          amount: withdrawal.amount,
+          currency: withdrawal.currency,
+          userName: `${withdrawal.user.firstName} ${withdrawal.user.lastName}`,
+          error: error.message,
+          accountInfo: accountInfo
+        }
+      });
+
+      throw new Error(`Failed to process withdrawal: ${error.message}`);
+    }
   }
 
   async rejectWithdrawal(withdrawalId: string, reason: string, adminId?: number): Promise<AdminWithdrawalRequest> {
@@ -3212,9 +3562,11 @@ export class AdminService {
       include: {
         user: {
           select: {
+            id: true,
             firstName: true,
             lastName: true,
-            email: true
+            email: true,
+            phone: true
           }
         }
       }
@@ -3233,10 +3585,43 @@ export class AdminService {
       }
     });
 
+    // Refund wallet balance (move from pending back to available)
+    const wallet = await prisma.wallet.findUnique({
+      where: { userId: withdrawal.userId }
+    });
+
+    if (wallet) {
+      const newPendingBalance = Math.max(0, wallet.pendingBalance - withdrawal.amount);
+      const newBalance = wallet.balance + withdrawal.amount;
+
+      await prisma.wallet.update({
+        where: { userId: withdrawal.userId },
+        data: {
+          balance: newBalance,
+          pendingBalance: newPendingBalance
+        }
+      });
+
+      // Create wallet transaction record for refund
+      await prisma.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'credit',
+          amount: withdrawal.amount,
+          balanceBefore: wallet.balance,
+          balanceAfter: newBalance,
+          reference: `REFUND-${withdrawal.reference}`,
+          description: `Withdrawal rejected - ${reason} (moved from pending to balance)`,
+          transactionId: withdrawal.id
+        }
+      });
+    }
+
+    // Send notification to admin
     await this.sendAdminNotification({
       type: 'withdrawal_rejected',
       title: 'Withdrawal Request Rejected',
-      message: `Withdrawal request of RWF ${withdrawal.amount.toLocaleString()} has been rejected.`,
+      message: `Withdrawal request of ${withdrawal.amount.toLocaleString()} ${withdrawal.currency} has been rejected.`,
       severity: 'medium',
       reason,
       resource: {
@@ -3254,6 +3639,28 @@ export class AdminService {
         reason
       }
     });
+
+    // Send notification email to user using withdrawal notification service
+    try {
+      await withdrawalNotificationService.notifyWithdrawalRejected({
+        withdrawalId: withdrawalId,
+        userId: withdrawal.userId,
+        userEmail: withdrawal.user.email,
+        userFirstName: withdrawal.user.firstName || 'User',
+        userLastName: withdrawal.user.lastName || '',
+        userPhone: withdrawal.user.phone,
+        amount: withdrawal.amount,
+        currency: withdrawal.currency,
+        method: withdrawal.method,
+        status: 'REJECTED',
+        reference: withdrawal.reference,
+        failureReason: reason
+      });
+      console.log(`[ADMIN_SERVICE] ✅ Withdrawal rejection notifications sent for ${withdrawal.reference}`);
+    } catch (notificationError: any) {
+      console.error(`[ADMIN_SERVICE] ❌ Failed to send withdrawal rejection notifications:`, notificationError);
+      // Don't fail the entire rejection if notification fails
+    }
 
     return {
       id: updatedWithdrawal.id,
@@ -3275,7 +3682,15 @@ export class AdminService {
   // === CONTENT MANAGEMENT (ORIGINAL METHODS) ===
 
   async respondToContact(contactId: string, response: string, adminId: number): Promise<any> {
-    const contact = await prisma.contactMessage.update({
+    const contact: any = await prisma.contactMessage.findUnique({
+      where: { id: Number(contactId) }
+    });
+
+    if (!contact) {
+      throw new Error('Contact message not found');
+    }
+
+    const updatedContact = await prisma.contactMessage.update({
       where: { id: Number(contactId) },
       data: {
         adminReply: response,
@@ -3285,9 +3700,27 @@ export class AdminService {
       }
     });
 
+    // Send notification email to user if they provided an email
+    if (contact.email) {
+      await this.sendUserNotification({
+        userId: 0, // Contact may not have userId
+        email: contact.email,
+        firstName: contact.name?.split(' ')[0] || 'User',
+        lastName: contact.name?.split(' ').slice(1).join(' ') || '',
+        actionType: 'contact_response',
+        title: 'Response to Your Inquiry',
+        message: 'Our support team has responded to your inquiry.',
+        details: {
+          originalMessage: contact.message,
+          adminResponse: response,
+          repliedAt: new Date().toISOString(),
+          contactId: contactId,
+          nextSteps: 'If you have any follow-up questions, please feel free to contact us again'
+        }
+      });
+    }
 
-
-    return contact;
+    return updatedContact;
   }
 
   // === ANALYTICS ===
@@ -4446,6 +4879,83 @@ export class AdminService {
       });
     } catch (error) {
       console.error('Failed to send critical alert:', error);
+    }
+  }
+
+  private async sendUserNotification(params: {
+    userId: number;
+    email: string;
+    firstName: string;
+    lastName: string;
+    actionType: string;
+    title: string;
+    message: string;
+    reason?: string;
+    details?: Record<string, any>;
+  }): Promise<void> {
+    try {
+      const context = {
+        user: {
+          id: params.userId,
+          email: params.email,
+          firstName: params.firstName,
+          lastName: params.lastName
+        },
+        company: this.companyInfo,
+        action: {
+          type: params.actionType,
+          title: params.title,
+          message: params.message,
+          timestamp: new Date().toISOString(),
+          reason: params.reason,
+          details: params.details
+        }
+      };
+
+      // Map action types to specific mailing service methods
+      switch (params.actionType) {
+        case 'account_suspended':
+          await this.mailingService.sendUserAccountSuspended(context);
+          break;
+        case 'account_activated':
+          await this.mailingService.sendUserAccountReactivated(context);
+          break;
+        case 'kyc_approved':
+          await this.mailingService.sendUserKYCApproved(context);
+          break;
+        case 'kyc_rejected':
+          await this.mailingService.sendUserKYCRejected(context);
+          break;
+        case 'property_approved':
+          await this.mailingService.sendUserPropertyApproved(context);
+          break;
+        case 'property_rejected':
+          await this.mailingService.sendUserPropertyRejected(context);
+          break;
+        case 'property_suspended':
+          await this.mailingService.sendUserPropertySuspended(context);
+          break;
+        case 'tour_approved':
+          await this.mailingService.sendUserTourApproved(context);
+          break;
+        case 'tour_suspended':
+          await this.mailingService.sendUserTourSuspended(context);
+          break;
+        case 'withdrawal_approved':
+          await this.mailingService.sendUserWithdrawalApproved(context);
+          break;
+        case 'withdrawal_rejected':
+          await this.mailingService.sendUserWithdrawalRejected(context);
+          break;
+        case 'contact_response':
+          await this.mailingService.sendUserContactResponse(context);
+          break;
+        default:
+          console.warn(`Unknown action type: ${params.actionType}. Skipping email notification.`);
+      }
+    } catch (error) {
+      console.error('Failed to send user notification:', error);
+      // Don't throw - email notifications should not break admin operations
     }
   }
 

@@ -769,6 +769,22 @@ export class BrevoMailingService {
     }
   }
 
+  async sendUserContactResponse(context: UserNotificationContext): Promise<void> {
+    try {
+      const emailData = {
+        sender: this.defaultSender,
+        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
+        subject: `Response to Your Inquiry - ${context.company.name}`,
+        htmlContent: this.getUserContactResponseTemplate(context),
+        textContent: this.getUserContactResponseTextTemplate(context)
+      };
+
+      await this.sendTransactionalEmail(emailData);
+    } catch (error: any) {
+      throw error;
+    }
+  }
+
   // --- AUTHENTICATION EMAIL METHODS (keeping existing) ---
 
   async sendWelcomeEmail(context: MailingContext): Promise<void> {
@@ -3234,12 +3250,12 @@ Your withdrawal request has been approved.
 DETAILS:
 - Amount: RWF ${amount.toLocaleString()}
 - Method: ${context.action.details?.method || 'Bank Transfer'}
-- Processing Time: 3-5 business days
+- Processing Time: 24 hours business days
 - Status: Processing
 
-The funds should arrive in your account within 3-5 business days.
+The funds should arrive in your account within 24 hours.
 
-View transactions: https://app.jambolush.com/transactions
+View transactions: https://app.jambolush.com
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();
@@ -3279,7 +3295,7 @@ Support: ${context.company.supportEmail}
 
   private getUserEscrowReleasedTextTemplate(context: UserNotificationContext): string {
     const amount = context.action.details?.amount || 0;
-    
+
     return `
 PAYMENT RELEASED - ${context.company.name}
 
@@ -3296,6 +3312,117 @@ ${context.action.reason ? `- Note: ${context.action.reason}` : ''}
 You can now withdraw these funds or use them on the platform.
 
 View wallet: https://app.jambolush.com
+
+© ${new Date().getFullYear()} ${context.company.name}
+    `.trim();
+  }
+
+  private getUserContactResponseTemplate(context: UserNotificationContext): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Response to Your Inquiry</title>
+        ${this.getBaseTemplate()}
+      </head>
+      <body>
+        <div class="email-wrapper">
+          <div class="email-container">
+            <div class="header">
+              <div class="logo">${context.company.name}</div>
+              <div class="header-subtitle">Support Team Response</div>
+            </div>
+
+            <div class="content">
+              <div class="greeting">Hello ${context.user.firstName},</div>
+
+              <div class="message">
+                Thank you for contacting us. Our support team has reviewed your inquiry and provided a response below.
+              </div>
+
+              <div class="info-card">
+                <div class="info-card-header">
+                  <span class="info-card-icon">📝</span>
+                  Your Original Message
+                </div>
+                <div style="padding: 12px; background: #f9fafb; border-radius: 6px; margin-top: 10px;">
+                  <p style="font-size: 14px; color: #6b7280; line-height: 1.6;">
+                    ${context.action.details?.originalMessage || 'N/A'}
+                  </p>
+                </div>
+              </div>
+
+              <div class="alert-box alert-info">
+                <div class="alert-title">💬 Our Response</div>
+                <div class="alert-text">
+                  ${context.action.details?.adminResponse || context.action.message}
+                </div>
+              </div>
+
+              <div class="info-card">
+                <div class="info-card-header">Response Details</div>
+                <div class="info-row">
+                  <span class="info-label">Responded On</span>
+                  <span class="info-value">${new Date(context.action.timestamp).toLocaleString()}</span>
+                </div>
+                ${context.action.details?.contactId ? `
+                  <div class="info-row">
+                    <span class="info-label">Reference ID</span>
+                    <span class="info-value">${context.action.details.contactId}</span>
+                  </div>
+                ` : ''}
+              </div>
+
+              <div class="message">
+                ${context.action.details?.nextSteps || 'If you have any follow-up questions, please feel free to contact us again.'}
+              </div>
+
+              <div class="button-center">
+                <a href="mailto:${context.company.supportEmail}" class="button">
+                  Contact Support
+                </a>
+              </div>
+            </div>
+
+            <div class="footer">
+              <div class="footer-links">
+                <a href="${context.company.website}">Home</a>
+                <a href="mailto:${context.company.supportEmail}">Support</a>
+              </div>
+              <div class="footer-text">
+                © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
+              </div>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private getUserContactResponseTextTemplate(context: UserNotificationContext): string {
+    return `
+RESPONSE TO YOUR INQUIRY - ${context.company.name}
+
+Hello ${context.user.firstName},
+
+Thank you for contacting us. Our support team has reviewed your inquiry and provided a response.
+
+YOUR MESSAGE:
+${context.action.details?.originalMessage || 'N/A'}
+
+OUR RESPONSE:
+${context.action.details?.adminResponse || context.action.message}
+
+DETAILS:
+- Responded: ${new Date(context.action.timestamp).toLocaleString()}
+${context.action.details?.contactId ? `- Reference: ${context.action.details.contactId}` : ''}
+
+${context.action.details?.nextSteps || 'If you have any follow-up questions, please feel free to contact us again.'}
+
+Contact support: ${context.company.supportEmail}
 
 © ${new Date().getFullYear()} ${context.company.name}
     `.trim();

@@ -13,6 +13,10 @@ export class EnhancedPropertyService {
       activeClientsData,
       transactionSummary,
       recentBookings,
+      managedProperties,
+      recentEarnings,
+      walletData,
+      recentActivity,
       monthlyCommissions,
       escrowTransactions,
       paymentTransactions
@@ -20,23 +24,61 @@ export class EnhancedPropertyService {
       this.getAgentClients(agentId),
       this.getActiveAgentClients(agentId),
       this.getAgentTransactionSummary(agentId),
-      this.getAgentRecentBookingsWithTransactions(agentId),
+      this.getAgentRecentBookingsWithTransactions(agentId, 5), // Get at least 5 recent bookings
+      this.getAgentManagedProperties(agentId), // Get managed properties
+      this.getAgentRecentEarnings(agentId), // Get recent earnings
+      this.getAgentWalletOverview(agentId), // Get wallet overview
+      this.getAgentRecentActivity(agentId), // Get recent activity
       this.getAgentMonthlyCommissionsWithTransactions(agentId),
       this.getAgentEscrowTransactions(agentId),
       this.getAgentPaymentTransactions(agentId)
     ]);
 
+    // Calculate total bookings count for agent's properties only
+    const agentProperties = await prisma.property.findMany({
+      where: { agentId },
+      select: { id: true }
+    });
+    const agentPropertyIds = agentProperties.map(p => p.id);
+
+    const totalBookingsCount = await prisma.booking.count({
+      where: { propertyId: { in: agentPropertyIds } }
+    });
+
     return {
-      totalClients: totalClientsData.length,
-      activeClients: activeClientsData.length,
-      totalCommissions: transactionSummary.totalCommissions,
-      pendingCommissions: transactionSummary.pendingCommissions,
-      failedCommissions: transactionSummary.failedCommissions,
-      paidCommissions: transactionSummary.paidCommissions,
-      escrowHeldAmount: transactionSummary.escrowHeldAmount,
-      avgCommissionPerBooking: transactionSummary.avgCommissionPerBooking,
+      // Summary Stats
+      summaryStats: {
+        totalBookings: totalBookingsCount,
+        totalEarnings: transactionSummary.totalCommissions,
+        totalManagedProperties: managedProperties.length,
+        totalEarningsOverall: transactionSummary.paidCommissions,
+        totalClients: totalClientsData.length,
+        activeClients: activeClientsData.length
+      },
+
+      // Recent Data
       recentBookings: recentBookings.map(this.transformToAgentBookingInfo),
+      recentManagedProperties: managedProperties,
+      recentEarnings: recentEarnings,
+      recentActivity: recentActivity,
+
+      // Wallet Overview
+      walletOverview: walletData,
+
+      // Commission Breakdown
+      commissions: {
+        total: transactionSummary.totalCommissions,
+        pending: transactionSummary.pendingCommissions,
+        paid: transactionSummary.paidCommissions,
+        failed: transactionSummary.failedCommissions,
+        escrowHeld: transactionSummary.escrowHeldAmount,
+        avgPerBooking: transactionSummary.avgCommissionPerBooking
+      },
+
+      // Monthly Data
       monthlyCommissions: monthlyCommissions,
+
+      // Transaction Details
       transactionBreakdown: {
         escrowTransactions: escrowTransactions.slice(0, 10),
         paymentTransactions: paymentTransactions.slice(0, 10),
@@ -202,28 +244,347 @@ export class EnhancedPropertyService {
   }
 
   // === AGENT RECENT BOOKINGS WITH TRANSACTION DATA ===
-  async getAgentRecentBookingsWithTransactions(agentId: number) {
-    const recentBookings = await prisma.agentBooking.findMany({
+  async getAgentRecentBookingsWithTransactions(agentId: number, limit: number = 10) {
+    // Get properties uploaded by this agent
+    const agentProperties = await prisma.property.findMany({
       where: { agentId },
-      include: {
-        client: { select: { firstName: true, lastName: true } }
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 10
+      select: { id: true }
     });
 
-    // Enrich with transaction data
+    const agentPropertyIds = agentProperties.map(p => p.id);
+
+    // Get recent bookings for agent's properties only
+    const recentBookings = await prisma.booking.findMany({
+      where: {
+        propertyId: { in: agentPropertyIds }
+      },
+      include: {
+        property: { select: { name: true, location: true, images: true, hostId: true } },
+        guest: { select: { firstName: true, lastName: true, email: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit
+    });
+
+    // Enrich with transaction data and agent commission info
     const enrichedBookings = await Promise.all(
       recentBookings.map(async (booking) => {
-        const transactionData = await this.getBookingTransactionData(booking.id);
+        const agentBookingData = await prisma.agentBooking.findFirst({
+          where: {
+            bookingId: booking.id,
+            agentId
+          },
+          include: {
+            client: { select: { firstName: true, lastName: true, email: true } }
+          }
+        });
+
+        // Get transaction data only if agentBooking exists
+        const transactionData = agentBookingData
+          ? await this.getBookingTransactionData(agentBookingData.id)
+          : null;
+
         return {
-          ...booking,
+          id: agentBookingData?.id || booking.id,
+          bookingId: booking.id,
+          agentId,
+          clientId: booking.property.hostId,
+          commission: agentBookingData?.commission || 0,
+          status: agentBookingData?.status || 'pending',
+          createdAt: booking.createdAt,
+          client: agentBookingData?.client || { firstName: 'N/A', lastName: '', email: '' },
+          property: booking.property,
           transactionData
         };
       })
     );
 
     return enrichedBookings;
+  }
+
+  // === GET PROPERTY DATA FOR AGENT BOOKING ===
+  private async getPropertyDataForAgentBooking(bookingId: string) {
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        property: {
+          select: {
+            id: true,
+            name: true,
+            location: true,
+            images: true
+          }
+        }
+      }
+    });
+
+    return booking?.property || null;
+  }
+
+  // === GET AGENT MANAGED PROPERTIES ===
+  async getAgentManagedProperties(agentId: number) {
+    const properties = await prisma.property.findMany({
+      where: { agentId },
+      select: {
+        id: true,
+        name: true,
+        location: true,
+        type: true,
+        category: true,
+        pricePerNight: true,
+        status: true,
+        images: true,
+        averageRating: true,
+        createdAt: true,
+        updatedAt: true
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 10
+    });
+
+    // Get booking and review counts separately
+    const propertiesWithCounts = await Promise.all(
+      properties.map(async (property) => {
+        const [bookingCount, reviewCount] = await Promise.all([
+          prisma.booking.count({ where: { propertyId: property.id } }),
+          prisma.review.count({ where: { propertyId: property.id } })
+        ]);
+
+        return {
+          ...property,
+          rating: property.averageRating || 0,
+          totalBookings: bookingCount,
+          totalReviews: reviewCount
+        };
+      })
+    );
+
+    return propertiesWithCounts;
+  }
+
+  // === GET AGENT RECENT EARNINGS ===
+  async getAgentRecentEarnings(agentId: number) {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // Get properties uploaded by this agent
+    const agentProperties = await prisma.property.findMany({
+      where: { agentId },
+      select: { id: true }
+    });
+    const agentPropertyIds = agentProperties.map(p => p.id);
+
+    // Get recent bookings for agent's properties
+    const recentBookings = await prisma.booking.findMany({
+      where: {
+        propertyId: { in: agentPropertyIds },
+        createdAt: { gte: thirtyDaysAgo }
+      },
+      include: {
+        property: { select: { name: true, hostId: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10
+    });
+
+    // Enrich with agent commission data
+    const enrichedEarnings = await Promise.all(
+      recentBookings.map(async (booking) => {
+        const agentBookingData = await prisma.agentBooking.findFirst({
+          where: {
+            bookingId: booking.id,
+            agentId
+          },
+          include: {
+            client: { select: { firstName: true, lastName: true } }
+          }
+        });
+
+        return {
+          id: agentBookingData?.id || booking.id,
+          amount: agentBookingData?.commission || 0,
+          date: booking.createdAt,
+          source: `Booking #${booking.id}`,
+          clientName: agentBookingData ? `${agentBookingData.client.firstName} ${agentBookingData.client.lastName}` : 'N/A',
+          propertyName: booking.property?.name || 'N/A',
+          status: agentBookingData?.status || 'pending'
+        };
+      })
+    );
+
+    // Filter out bookings with no commission
+    return enrichedEarnings.filter(e => e.amount > 0);
+  }
+
+  // === GET AGENT WALLET OVERVIEW ===
+  async getAgentWalletOverview(agentId: number) {
+    const [walletData, escrowStates, paymentStates, withdrawalRequests] = await Promise.all([
+      prisma.wallet.findUnique({
+        where: { userId: agentId }
+      }),
+      this.getEscrowCommissionStates(agentId),
+      this.getPaymentCommissionStates(agentId),
+      prisma.withdrawalRequest.findMany({
+        where: {
+          userId: agentId,
+          status: { in: ['pending', 'processing'] }
+        }
+      })
+    ]);
+
+    const availableBalance = walletData?.balance || 0;
+    const pendingWithdrawals = withdrawalRequests.reduce((sum, req) => sum + req.amount, 0);
+
+    return {
+      availableBalance,
+      pendingBalance: escrowStates.pending + paymentStates.pending,
+      heldBalance: escrowStates.held,
+      totalEarned: escrowStates.paid + paymentStates.completed,
+      pendingWithdrawals,
+      currency: walletData?.currency || 'KES',
+      lastUpdated: walletData?.updatedAt || new Date()
+    };
+  }
+
+  // === GET AGENT RECENT ACTIVITY ===
+  async getAgentRecentActivity(agentId: number) {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    // Get properties uploaded by this agent
+    const agentProperties = await prisma.property.findMany({
+      where: { agentId },
+      select: { id: true }
+    });
+    const agentPropertyIds = agentProperties.map(p => p.id);
+
+    const [recentBookings, recentTransactions, recentWithdrawals, recentProperties] = await Promise.all([
+      // Recent bookings for agent's properties
+      prisma.booking.findMany({
+        where: {
+          propertyId: { in: agentPropertyIds },
+          createdAt: { gte: sevenDaysAgo }
+        },
+        include: {
+          property: { select: { name: true, hostId: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 5
+      }),
+
+      // Recent transactions
+      prisma.transaction.findMany({
+        where: {
+          OR: [
+            { userId: agentId },
+            { recipientId: agentId }
+          ],
+          createdAt: { gte: sevenDaysAgo }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 5
+      }),
+
+      // Recent withdrawal requests
+      prisma.withdrawalRequest.findMany({
+        where: {
+          userId: agentId,
+          createdAt: { gte: sevenDaysAgo }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 5
+      }),
+
+      // Recent property updates
+      prisma.property.findMany({
+        where: {
+          agentId,
+          updatedAt: { gte: sevenDaysAgo }
+        },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          updatedAt: true
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 5
+      })
+    ]);
+
+    // Combine and sort all activities
+    const activities: any[] = [];
+
+    // Process bookings with async to get commission data
+    for (const booking of recentBookings) {
+      const agentBookingData = await prisma.agentBooking.findFirst({
+        where: {
+          bookingId: booking.id,
+          agentId
+        },
+        include: {
+          client: { select: { firstName: true, lastName: true } }
+        }
+      });
+
+      activities.push({
+        type: 'booking',
+        action: 'New booking created',
+        description: agentBookingData
+          ? `Booking by ${agentBookingData.client.firstName} ${agentBookingData.client.lastName}`
+          : `Booking for ${booking.property.name}`,
+        timestamp: booking.createdAt,
+        metadata: {
+          bookingId: booking.id,
+          commission: agentBookingData?.commission || 0,
+          propertyName: booking.property.name
+        }
+      });
+    }
+
+    recentTransactions.forEach(transaction => {
+      activities.push({
+        type: 'transaction',
+        action: `${transaction.transactionType} transaction`,
+        description: `Amount: ${transaction.amount} ${transaction.currency}`,
+        timestamp: transaction.createdAt,
+        metadata: {
+          transactionId: transaction.id,
+          status: transaction.status
+        }
+      });
+    });
+
+    recentWithdrawals.forEach(withdrawal => {
+      activities.push({
+        type: 'withdrawal',
+        action: 'Withdrawal request',
+        description: `Amount: ${withdrawal.amount} - Status: ${withdrawal.status}`,
+        timestamp: withdrawal.createdAt,
+        metadata: {
+          withdrawalId: withdrawal.id,
+          status: withdrawal.status
+        }
+      });
+    });
+
+    recentProperties.forEach(property => {
+      activities.push({
+        type: 'property',
+        action: 'Property updated',
+        description: `${property.name} - Status: ${property.status}`,
+        timestamp: property.updatedAt,
+        metadata: {
+          propertyId: property.id,
+          status: property.status
+        }
+      });
+    });
+
+    // Sort by timestamp descending and return top 10
+    return activities
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      .slice(0, 10);
   }
 
   // === GET BOOKING TRANSACTION DATA ===

@@ -52,10 +52,9 @@ router.post('/:id/block-dates', validateHost, propertyController.blockPropertyDa
 // Host property pricing management
 router.patch('/:id/pricing', validateHost, propertyController.updatePropertyPricing);
 
-// --- ENHANCED AGENT DASHBOARD WITH TRANSACTION MONITORING ---
-// Enhanced agent dashboard with transaction data
+// --- AGENT DASHBOARD (CONSOLIDATED SINGLE ENDPOINT) ---
+// Comprehensive agent dashboard with all stats, recent data, wallet, and activity
 router.get('/agent/dashboard', validateAgent, enhancedPropertyController.getAgentDashboard);
-router.get('/agent/dashboard/enhanced', validateAgent, enhancedPropertyController.getAgentDashboard);
 
 // --- AGENT TRANSACTION MONITORING ROUTES ---
 // Transaction monitoring dashboard
@@ -181,8 +180,8 @@ router.get('/agent/all-properties', validateAgent, propertyController.getAllAgen
 // router.delete('/agent/own/properties/:id', validateAgent, propertyController.deleteProperty);
 // router.post('/agent/own/properties/:id/images', validateAgent, propertyController.uploadPropertyImages);
 
-// --- ENHANCED AGENT KPI ROUTES ---
-router.get('/agent/dashboard/enhanced', validateAgent, propertyController.getEnhancedAgentDashboard);
+// --- ENHANCED AGENT KPI ROUTES (OPTIONAL - Use main /agent/dashboard for comprehensive data) ---
+// These routes are kept for backward compatibility and granular access to specific metrics
 router.get('/agent/kpis/additional', validateAgent, propertyController.getAdditionalAgentKPIs);
 router.get('/agent/performance/trends', validateAgent, propertyController.getAgentPerformanceTrends);
 router.get('/agent/competitive/metrics', validateAgent, propertyController.getAgentCompetitiveMetrics);

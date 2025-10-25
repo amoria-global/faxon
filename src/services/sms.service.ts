@@ -81,15 +81,16 @@ export class BrevoSMSService {
    * Send withdrawal OTP - ONLY to registered phone number in database
    */
   async sendWithdrawalOTP(
-    userId: number, 
+    userId: number,
     registeredPhoneNumber: string, // This MUST be the phone from user's database record
-    amount: number, 
+    amount: number,
     currency: string = 'RWF'
   ): Promise<{
     success: boolean;
     message: string;
     messageId?: string;
     expiresIn?: number;
+    otp?: string; // INTERNAL USE ONLY - for sending to email
   }> {
     try {
       // SECURITY: Validate that we have a registered phone number
@@ -137,8 +138,18 @@ export class BrevoSMSService {
       const otp = this.generateOTP();
       const expiryTime = Date.now() + (5 * 60 * 1000); // 5 minutes
 
-      // Format the REGISTERED phone number
-      const formattedPhone = PhoneUtils.formatPhone(registeredPhoneNumber, true);
+      // Validate and format the REGISTERED phone number
+      const phoneValidation = PhoneUtils.validateRwandaPhone(registeredPhoneNumber);
+
+      if (!phoneValidation.isValid) {
+        console.error(`Invalid phone number for user ${userId}: ${registeredPhoneNumber}. Error: ${phoneValidation.error}`);
+        return {
+          success: false,
+          message: `Invalid phone number format: ${phoneValidation.error}. Please update your phone number in your profile.`
+        };
+      }
+
+      const formattedPhone = phoneValidation.formattedPhone!;
 
       // Create SMS message with user's name for personalization
       const userName = userFromDB.firstName || 'User';
@@ -189,12 +200,51 @@ export class BrevoSMSService {
           success: true,
           message: 'OTP sent to your registered phone number',
           messageId: smsResult.messageId,
-          expiresIn: 300 // 5 minutes in seconds
+          expiresIn: 300, // 5 minutes in seconds
+          otp: otp // INTERNAL USE ONLY - for sending to email
         };
       } else {
+        // SMS failed, but still store OTP for email fallback
+        const otpKey = `withdrawal_${userId}`;
+        this.otpStorage.set(otpKey, {
+          otp,
+          expiryTime,
+          attempts: 0,
+          phoneNumber: formattedPhone,
+          amount,
+          userId
+        });
+
+        // Store rate limit info
+        this.otpStorage.set(rateLimitKey, {
+          otp: '',
+          expiryTime,
+          attempts: 0,
+          phoneNumber: formattedPhone,
+          amount: 0,
+          userId
+        });
+
+        // Log failed SMS attempt
+        try {
+          await prisma.$executeRaw`
+            INSERT INTO sms_logs (user_id, phone_number, message_type, status, metadata, created_at)
+            VALUES (${userId}, ${formattedPhone}, 'withdrawal_otp', 'failed', ${JSON.stringify({
+              amount,
+              currency,
+              error: smsResult.error,
+              fallbackToEmail: true
+            })}, NOW())
+          `;
+        } catch (dbError) {
+          console.error('Failed to log SMS:', dbError);
+        }
+
         return {
           success: false,
-          message: smsResult.error || 'Failed to send OTP to registered phone number'
+          message: smsResult.error || 'Failed to send OTP to registered phone number',
+          otp: otp, // Return OTP for email fallback
+          expiresIn: 300
         };
       }
     } catch (error: any) {
@@ -284,15 +334,16 @@ export class BrevoSMSService {
    * Resend withdrawal OTP with rate limiting
    */
   async resendWithdrawalOTP(
-    userId: number, 
-    phoneNumber: string, 
-    amount: number, 
+    userId: number,
+    phoneNumber: string,
+    amount: number,
     currency: string = 'RWF'
   ): Promise<{
     success: boolean;
     message: string;
     messageId?: string;
     expiresIn?: number;
+    otp?: string; // INTERNAL USE ONLY - for sending to email
   }> {
     const otpKey = `withdrawal_${userId}`;
     const storedOTP = this.otpStorage.get(otpKey);
@@ -324,15 +375,24 @@ export class BrevoSMSService {
    * Send general notification SMS
    */
   async sendNotificationSMS(
-    phoneNumber: string, 
+    phoneNumber: string,
     message: string
   ): Promise<{
     success: boolean;
     messageId?: string;
     error?: string;
   }> {
-    const formattedPhone = PhoneUtils.formatPhone(phoneNumber, true);
-    return this.sendSMS(formattedPhone, `Jambolush: ${message}`);
+    const phoneValidation = PhoneUtils.validateRwandaPhone(phoneNumber);
+
+    if (!phoneValidation.isValid) {
+      console.error(`Invalid phone number for notification: ${phoneNumber}. Error: ${phoneValidation.error}`);
+      return {
+        success: false,
+        error: `Invalid phone number: ${phoneValidation.error}`
+      };
+    }
+
+    return this.sendSMS(phoneValidation.formattedPhone!, `Jambolush: ${message}`);
   }
 
   /**

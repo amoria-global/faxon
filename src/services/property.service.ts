@@ -2268,14 +2268,7 @@ export class PropertyService {
   private async getAgentPropertiesBasic(agentId: number) {
     return prisma.property.findMany({
       where: {
-        host: {
-          clientBookings: {
-            some: {
-              agentId,
-              status: 'active'
-            }
-          }
-        }
+        agentId: agentId
       },
       select: {
         id: true,
@@ -2581,31 +2574,15 @@ export class PropertyService {
   async getAgentProperties(agentId: number, filters: any, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
 
-    // Get all clients this agent manages
-    const agentClients = await prisma.agentBooking.findMany({
-      where: { agentId, status: 'active' },
-      select: { clientId: true }
-    });
-
-    const clientIds = agentClients.map(ac => ac.clientId);
-
-    // Query properties where:
-    // 1. hostId is in the agent's client list, OR
-    // 2. agentId matches (for properties directly assigned to agent)
+    // Query properties where agentId matches
+    // This ensures agents only see properties they uploaded/manage, not all properties from hosts they work with
     const whereClause: any = {
-      OR: [
-        { hostId: { in: clientIds } },
-        { agentId: agentId }
-      ]
+      agentId: agentId
     };
 
     if (filters.clientId) {
-      // Override to filter by specific client
-      whereClause.AND = [
-        { OR: whereClause.OR },
-        { hostId: filters.clientId }
-      ];
-      delete whereClause.OR;
+      // Filter by specific host (client)
+      whereClause.hostId = filters.clientId;
     }
     if (filters.status) {
       whereClause.status = filters.status;
@@ -2884,17 +2861,26 @@ export class PropertyService {
 
   async getAgentBookings(agentId: number, filters: any, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
-    
-    const whereClause: any = {
-      agentId
+
+    // Get properties uploaded by this agent
+    const agentProperties = await prisma.property.findMany({
+      where: { agentId },
+      select: { id: true }
+    });
+
+    const agentPropertyIds = agentProperties.map(p => p.id);
+
+    // Build where clause for bookings
+    const bookingWhereClause: any = {
+      propertyId: { in: agentPropertyIds }
     };
 
-    if (filters.clientId) {
-      whereClause.clientId = filters.clientId;
+    if (filters.status) {
+      bookingWhereClause.status = filters.status;
     }
 
     if (filters.dateRange) {
-      whereClause.createdAt = {
+      bookingWhereClause.createdAt = {
         gte: new Date(filters.dateRange.start),
         lte: new Date(filters.dateRange.end)
       };
@@ -2907,37 +2893,42 @@ export class PropertyService {
       orderBy.createdAt = 'desc';
     }
 
-    const [agentBookings, total] = await Promise.all([
-      prisma.agentBooking.findMany({
-        where: whereClause,
+    // Get bookings for agent's properties
+    const [bookings, total] = await Promise.all([
+      prisma.booking.findMany({
+        where: bookingWhereClause,
         include: {
-          client: { select: { firstName: true, lastName: true } }
+          property: { select: { name: true, hostId: true } },
+          guest: { select: { firstName: true, lastName: true } }
         },
         orderBy,
         skip,
         take: limit
       }),
-      prisma.agentBooking.count({ where: whereClause })
+      prisma.booking.count({ where: bookingWhereClause })
     ]);
 
-    const bookingIds = agentBookings.map(ab => ab.bookingId);
-    const actualBookings = await prisma.booking.findMany({
-      where: { id: { in: bookingIds } },
-      include: {
-        property: { select: { name: true } },
-        guest: { select: { firstName: true, lastName: true } }
-      }
-    });
+    // Enrich with agent commission data if available
+    const enrichedBookings = await Promise.all(
+      bookings.map(async (booking) => {
+        const agentBooking = await prisma.agentBooking.findFirst({
+          where: {
+            bookingId: booking.id,
+            agentId
+          },
+          include: {
+            client: { select: { firstName: true, lastName: true } }
+          }
+        });
 
-    const enrichedBookings = agentBookings.map(agentBooking => {
-      const actualBooking = actualBookings.find(b => b.id === agentBooking.bookingId);
-      return {
-        ...this.transformToBookingInfo(actualBooking),
-        agentCommission: agentBooking.commission,
-        commissionStatus: agentBooking.status,
-        clientName: `${agentBooking.client.firstName} ${agentBooking.client.lastName}`
-      };
-    });
+        return {
+          ...this.transformToBookingInfo(booking),
+          agentCommission: agentBooking?.commission || 0,
+          commissionStatus: agentBooking?.status || 'pending',
+          clientName: agentBooking ? `${agentBooking.client.firstName} ${agentBooking.client.lastName}` : 'N/A'
+        };
+      })
+    );
 
     return {
       bookings: enrichedBookings,
@@ -3657,26 +3648,14 @@ export class PropertyService {
 
   // --- PRIVATE HELPER METHODS ---
   private async verifyAgentPropertyAccess(agentId: number, propertyId: number): Promise<boolean> {
-    // First, get the property to find the host
+    // Check if the property was uploaded/managed by this agent
     const property = await prisma.property.findUnique({
       where: { id: propertyId },
-      select: { hostId: true }
+      select: { agentId: true }
     });
 
-    if (!property || !property.hostId) {
-      return false;
-    }
-
-    // Then check if the agent has access to this host (as a client)
-    const agentBooking = await prisma.agentBooking.findFirst({
-      where: {
-        agentId,
-        clientId: property.hostId,
-        status: 'active'
-      }
-    });
-
-    return !!agentBooking;
+    // Agent has access only if they uploaded/manage this property
+    return property?.agentId === agentId;
   }
 
   private async verifyAgentClientAccess(agentId: number, clientId: number): Promise<boolean> {
