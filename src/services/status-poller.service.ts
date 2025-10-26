@@ -16,14 +16,15 @@ export class StatusPollerService {
   private pollIntervalMs: number;
 
   // Configuration constants
-  private readonly MIN_AGE_HOURS = 2; // Minimum 2 hours old
-  private readonly MAX_AGE_DAYS = 10; // Maximum 10 days old
+  private readonly MAX_AGE_DAYS = 30; // Maximum 30 days old (increased from 10)
   private readonly ADMIN_EMAIL = 'admin@amoriaglobal.com';
+  private readonly RECHECK_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes for FAILED/PROCESSING
+  private readonly COMPLETED_RECHECK_MS = 2 * 60 * 1000; // 2 minutes for COMPLETED transactions/INITIATED/ACCEPTED
 
   constructor(
     pawaPayService: PawaPayService,
     xentriPayService: XentriPayService,
-    pollIntervalMs: number = 3 * 60 * 60 * 1000 // Default: 3 hours
+    pollIntervalMs: number = 30 * 1000 // Default: 30 seconds for instant checking
   ) {
     this.pawaPayService = pawaPayService;
     this.xentriPayService = xentriPayService;
@@ -39,8 +40,8 @@ export class StatusPollerService {
       return;
     }
 
-    const intervalHours = this.pollIntervalMs / (60 * 60 * 1000);
-    console.log(`[STATUS_POLLER] Starting comprehensive status polling (every ${intervalHours} hours)`);
+    const intervalSeconds = this.pollIntervalMs / 1000;
+    console.log(`[STATUS_POLLER] Starting instant transaction status polling (every ${intervalSeconds} seconds)`);
     this.isPolling = true;
 
     // Run immediately on start
@@ -65,26 +66,30 @@ export class StatusPollerService {
   }
 
   /**
-   * Poll all transactions (2 hours to 10 days old) for all payment providers
+   * Poll all transactions instantly - no age restrictions for PENDING status
+   * Checks all transaction types: deposits, payouts, withdrawals, refunds
    */
   private async pollAllTransactions() {
     try {
-      console.log('[STATUS_POLLER] Starting comprehensive polling cycle...');
+      console.log('[STATUS_POLLER] Starting instant polling cycle...');
 
       const now = new Date();
-      const minDate = new Date(now.getTime() - this.MAX_AGE_DAYS * 24 * 60 * 60 * 1000); // 10 days ago
-      const maxDate = new Date(now.getTime() - this.MIN_AGE_HOURS * 60 * 60 * 1000); // 2 hours ago
+      const minDate = new Date(now.getTime() - this.MAX_AGE_DAYS * 24 * 60 * 60 * 1000); // 30 days ago
+      const recheckDate = new Date(now.getTime() - this.RECHECK_INTERVAL_MS); // 10 minutes ago
+      const completedRecheckDate = new Date(now.getTime() - this.COMPLETED_RECHECK_MS); // 2 minutes ago
 
-      console.log(`[STATUS_POLLER] Checking transactions from ${minDate.toISOString()} to ${maxDate.toISOString()}`);
+      console.log(`[STATUS_POLLER] Checking all PENDING transactions (last ${this.MAX_AGE_DAYS} days)`);
+      console.log(`[STATUS_POLLER] Rechecking FAILED/PROCESSING transactions (last 10 minutes)`);
+      console.log(`[STATUS_POLLER] Rechecking COMPLETED transactions (last 2 minutes) for notifications/wallet updates`);
 
       // Run all checks in parallel
       await Promise.allSettled([
-        this.pollCompletedAndFailedPawaPayTransactions(minDate, maxDate),
-        this.pollCompletedAndFailedXentriPayTransactions(minDate, maxDate),
+        this.pollPawaPayTransactions(minDate, recheckDate, completedRecheckDate),
+        this.pollXentriPayTransactions(minDate, recheckDate, completedRecheckDate),
         this.pollWithdrawalRequests()
       ]);
 
-      console.log('[STATUS_POLLER] ✅ Comprehensive polling cycle complete');
+      console.log('[STATUS_POLLER] ✅ Instant polling cycle complete');
 
     } catch (error: any) {
       console.error('[STATUS_POLLER] ❌ Polling error:', error);
@@ -152,88 +157,22 @@ export class StatusPollerService {
   // }
 
   /**
-   * Poll PawaPay transactions that are COMPLETED or FAILED (2 hours to 10 days old)
+   * Poll PawaPay transactions - instant check for PENDING, recheck FAILED/PROCESSING every 10 mins, COMPLETED every 2 mins
+   * @param minDate - Oldest transaction to check (30 days ago)
+   * @param recheckDate - Date for rechecking FAILED/PROCESSING (10 minutes ago)
+   * @param completedRecheckDate - Date for rechecking COMPLETED transactions (2 minutes ago)
    */
-  private async pollCompletedAndFailedPawaPayTransactions(minDate: Date, maxDate: Date) {
+  private async pollPawaPayTransactions(minDate: Date, recheckDate: Date, completedRecheckDate: Date) {
     try {
-      console.log('[STATUS_POLLER] Checking completed/failed PawaPay transactions...');
+      console.log('[STATUS_POLLER] Checking PawaPay transactions...');
 
-      const transactions = await prisma.transaction.findMany({
-        where: {
-          provider: 'PAWAPAY',
-          status: { in: ['COMPLETED', 'FAILED'] },
-          transactionType: 'DEPOSIT', // Only deposits (payments for bookings)
-          createdAt: {
-            gte: minDate,
-            lte: maxDate
-          }
-        },
-        select: {
-          id: true,
-          userId: true,
-          reference: true,
-          transactionType: true,
-          status: true,
-          createdAt: true,
-          bookingId: true,
-          metadata: true,
-          completedAt: true,
-          failureCode: true,
-          failureReason: true,
-          statusCheckCount: true,
-          lastStatusCheck: true,
-          notificationCount: true,
-          notificationSentAt: true
-        },
-        take: 100
-      });
-
-      if (transactions.length === 0) {
-        console.log('[STATUS_POLLER] No completed/failed PawaPay transactions to check');
-        return;
-      }
-
-      console.log(`[STATUS_POLLER] Found ${transactions.length} completed/failed PawaPay transactions to process`);
-
-      let processed = 0;
-      let errors = 0;
-
-      for (const transaction of transactions) {
-        try {
-          await this.processPawaPayTransactionForBooking(transaction);
-          processed++;
-        } catch (error: any) {
-          console.error(`[STATUS_POLLER] Failed to process PawaPay transaction ${transaction.reference}:`, error.message);
-          errors++;
-        }
-
-        await this.delay(500); // Rate limiting
-      }
-
-      console.log(`[STATUS_POLLER] ✅ PawaPay: ${processed} processed, ${errors} errors`);
-
-    } catch (error: any) {
-      console.error('[STATUS_POLLER] ❌ PawaPay polling error:', error);
-    }
-  }
-
-  /**
-   * Poll XentriPay transactions - checks PENDING transactions from provider API
-   * Also processes COMPLETED/FAILED transactions for booking confirmations
-   * Handles both DEPOSIT (card/mobile money collections) and PAYOUT (withdrawals/refunds)
-   */
-  private async pollCompletedAndFailedXentriPayTransactions(minDate: Date, maxDate: Date) {
-    try {
-      console.log('[STATUS_POLLER] Checking XentriPay transactions...');
-
-      // Get PENDING transactions to check status from provider
+      // 1. Check ALL PENDING transactions (instant, no age limit except minDate)
       const pendingTransactions = await prisma.transaction.findMany({
         where: {
-          provider: 'XENTRIPAY',
+          provider: 'PAWAPAY',
           status: 'PENDING',
           createdAt: {
-            gte: minDate,
-            lte: maxDate
+            gte: minDate
           }
         },
         select: {
@@ -248,18 +187,62 @@ export class StatusPollerService {
           statusCheckCount: true,
           lastStatusCheck: true
         },
+        take: 100
+      });
+
+      // 2. Check FAILED/PROCESSING transactions that haven't been checked in last 10 minutes
+      const recheckTransactions = await prisma.transaction.findMany({
+        where: {
+          provider: 'PAWAPAY',
+          status: { in: ['FAILED', 'PROCESSING'] },
+          createdAt: {
+            gte: minDate
+          },
+          OR: [
+            { lastStatusCheck: null },
+            { lastStatusCheck: { lt: recheckDate } }
+          ]
+        },
+        select: {
+          id: true,
+          userId: true,
+          reference: true,
+          transactionType: true,
+          status: true,
+          createdAt: true,
+          bookingId: true,
+          metadata: true,
+          statusCheckCount: true,
+          lastStatusCheck: true,
+          failureCode: true,
+          failureReason: true
+        },
         take: 50
       });
 
-      // Get COMPLETED/FAILED transactions that need booking processing
+      // 3. Check COMPLETED transactions every 2 minutes to ensure notifications/wallet updates
+      // Check both: (a) never notified OR (b) not checked in last 2 minutes
       const completedTransactions = await prisma.transaction.findMany({
         where: {
-          provider: 'XENTRIPAY',
-          status: { in: ['COMPLETED', 'FAILED'] },
+          provider: 'PAWAPAY',
+          status: 'COMPLETED',
           createdAt: {
-            gte: minDate,
-            lte: maxDate
-          }
+            gte: minDate
+          },
+          OR: [
+            { notificationSentAt: null }, // Never notified
+            {
+              AND: [
+                { notificationSentAt: { not: null } }, // Already notified
+                {
+                  OR: [
+                    { lastStatusCheck: null }, // Never checked
+                    { lastStatusCheck: { lt: completedRecheckDate } } // Not checked in last 2 mins
+                  ]
+                }
+              ]
+            }
+          ]
         },
         select: {
           id: true,
@@ -271,28 +254,266 @@ export class StatusPollerService {
           bookingId: true,
           metadata: true,
           completedAt: true,
-          failureCode: true,
-          failureReason: true,
-          statusCheckCount: true,
-          lastStatusCheck: true,
           notificationCount: true,
           notificationSentAt: true
         },
         take: 50
       });
 
-      if (pendingTransactions.length === 0 && completedTransactions.length === 0) {
-        console.log('[STATUS_POLLER] No XentriPay transactions to check');
+      const totalCount = pendingTransactions.length + recheckTransactions.length + completedTransactions.length;
+      if (totalCount === 0) {
+        console.log('[STATUS_POLLER] No PawaPay transactions to check');
         return;
       }
 
-      console.log(`[STATUS_POLLER] Found ${pendingTransactions.length} pending + ${completedTransactions.length} completed/failed XentriPay transactions`);
+      console.log(`[STATUS_POLLER] Found ${pendingTransactions.length} pending + ${recheckTransactions.length} recheck + ${completedTransactions.length} completed PawaPay transactions`);
 
       let polled = 0;
       let processed = 0;
       let errors = 0;
 
-      // First, poll PENDING transactions from provider API
+      // 1. Poll PENDING transactions to check their status (INSTANT)
+      for (const transaction of pendingTransactions) {
+        try {
+          // Update status check tracking
+          await prisma.transaction.update({
+            where: { id: transaction.id },
+            data: {
+              statusCheckCount: { increment: 1 },
+              lastStatusCheck: new Date()
+            }
+          });
+
+          // Check status from PawaPay API
+          const depositId = (transaction.metadata as any)?.depositId;
+          if (depositId) {
+            const status = await this.pawaPayService.getDepositStatus(depositId);
+
+            // Update transaction if status changed
+            const newStatus = this.mapPawaPayStatus(status.status);
+            if (newStatus !== transaction.status) {
+              // Extract failure reason as string
+              let failureReasonStr: string | undefined;
+              if (status.failureReason) {
+                failureReasonStr = typeof status.failureReason === 'string'
+                  ? status.failureReason
+                  : JSON.stringify(status.failureReason);
+              }
+
+              await prisma.transaction.update({
+                where: { id: transaction.id },
+                data: {
+                  status: newStatus,
+                  completedAt: newStatus === 'COMPLETED' ? new Date() : null,
+                  failureReason: failureReasonStr,
+                  metadata: {
+                    ...(transaction.metadata as any),
+                    lastProviderCheck: status
+                  }
+                }
+              });
+              console.log(`[STATUS_POLLER] ✅ Updated PawaPay transaction ${transaction.reference}: ${transaction.status} → ${newStatus}`);
+            }
+          }
+
+          polled++;
+        } catch (error: any) {
+          console.error(`[STATUS_POLLER] Failed to poll PawaPay transaction ${transaction.reference}:`, error.message);
+          errors++;
+        }
+
+        await this.delay(300); // Rate limiting
+      }
+
+      // 2. Recheck FAILED/PROCESSING transactions (every 10 minutes)
+      for (const transaction of recheckTransactions) {
+        try {
+          // Update status check tracking
+          await prisma.transaction.update({
+            where: { id: transaction.id },
+            data: {
+              statusCheckCount: { increment: 1 },
+              lastStatusCheck: new Date()
+            }
+          });
+
+          // Check status from PawaPay API
+          const depositId = (transaction.metadata as any)?.depositId;
+          if (depositId) {
+            const status = await this.pawaPayService.getDepositStatus(depositId);
+            const newStatus = this.mapPawaPayStatus(status.status);
+
+            if (newStatus !== transaction.status) {
+              let failureReasonStr: string | undefined;
+              if (status.failureReason) {
+                failureReasonStr = typeof status.failureReason === 'string'
+                  ? status.failureReason
+                  : JSON.stringify(status.failureReason);
+              }
+
+              await prisma.transaction.update({
+                where: { id: transaction.id },
+                data: {
+                  status: newStatus,
+                  completedAt: newStatus === 'COMPLETED' ? new Date() : null,
+                  failureReason: failureReasonStr,
+                  metadata: {
+                    ...(transaction.metadata as any),
+                    lastProviderCheck: status
+                  }
+                }
+              });
+              console.log(`[STATUS_POLLER] ✅ Rechecked PawaPay transaction ${transaction.reference}: ${transaction.status} → ${newStatus}`);
+            }
+          }
+
+          polled++;
+        } catch (error: any) {
+          console.error(`[STATUS_POLLER] Failed to recheck PawaPay transaction ${transaction.reference}:`, error.message);
+          errors++;
+        }
+
+        await this.delay(300); // Rate limiting
+      }
+
+      // 3. Process COMPLETED transactions for booking confirmations and notifications
+      for (const transaction of completedTransactions) {
+        try {
+          await this.processPawaPayTransactionForBooking(transaction);
+          processed++;
+        } catch (error: any) {
+          console.error(`[STATUS_POLLER] Failed to process PawaPay transaction ${transaction.reference}:`, error.message);
+          errors++;
+        }
+
+        await this.delay(300); // Rate limiting
+      }
+
+      console.log(`[STATUS_POLLER] ✅ PawaPay: ${polled} polled/rechecked, ${processed} processed, ${errors} errors`);
+
+    } catch (error: any) {
+      console.error('[STATUS_POLLER] ❌ PawaPay polling error:', error);
+    }
+  }
+
+  /**
+   * Poll XentriPay transactions - instant check for PENDING, recheck FAILED/PROCESSING every 10 mins, COMPLETED every 2 mins
+   * Handles both DEPOSIT (card/mobile money collections) and PAYOUT (withdrawals/refunds)
+   * @param minDate - Oldest transaction to check (30 days ago)
+   * @param recheckDate - Date for rechecking FAILED/PROCESSING (10 minutes ago)
+   * @param completedRecheckDate - Date for rechecking COMPLETED transactions (2 minutes ago)
+   */
+  private async pollXentriPayTransactions(minDate: Date, recheckDate: Date, completedRecheckDate: Date) {
+    try {
+      console.log('[STATUS_POLLER] Checking XentriPay transactions...');
+
+      // 1. Check ALL PENDING transactions (instant, no age limit except minDate)
+      const pendingTransactions = await prisma.transaction.findMany({
+        where: {
+          provider: 'XENTRIPAY',
+          status: 'PENDING',
+          createdAt: {
+            gte: minDate
+          }
+        },
+        select: {
+          id: true,
+          userId: true,
+          reference: true,
+          transactionType: true,
+          status: true,
+          createdAt: true,
+          bookingId: true,
+          metadata: true,
+          statusCheckCount: true,
+          lastStatusCheck: true
+        },
+        take: 100
+      });
+
+      // 2. Check FAILED/PROCESSING transactions that haven't been checked in last 10 minutes
+      const recheckTransactions = await prisma.transaction.findMany({
+        where: {
+          provider: 'XENTRIPAY',
+          status: { in: ['FAILED', 'PROCESSING'] },
+          createdAt: {
+            gte: minDate
+          },
+          OR: [
+            { lastStatusCheck: null },
+            { lastStatusCheck: { lt: recheckDate } }
+          ]
+        },
+        select: {
+          id: true,
+          userId: true,
+          reference: true,
+          transactionType: true,
+          status: true,
+          createdAt: true,
+          bookingId: true,
+          metadata: true,
+          statusCheckCount: true,
+          lastStatusCheck: true,
+          failureCode: true,
+          failureReason: true
+        },
+        take: 50
+      });
+
+      // 3. Check COMPLETED transactions every 2 minutes to ensure notifications/wallet updates
+      // Check both: (a) never notified OR (b) not checked in last 2 minutes
+      const completedTransactions = await prisma.transaction.findMany({
+        where: {
+          provider: 'XENTRIPAY',
+          status: 'COMPLETED',
+          createdAt: {
+            gte: minDate
+          },
+          OR: [
+            { notificationSentAt: null }, // Never notified
+            {
+              AND: [
+                { notificationSentAt: { not: null } }, // Already notified
+                {
+                  OR: [
+                    { lastStatusCheck: null }, // Never checked
+                    { lastStatusCheck: { lt: completedRecheckDate } } // Not checked in last 2 mins
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        select: {
+          id: true,
+          userId: true,
+          reference: true,
+          transactionType: true,
+          status: true,
+          createdAt: true,
+          bookingId: true,
+          metadata: true,
+          completedAt: true,
+          notificationCount: true,
+          notificationSentAt: true
+        },
+        take: 50
+      });
+
+      const totalCount = pendingTransactions.length + recheckTransactions.length + completedTransactions.length;
+      if (totalCount === 0) {
+        console.log('[STATUS_POLLER] No XentriPay transactions to check');
+        return;
+      }
+
+      console.log(`[STATUS_POLLER] Found ${pendingTransactions.length} pending + ${recheckTransactions.length} recheck + ${completedTransactions.length} completed XentriPay transactions`);
+
+      let polled = 0;
+      let processed = 0;
+      let errors = 0;
+
+      // 1. Poll PENDING transactions from provider API (INSTANT)
       for (const transaction of pendingTransactions) {
         try {
           await this.pollXentriPayTransactionStatus(transaction);
@@ -302,10 +523,23 @@ export class StatusPollerService {
           errors++;
         }
 
-        await this.delay(500); // Rate limiting
+        await this.delay(300); // Rate limiting
       }
 
-      // Then, process COMPLETED/FAILED transactions for booking confirmations
+      // 2. Recheck FAILED/PROCESSING transactions (every 10 minutes)
+      for (const transaction of recheckTransactions) {
+        try {
+          await this.pollXentriPayTransactionStatus(transaction);
+          polled++;
+        } catch (error: any) {
+          console.error(`[STATUS_POLLER] Failed to recheck XentriPay transaction ${transaction.reference}:`, error.message);
+          errors++;
+        }
+
+        await this.delay(300); // Rate limiting
+      }
+
+      // 3. Process COMPLETED transactions for booking confirmations and notifications
       for (const transaction of completedTransactions) {
         try {
           // Handle both DEPOSIT (card/collections) and PAYOUT (withdrawals)
@@ -320,10 +554,10 @@ export class StatusPollerService {
           errors++;
         }
 
-        await this.delay(500); // Rate limiting
+        await this.delay(300); // Rate limiting
       }
 
-      console.log(`[STATUS_POLLER] ✅ XentriPay: ${polled} polled, ${processed} processed, ${errors} errors`);
+      console.log(`[STATUS_POLLER] ✅ XentriPay: ${polled} polled/rechecked, ${processed} processed, ${errors} errors`);
 
     } catch (error: any) {
       console.error('[STATUS_POLLER] ❌ XentriPay polling error:', error);
@@ -429,6 +663,21 @@ export class StatusPollerService {
     };
 
     return statusMap[xentriPayStatus?.toUpperCase()] || 'PENDING';
+  }
+
+  /**
+   * Map PawaPay status to internal status
+   */
+  private mapPawaPayStatus(pawaPayStatus: string): 'PENDING' | 'COMPLETED' | 'FAILED' {
+    const statusMap: Record<string, 'PENDING' | 'COMPLETED' | 'FAILED'> = {
+      'ACCEPTED': 'PENDING',
+      'SUBMITTED': 'PENDING',
+      'COMPLETED': 'COMPLETED',
+      'FAILED': 'FAILED',
+      'REJECTED': 'FAILED'
+    };
+
+    return statusMap[pawaPayStatus?.toUpperCase()] || 'PENDING';
   }
 
   /**
@@ -695,21 +944,21 @@ export class StatusPollerService {
    */
   async pollWithdrawalRequests(): Promise<void> {
     try {
-      console.log('[STATUS_POLLER] Checking APPROVED and FAILED withdrawal requests...');
+      console.log('[STATUS_POLLER] Checking withdrawal requests (instant for PENDING/APPROVED)...');
 
       const now = new Date();
       const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000); // Changed from 2 hours to 30 minutes
-      const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+      const recheckDate = new Date(now.getTime() - 10 * 60 * 1000); // 10 minutes ago for rechecking
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-      // Get APPROVED and FAILED withdrawal requests
+      // Get ALL PENDING, APPROVED, and FAILED withdrawal requests (instant checking)
       const activeWithdrawals = await prisma.withdrawalRequest.findMany({
         where: {
           status: {
-            in: ['APPROVED', 'FAILED']
+            in: ['PENDING', 'APPROVED', 'FAILED']
           },
           createdAt: {
-            gte: tenDaysAgo // Last 10 days
+            gte: thirtyDaysAgo // Last 30 days
           }
         },
         include: {
@@ -729,18 +978,23 @@ export class StatusPollerService {
         take: 100
       });
 
-      console.log(`[STATUS_POLLER] Found ${activeWithdrawals.length} withdrawal requests to process (APPROVED + FAILED)`);
+      console.log(`[STATUS_POLLER] Found ${activeWithdrawals.length} withdrawal requests to process (PENDING/APPROVED/FAILED)`);
 
+      let pendingCount = 0;
       let approvedCount = 0;
       let failedCount = 0;
       let expiredCount = 0;
       let processedCount = 0;
-      let skippedCount = 0;
       let refundedCount = 0;
 
       for (const withdrawal of activeWithdrawals) {
         try {
-          if (withdrawal.status === 'APPROVED') {
+          if (withdrawal.status === 'PENDING') {
+            pendingCount++;
+            // PENDING withdrawals await admin approval - just log them
+            console.log(`[STATUS_POLLER] Withdrawal ${withdrawal.reference} is PENDING admin approval`);
+
+          } else if (withdrawal.status === 'APPROVED') {
             approvedCount++;
 
             // Check if approved more than 24 hours ago (expired)
@@ -748,13 +1002,10 @@ export class StatusPollerService {
               expiredCount++;
               await this.handleExpiredWithdrawal(withdrawal);
             }
-            // Check if approved more than 30 minutes ago (check status from provider)
-            else if (withdrawal.approvedAt && withdrawal.approvedAt < thirtyMinutesAgo) {
+            // INSTANT CHECK: Check all APPROVED withdrawals immediately
+            else {
               await this.checkWithdrawalStatusFromProvider(withdrawal);
               processedCount++;
-            } else {
-              skippedCount++;
-              console.log(`[STATUS_POLLER] Withdrawal ${withdrawal.reference} recently approved (< 30 minutes) - skipping`);
             }
 
           } else if (withdrawal.status === 'FAILED') {
@@ -813,7 +1064,7 @@ export class StatusPollerService {
             }
           }
 
-          await this.delay(500); // Rate limiting
+          await this.delay(300); // Rate limiting
         } catch (error: any) {
           console.error(`[STATUS_POLLER] Error processing withdrawal ${withdrawal.reference}:`, error);
         }
@@ -821,12 +1072,12 @@ export class StatusPollerService {
 
       console.log('[STATUS_POLLER] ✅ Withdrawal polling complete:', {
         total: activeWithdrawals.length,
+        pending: pendingCount,
         approved: approvedCount,
         failed: failedCount,
         expired: expiredCount,
         processed: processedCount,
-        refunded: refundedCount,
-        skipped: skippedCount
+        refunded: refundedCount
       });
 
     } catch (error: any) {
