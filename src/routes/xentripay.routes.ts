@@ -192,10 +192,10 @@ if (!isProduction) {
         cname: 'Test User',
         amount: Math.round(amount),
         cnumber: PhoneUtils.formatPhone(phone, false),
-        msisdn: PhoneUtils.formatPhone(phone, true),
+        msisdn: PhoneUtils.formatPhone(phone, true).replace(/^\+/, ''),
         currency: 'RWF',
         pmethod: 'momo',
-        chargesIncluded: 'true'
+        chargesIncluded: true
       });
 
       res.json({
