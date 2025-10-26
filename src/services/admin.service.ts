@@ -253,22 +253,30 @@ export class AdminService {
       verificationStatus: user.verificationStatus || 'unverified',
       kycStatus: user.kycStatus,
       provider: user.provider,
+      providerId: user.providerId,
       country: user.country,
       totalBookings: user._count?.bookingsAsGuest || 0,
       totalProperties: user._count?.ownedProperties || 0,
       totalTours: user._count?.toursAsGuide || 0,
       lastLogin: user.lastLogin?.toISOString(),
       createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt.toISOString(),
       isVerified: user.isVerified,
       profileImage: user.profileImage,
       phone: user.phone,
       phoneCountryCode: user.phoneCountryCode,
+      preferredCommunication: user.preferredCommunication,
+      hostNotes: user.hostNotes,
       address: {
         street: user.street,
         city: user.city,
         state: user.state,
         province: user.province,
         country: user.country,
+        county: user.county,
+        district: user.district,
+        region: user.region,
+        sector: user.sector,
         zipCode: user.zipCode,
         postalCode: user.postalCode,
         postcode: user.postcode,
@@ -283,22 +291,37 @@ export class AdminService {
         specializations: user.specializations,
         rating: user.rating,
         totalSessions: user.totalSessions,
-        averageRating: user.averageRating
+        averageRating: user.averageRating,
+        totalTours: user.totalTours
       },
       business: {
         companyName: user.companyName,
         companyTIN: user.companyTIN,
         licenseNumber: user.licenseNumber,
         tourGuideType: user.tourGuideType,
-        certifications: user.certifications
+        certifications: user.certifications,
+        employmentContract: user.employmentContract
       },
       verification: {
         isVerified: user.isVerified,
         verificationDocument: user.verificationDocument,
         addressDocument: user.addressDocument,
+        nationalId: user.nationalId,
+        passportPhotoUrl: user.passportPhotoUrl,
         kycCompleted: user.kycCompleted,
         kycSubmittedAt: user.kycSubmittedAt?.toISOString(),
         twoFactorEnabled: user.twoFactorEnabled
+      },
+      referral: {
+        referralCode: user.referralCode,
+        referralStatus: user.referralStatus,
+        referredAt: user.referredAt?.toISOString(),
+        referredBy: user.referredBy
+      },
+      financial: {
+        bankAccounts: user.bankAccounts || [],
+        mobileMoneyAccounts: user.mobileMoneyAccounts || [],
+        wallet: user.wallet || null
       },
       metrics,
       recentActivity,

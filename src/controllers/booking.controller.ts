@@ -780,6 +780,239 @@ export class BookingController {
   };
 
 
+  // --- CHECK-IN/CHECKOUT OPERATIONS ---
+  checkInPropertyBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const userId = parseInt(req.user.userId);
+      const bookingId = req.params.bookingId;
+
+      // Fetch the booking to check payment status
+      const booking = await this.bookingService.getPropertyBookingById(bookingId, userId);
+
+      if (!booking) {
+        res.status(404).json({
+          success: false,
+          message: 'Booking not found'
+        });
+        return;
+      }
+
+      // Validate payment status
+      if (booking.paymentStatus !== 'completed') {
+        res.status(400).json({
+          success: false,
+          message: `Cannot check-in. Payment status is ${booking.paymentStatus}. Payment must be completed before check-in.`
+        });
+        return;
+      }
+
+      // Update check-in validation
+      const updatedBooking = await this.bookingService.updatePropertyBooking(bookingId, userId, {
+        checkInValidated: true,
+        checkInValidatedAt: new Date(),
+        checkInValidatedBy: userId
+      } as any);
+
+      res.json({
+        success: true,
+        message: 'Property check-in completed successfully',
+        data: updatedBooking
+      });
+    } catch (error: any) {
+      console.error('Error checking in property booking:', error);
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to check-in'
+      });
+    }
+  };
+
+  checkOutPropertyBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const userId = parseInt(req.user.userId);
+      const bookingId = req.params.bookingId;
+
+      // Fetch the booking to check payment status
+      const booking = await this.bookingService.getPropertyBookingById(bookingId, userId);
+
+      if (!booking) {
+        res.status(404).json({
+          success: false,
+          message: 'Booking not found'
+        });
+        return;
+      }
+
+      // Validate payment status
+      if (booking.paymentStatus !== 'completed') {
+        res.status(400).json({
+          success: false,
+          message: `Cannot check-out. Payment status is ${booking.paymentStatus}. Payment must be completed.`
+        });
+        return;
+      }
+
+      // Validate check-in was done
+      if (!booking.checkInValidated) {
+        res.status(400).json({
+          success: false,
+          message: 'Cannot check-out. Guest has not checked in yet.'
+        });
+        return;
+      }
+
+      // Update check-out validation
+      const updatedBooking = await this.bookingService.updatePropertyBooking(bookingId, userId, {
+        checkOutValidated: true,
+        checkOutValidatedAt: new Date(),
+        checkOutValidatedBy: userId,
+        status: 'completed'
+      } as any);
+
+      res.json({
+        success: true,
+        message: 'Property check-out completed successfully',
+        data: updatedBooking
+      });
+    } catch (error: any) {
+      console.error('Error checking out property booking:', error);
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to check-out'
+      });
+    }
+  };
+
+  checkInTourBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const userId = parseInt(req.user.userId);
+      const bookingId = req.params.bookingId;
+
+      // Fetch the booking to check payment status
+      const booking = await this.bookingService.getTourBookingById(bookingId, userId);
+
+      if (!booking) {
+        res.status(404).json({
+          success: false,
+          message: 'Tour booking not found'
+        });
+        return;
+      }
+
+      // Validate payment status
+      if (booking.paymentStatus !== 'completed') {
+        res.status(400).json({
+          success: false,
+          message: `Cannot check-in. Payment status is ${booking.paymentStatus}. Payment must be completed before check-in.`
+        });
+        return;
+      }
+
+      // Update check-in status
+      const updatedBooking = await this.bookingService.updateTourBooking(bookingId, userId, {
+        checkInStatus: 'checked_in'
+      });
+
+      res.json({
+        success: true,
+        message: 'Tour check-in completed successfully',
+        data: updatedBooking
+      });
+    } catch (error: any) {
+      console.error('Error checking in tour booking:', error);
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to check-in'
+      });
+    }
+  };
+
+  checkOutTourBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const userId = parseInt(req.user.userId);
+      const bookingId = req.params.bookingId;
+
+      // Fetch the booking to check payment status
+      const booking = await this.bookingService.getTourBookingById(bookingId, userId);
+
+      if (!booking) {
+        res.status(404).json({
+          success: false,
+          message: 'Tour booking not found'
+        });
+        return;
+      }
+
+      // Validate payment status
+      if (booking.paymentStatus !== 'completed') {
+        res.status(400).json({
+          success: false,
+          message: `Cannot check-out. Payment status is ${booking.paymentStatus}. Payment must be completed.`
+        });
+        return;
+      }
+
+      // Validate check-in was done
+      if (booking.checkInStatus !== 'checked_in') {
+        res.status(400).json({
+          success: false,
+          message: 'Cannot check-out. Participant has not checked in yet.'
+        });
+        return;
+      }
+
+      // Update check-out status
+      const updatedBooking = await this.bookingService.updateTourBooking(bookingId, userId, {
+        checkInStatus: 'checked_out',
+        status: 'completed'
+      });
+
+      res.json({
+        success: true,
+        message: 'Tour check-out completed successfully',
+        data: updatedBooking
+      });
+    } catch (error: any) {
+      console.error('Error checking out tour booking:', error);
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to check-out'
+      });
+    }
+  };
+
   // --- BULK OPERATIONS ---
   cancelBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {

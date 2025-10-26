@@ -15,6 +15,12 @@ export interface UpdatePropertyBookingDto {
   message?: string;
   specialRequests?: string;
   guestNotes?: string;
+  checkInValidated?: boolean;
+  checkInValidatedAt?: Date;
+  checkInValidatedBy?: number;
+  checkOutValidated?: boolean;
+  checkOutValidatedAt?: Date;
+  checkOutValidatedBy?: number;
 }
 
 export interface PropertyBookingInfo {
@@ -49,6 +55,12 @@ export interface PropertyBookingInfo {
   specialRequests?: string;
   checkInInstructions?: string;
   checkOutInstructions?: string;
+  checkInValidated?: boolean;
+  checkInValidatedAt?: string;
+  checkInValidatedBy?: number;
+  checkOutValidated?: boolean;
+  checkOutValidatedAt?: string;
+  checkOutValidatedBy?: number;
   createdAt: string;
   updatedAt: string;
 }

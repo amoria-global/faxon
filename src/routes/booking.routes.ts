@@ -34,6 +34,28 @@ router.get('/properties', bookingController.searchPropertyBookings);
 // Cancel property booking
 router.patch('/properties/:bookingId/cancel', bookingController.cancelBooking);
 
+// Check-in property booking (host only)
+router.patch('/properties/:bookingId/checkin', (req, res, next) => {
+  if (req.user?.userType && req.user.userType !== 'host') {
+    return res.status(403).json({
+      success: false,
+      message: 'Host access required'
+    });
+  }
+  next();
+}, bookingController.checkInPropertyBooking);
+
+// Check-out property booking (host only)
+router.patch('/properties/:bookingId/checkout', (req, res, next) => {
+  if (req.user?.userType && req.user.userType !== 'host') {
+    return res.status(403).json({
+      success: false,
+      message: 'Host access required'
+    });
+  }
+  next();
+}, bookingController.checkOutPropertyBooking);
+
 // --- TOUR BOOKING ROUTES ---
 // Create tour booking
 router.post('/tours', validateTourBooking, bookingController.createTourBooking);
@@ -153,10 +175,8 @@ router.patch('/tourguide/:bookingId/checkin', (req, res, next) => {
       message: 'Tour guide access required'
     });
   }
-  // Add check-in status to body
-  req.body.checkInStatus = 'checked_in';
   next();
-}, validateBookingUpdate, bookingController.updateTourBooking);
+}, bookingController.checkInTourBooking);
 
 // Check-out participant
 router.patch('/tourguide/:bookingId/checkout', (req, res, next) => {
@@ -166,10 +186,8 @@ router.patch('/tourguide/:bookingId/checkout', (req, res, next) => {
       message: 'Tour guide access required'
     });
   }
-  // Add check-out status to body
-  req.body.checkInStatus = 'checked_out';
   next();
-}, validateBookingUpdate, bookingController.updateTourBooking);
+}, bookingController.checkOutTourBooking);
 
 // --- AGENT SPECIFIC ROUTES ---
 // Agent dashboard - all client bookings
