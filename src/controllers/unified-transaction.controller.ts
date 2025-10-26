@@ -454,8 +454,28 @@ export class UnifiedTransactionController {
       }
     }
 
-    // Use phone number or default (cnumber must be 10 digits without country code)
-    const contactNumber = phoneNumber || user?.phone || '0780000000';
+    // Get phone number from request or user session - REQUIRED for payment processing
+    const contactNumber = phoneNumber || user?.phone;
+
+    // Phone number is required for card payments
+    if (!contactNumber) {
+      res.status(400).json({
+        success: false,
+        message: 'Phone number is required. Please provide a valid Rwanda phone number or update your profile.'
+      });
+      return;
+    }
+
+    // Validate and format phone number
+    const phoneValidation = PhoneUtils.validateRwandaPhone(contactNumber);
+    if (!phoneValidation.isValid) {
+      res.status(400).json({
+        success: false,
+        message: `Invalid phone number: ${phoneValidation.error}. Please provide a valid Rwanda phone number (e.g., 0780000000).`
+      });
+      return;
+    }
+
     const cnumberFormatted = PhoneUtils.formatPhone(contactNumber, false); // e.g., "0780371519"
     const msisdnFormatted = PhoneUtils.formatPhone(contactNumber, true); // e.g., "250780371519"
 
@@ -463,7 +483,27 @@ export class UnifiedTransactionController {
     if (!/^\d{10}$/.test(cnumberFormatted)) {
       res.status(400).json({
         success: false,
-        message: 'Phone number must be exactly 10 digits (e.g., 0780000000)'
+        message: 'Phone number must be exactly 10 digits (e.g., 0780371519)'
+      });
+      return;
+    }
+
+    // Validate email is available
+    const userEmail = email || user?.email;
+    if (!userEmail) {
+      res.status(400).json({
+        success: false,
+        message: 'Email is required. Please provide an email address or update your profile.'
+      });
+      return;
+    }
+
+    // Validate customer name
+    const fullName = customerName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
+    if (!fullName) {
+      res.status(400).json({
+        success: false,
+        message: 'Customer name is required. Please provide your name or update your profile.'
       });
       return;
     }
@@ -471,17 +511,19 @@ export class UnifiedTransactionController {
     // Initiate card collection via XentriPay
     // NOTE: XentriPayService.initiateCollection() expects USD amount and converts to RWF internally
     // Send 'cc' as pmethod to provider, but save 'card' in database
-    // The redirecturl will be dynamically set by the provider based on payment status
+    // XentriPay expects: cnumber with leading 0, msisdn without +, chargesIncluded as boolean
     const collectionResponse = await xentriPayService.initiateCollection({
-      email: email || user?.email || 'guest@jambolush.com',
-      cname: customerName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Guest',
+      email: userEmail,
+      cname: fullName,
       amount: usdAmount, // Send USD - service will convert to RWF
-      cnumber: cnumberFormatted, // 10 digits: "0780371519"
-      msisdn: msisdnFormatted, // Full: "250780371519"
+      cnumber: cnumberFormatted, // 10 digits with leading 0: "0780371519"
+      msisdn: msisdnFormatted.replace(/^\+/, ''), // Full without +: "250780371519"
       currency: 'USD', // Service will convert to RWF
-      pmethod: 'cc', // Send 'cc' to provider instead of 'card'
-      chargesIncluded: 'true',
-      redirecturl: 'https://jambolush.com/payment/status' // Provider will append actual status
+      pmethod: 'cc', // Card payment method
+      chargesIncluded: true, // Boolean, not string
+      description: description || `Card deposit for ${internalReference}`,
+      internalReference: internalReference,
+      redirecturl: 'https://jambolush.com/payment/status'
     });
 
     // Store in unified Transaction table
@@ -514,8 +556,8 @@ export class UnifiedTransactionController {
           xentriPayAuthkey: collectionResponse.authkey,
           xentriPayReply: collectionResponse.reply,
           paymentMethod: 'card',
-          userEmail: email || user?.email,
-          customerName: customerName,
+          userEmail: userEmail,
+          customerName: fullName,
           cnumber: cnumberFormatted,
           msisdn: msisdnFormatted,
           userFirstName: user?.firstName,

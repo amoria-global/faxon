@@ -33,11 +33,13 @@ export interface CollectionRequest {
   email: string;
   cname: string;
   amount: number; // USD amount - will be converted to RWF
-  cnumber: string; // 10 digits, customer phone without country code
-  msisdn: string; // Full phone with country code e.g. 250780371519
+  cnumber: string; // 10 digits with leading 0, e.g. "0781121117"
+  msisdn: string; // Full phone with country code WITHOUT + sign, e.g. "250781121117"
   currency: string; // Currency of the amount (USD)
   pmethod: string; // e.g. "momo", "cc" (for card payments)
-  chargesIncluded?: string; // "true" or "false"
+  chargesIncluded?: boolean; // true or false (boolean, not string)
+  description?: string; // Optional description
+  internalReference?: string; // Optional internal reference
   redirecturl?: string; // Optional redirect URL after payment completion (lowercase as per provider spec)
 }
 
@@ -182,7 +184,11 @@ export class XentriPayService {
       async (error: AxiosError) => {
         logger.error('XentriPay API error', 'XentriPayService', {
           status: error.response?.status,
-          message: error.message
+          statusText: error.response?.statusText,
+          message: error.message,
+          responseData: error.response?.data,
+          requestData: error.config?.data,
+          error: error
         });
         return Promise.reject(this.handleError(error));
       }
@@ -257,21 +263,42 @@ export class XentriPayService {
       const usdAmount = request.amount;
       const rwfAmount = await CurrencyUtils.convertUsdToRwf(usdAmount);
 
-      // Validate customer number format (10 digits)
-      if (!/^\d{10}$/.test(request.cnumber)) {
-        throw new Error('Customer number must be exactly 10 digits with no spaces or letters');
+      // XentriPay expects cnumber to be exactly 10 digits with leading 0 (e.g., "0780000000")
+      // Ensure cnumber has leading 0 if it's missing
+      let cnumber = request.cnumber;
+      if (/^\d{9}$/.test(cnumber)) {
+        // 9 digits without leading 0 - add it
+        cnumber = '0' + cnumber;
+      }
+
+      // Validate customer number format (must be 10 digits starting with 0)
+      if (!/^0\d{9}$/.test(cnumber)) {
+        throw new Error('Customer number must be exactly 10 digits starting with 0 (e.g., 0780000000)');
+      }
+
+      // XentriPay expects msisdn without + sign (e.g., "250780371519" not "+250780371519")
+      let msisdn = request.msisdn;
+      if (msisdn.startsWith('+')) {
+        msisdn = msisdn.substring(1);
       }
 
       // Prepare payload with RWF amount and currency
       const payload = {
         ...request,
+        cnumber, // 10 digits with leading 0
+        msisdn, // Country code without + sign
         amount: rwfAmount, // Send RWF amount to XentriPay
         currency: 'RWF' // XentriPay processes in RWF
       };
 
-      logger.debug('Collection currency conversion', 'XentriPayService', {
+      logger.debug('Collection request payload', 'XentriPayService', {
         originalAmount: usdAmount,
-        convertedAmount: rwfAmount
+        convertedAmount: rwfAmount,
+        cnumber,
+        msisdn,
+        email: payload.email,
+        cname: payload.cname,
+        pmethod: payload.pmethod
       });
 
       const response = await this.client.post<CollectionResponse>(
@@ -516,22 +543,30 @@ export class XentriPayService {
   private handleError(error: AxiosError): Error {
     if (error.response) {
       const data: any = error.response.data;
-      
-      // XentriPay error format
+
+      // XentriPay error format - try to extract detailed error message
       if (data.message) {
-        return new Error(data.message);
+        return new Error(`XentriPay Error: ${data.message}`);
       }
-      
-      // Generic error
+
+      if (data.error) {
+        return new Error(`XentriPay Error: ${JSON.stringify(data.error)}`);
+      }
+
+      if (data.errors) {
+        return new Error(`XentriPay Validation Errors: ${JSON.stringify(data.errors)}`);
+      }
+
+      // Generic error with full response data
       return new Error(
-        `XentriPay API Error: ${error.response.status} - ${error.response.statusText}`
+        `XentriPay API Error: ${error.response.status} - ${error.response.statusText}. Response: ${JSON.stringify(data)}`
       );
     }
-    
+
     if (error.request) {
       return new Error('No response received from XentriPay API');
     }
-    
+
     return new Error(error.message || 'Unknown error occurred');
   }
 
