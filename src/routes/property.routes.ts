@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { PropertyController } from '../controllers/property.controller';
 import { EnhancedPropertyController } from '../controllers/enhanced-property.controller';
+import { AgentPerformanceController } from '../controllers/agent-performance.controller';
 import { authenticate } from '../middleware/auth.middleware';
 import {
   validateProperty,
@@ -16,6 +17,7 @@ import {
 const router = Router();
 const propertyController = new PropertyController();
 const enhancedPropertyController = new EnhancedPropertyController();
+const agentPerformanceController = new AgentPerformanceController();
 
 // --- PUBLIC PROPERTY ROUTES ---
 // Search and browse properties
@@ -55,6 +57,11 @@ router.patch('/:id/pricing', validateHost, propertyController.updatePropertyPric
 // --- AGENT DASHBOARD (CONSOLIDATED SINGLE ENDPOINT) ---
 // Comprehensive agent dashboard with all stats, recent data, wallet, and activity
 router.get('/agent/dashboard', validateAgent, enhancedPropertyController.getAgentDashboard);
+
+// --- AGENT PERFORMANCE DASHBOARD (JAMBOLUSH STYLE) ---
+// Agent performance dashboard matching Jambolush design with KPIs, scores, rankings
+router.get('/agent/performance', validateAgent, agentPerformanceController.getPerformanceDashboard);
+router.post('/agent/performance/save-metrics', validateAgent, agentPerformanceController.saveMonthlyMetrics);
 
 // --- AGENT TRANSACTION MONITORING ROUTES ---
 // Transaction monitoring dashboard

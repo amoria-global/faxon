@@ -293,7 +293,13 @@ export class BookingService {
       data: {
         ...(data.status && { status: data.status }),
         ...(data.message && { message: data.message }),
-        ...(data.specialRequests && { specialRequests: data.specialRequests })
+        ...(data.specialRequests && { specialRequests: data.specialRequests }),
+        ...(data.checkInValidated !== undefined && { checkInValidated: data.checkInValidated }),
+        ...(data.checkInValidatedAt && { checkInValidatedAt: data.checkInValidatedAt }),
+        ...(data.checkInValidatedBy && { checkInValidatedBy: data.checkInValidatedBy }),
+        ...(data.checkOutValidated !== undefined && { checkOutValidated: data.checkOutValidated }),
+        ...(data.checkOutValidatedAt && { checkOutValidatedAt: data.checkOutValidatedAt }),
+        ...(data.checkOutValidatedBy && { checkOutValidatedBy: data.checkOutValidatedBy })
       },
       include: {
         property: {
