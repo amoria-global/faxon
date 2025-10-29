@@ -210,7 +210,7 @@ export class BrevoBookingMailingService {
   private getBookingDetailsHtml(booking: PropertyBookingInfo | TourBookingInfo): string {
     if ('property' in booking) { // Property Booking
       return `
-        <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${booking.id}</span></div>
+        <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${booking.id.toUpperCase()}</span></div>
         <div class="info-row"><span class="info-label">Property</span><span class="info-value">${booking.property.name}</span></div>
         <div class="info-row"><span class="info-label">Location</span><span class="info-value">${booking.property.location}</span></div>
         <div class="info-row"><span class="info-label">Check-in</span><span class="info-value">${new Date(booking.checkIn).toDateString()}</span></div>
@@ -220,7 +220,7 @@ export class BrevoBookingMailingService {
       `;
     } else { // Tour Booking
       return `
-        <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${booking.id}</span></div>
+        <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${booking.id.toUpperCase()}</span></div>
         <div class="info-row"><span class="info-label">Tour</span><span class="info-value">${booking.tour.title}</span></div>
         <div class="info-row"><span class="info-label">Location</span><span class="info-value">${booking.tour.location}</span></div>
         <div class="info-row"><span class="info-label">Date</span><span class="info-value">${new Date(booking.schedule.startDate).toDateString()}</span></div>
@@ -254,7 +254,7 @@ export class BrevoBookingMailingService {
               You can view your full booking details, manage your reservation, or contact the host/guide through your dashboard.
             </div>
             <div class="button-center">
-              <a href="https://app.jambolush.com" class="button">View My Booking</a>
+              <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking" class="button">View My Booking</a>
             </div>
           </div>
           <div class="footer">
@@ -292,7 +292,7 @@ export class BrevoBookingMailingService {
               Please respond to this booking request promptly via your dashboard to confirm or decline.
             </div>
             <div class="button-center">
-              <a href="https://app.jambolush.com" class="button">Manage Booking</a>
+              <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking" class="button">Manage Booking</a>
             </div>
           </div>
           <div class="footer">
@@ -318,7 +318,7 @@ export class BrevoBookingMailingService {
           <div class="content">
             <div class="greeting">Booking Canceled</div>
             <div class="message">
-              Hi ${user.firstName}, this email confirms that your booking (ID: ${booking.id}) has been successfully canceled.
+              Hi ${user.firstName}, this email confirms that your booking (ID: ${booking.id.toUpperCase()}) has been successfully canceled.
             </div>
             <div class="alert-box alert-warning">
               <div class="alert-title">Cancellation Details</div>
@@ -330,7 +330,7 @@ export class BrevoBookingMailingService {
               We're sorry to see you go. We hope you'll consider booking with us again in the future.
             </div>
             <div class="button-center">
-              <a href="https://jambolush.com" class="button">Explore Other Options</a>
+              <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking" class="button">View Cancelled Booking</a>
             </div>
           </div>
           <div class="footer">
@@ -367,7 +367,7 @@ export class BrevoBookingMailingService {
               Please double-check any check-in instructions or tour requirements. If you have any questions, don't hesitate to reach out.
             </div>
             <div class="button-center">
-              <a href="https://app.jambolush.com" class="button">View Full Details</a>
+              <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking" class="button">View Full Details</a>
             </div>
           </div>
           <div class="footer">
@@ -396,10 +396,10 @@ export class BrevoBookingMailingService {
       Hi ${context.user.firstName},
 
       Your booking for ${bookingName} is confirmed.
-      Booking ID: ${booking.id}
+      Booking ID: ${booking.id.toUpperCase()}
       ${dateLabel}: ${dateValue}
 
-      View your booking details: https://app.jambolush.com
+      View your booking details: https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking
 
       Thank you,
       The ${context.company.name} Team
@@ -419,9 +419,9 @@ export class BrevoBookingMailingService {
       Hi ${context.user.firstName},
 
       You have a new ${bookingType} booking request from ${guestName}.
-      Booking ID: ${booking.id}
+      Booking ID: ${booking.id.toUpperCase()}
 
-      Please manage this booking from your dashboard: https://app.jambolush.com
+      Please manage this booking from your dashboard: https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking
 
       The ${context.company.name} Team
     `.trim();
@@ -433,7 +433,7 @@ export class BrevoBookingMailingService {
 
       Hi ${context.user.firstName},
 
-      This email confirms the cancellation of your booking (ID: ${context.booking.id}).
+      This email confirms the cancellation of your booking (ID: ${context.booking.id.toUpperCase()}).
 
       ${context.cancellationReason || 'If you have questions about refunds, please consult our cancellation policy or contact support.'}
 
@@ -457,7 +457,7 @@ export class BrevoBookingMailingService {
       This is a friendly reminder for your upcoming booking at ${bookingName}.
       ${dateLabel}: ${dateValue}
 
-      View full details here: https://app.jambolush.com
+      View full details here: https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking
 
       We look forward to seeing you!
 

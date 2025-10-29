@@ -748,7 +748,7 @@ Questions? Contact us at ${this.companyInfo.supportEmail}
                 <div class="info-card-header">📋 Booking Details</div>
                 <div class="info-row">
                   <span class="info-label">Booking ID</span>
-                  <span class="info-value">${data.bookingId}</span>
+                  <span class="info-value">${data.bookingId.toUpperCase()}</span>
                 </div>
                 <div class="info-row">
                   <span class="info-label">Property</span>
@@ -819,7 +819,7 @@ Hi ${data.userName}!
 Your payment has been successfully processed and your booking is now confirmed!
 
 Booking Details:
-- Booking ID: ${data.bookingId}
+- Booking ID: ${data.bookingId.toUpperCase()}
 - Property: ${data.propertyName}
 - Check-In: ${new Date(data.checkIn).toLocaleDateString()}
 - Check-Out: ${new Date(data.checkOut).toLocaleDateString()}
@@ -887,7 +887,7 @@ Need help? Contact us at ${this.companyInfo.supportEmail}
                 <div class="info-card-header">Payment Details</div>
                 <div class="info-row">
                   <span class="info-label">Booking ID</span>
-                  <span class="info-value">${data.bookingId}</span>
+                  <span class="info-value">${data.bookingId.toUpperCase()}</span>
                 </div>
                 <div class="info-row">
                   <span class="info-label">Property</span>
@@ -934,7 +934,7 @@ Status: ${data.status.toUpperCase()}
 ${statusMessage}
 
 Payment Details:
-- Booking ID: ${data.bookingId}
+- Booking ID: ${data.bookingId.toUpperCase()}
 - Property: ${data.propertyName}
 - Amount: ${data.amount.toLocaleString()} RWF
 - Reference: ${data.reference}
@@ -1076,7 +1076,7 @@ Need help? Contact us at ${this.companyInfo.supportEmail}
     return { subject, html, text };
   }
 
-  private async sendEmail(options: {
+  async sendEmail(options: {
     to: string;
     subject: string;
     html: string;

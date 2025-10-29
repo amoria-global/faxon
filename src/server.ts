@@ -21,11 +21,11 @@ import agentCommissionRoutes from './routes/agent-commission.routes'; // NEW
 import bookingLeadsRoutes from './routes/booking-leads.routes'; // NEW - Booking leads/archive management
 import { ReminderSchedulerService } from './services/reminder-scheduler.service'; // NEW
 import { BookingCleanupSchedulerService } from './services/booking-cleanup-scheduler.service'; // NEW
-import { EmailService } from './services/email.service';
 import { StatusPollerService } from './services/status-poller.service';
 import { PawaPayService } from './services/pawapay.service';
 import { XentriPayService } from './services/xentripay.service';
 import unifiedTransactionRoutes from './routes/unified-transaction.routes';
+import checkinRoutes from './routes/checkin.routes';
 
 const app = express();
 
@@ -116,6 +116,7 @@ app.use('/api/booking-cleanup', bookingCleanupRoutes); // NEW: Booking cleanup r
 app.use('/api', agentCommissionRoutes); // NEW: Agent commission and owner management routes
 app.use('/api/admin/booking-leads', bookingLeadsRoutes); // NEW: Booking leads/archive management (admin only)
 app.use('/api/transactions', unifiedTransactionRoutes); // NEW: Unified transaction routes (all providers)
+app.use('/api/checkin', checkinRoutes); // NEW: Check-in/check-out routes
 
 // Health check
 app.get('/health', (req, res) => {

@@ -100,11 +100,8 @@ export class BookingService {
       throw new Error('Check-in date cannot be in the past');
     }
 
-    // Calculate nights and total price
-    const nights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24));
-    const totalPrice = nights === 2 && property.pricePerTwoNights
-      ? property.pricePerTwoNights
-      : nights * property.pricePerNight;
+    // Use total price from request (calculated on frontend with fees, taxes, etc.)
+    const totalPrice = data.totalPrice;
 
     // Check for conflicting bookings
     const conflictingBooking = await prisma.booking.findFirst({
@@ -659,7 +656,8 @@ export class BookingService {
       throw new Error('Number of participants does not match participant details');
     }
 
-    const totalAmount = (schedule.price || schedule.tour.price) * data.numberOfParticipants;
+    // Use total amount from request (calculated on frontend with fees, taxes, etc.)
+    const totalAmount = data.totalAmount;
 
     // Create tour booking
     const booking = await prisma.tourBooking.create({

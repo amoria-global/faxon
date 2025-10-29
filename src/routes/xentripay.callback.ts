@@ -214,7 +214,8 @@ async function handlePaymentSuccessDirectly(reference: string, prisma: any): Pro
             booking.property.host.id,
             splitAmounts.host,
             'PAYMENT_RECEIVED',
-            reference
+            reference,
+            booking.id
           ).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to update host wallet:', err));
         }
 
@@ -225,7 +226,8 @@ async function handlePaymentSuccessDirectly(reference: string, prisma: any): Pro
             booking.property.agent.id,
             splitAmounts.agent,
             'COMMISSION_EARNED',
-            reference
+            reference,
+            booking.id
           ).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to update agent wallet:', err));
         }
 
@@ -236,7 +238,8 @@ async function handlePaymentSuccessDirectly(reference: string, prisma: any): Pro
             1, // Platform account (user ID 1)
             splitAmounts.platform,
             'PLATFORM_FEE',
-            reference
+            reference,
+            booking.id
           ).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to update platform wallet:', err));
         }
 
@@ -279,7 +282,7 @@ async function handlePaymentSuccessDirectly(reference: string, prisma: any): Pro
         console.log('[XENTRIPAY_CALLBACK] ✅ Booking payment processed successfully');
 
         // Send payment confirmation emails to guest, host, and agent
-        await sendPropertyBookingPaymentEmails(reference, 'completed');
+        await sendPropertyBookingPaymentEmails(reference, 'completed', undefined, reference);
       }
     }
   } catch (error) {
@@ -317,7 +320,7 @@ async function handlePaymentFailureDirectly(reference: string, prisma: any): Pro
         });
 
         // Send payment failure email to guest
-        await sendPropertyBookingPaymentEmails(reference, 'failed', failureReason);
+        await sendPropertyBookingPaymentEmails(reference, 'failed', failureReason, reference);
 
         console.log('[XENTRIPAY_CALLBACK] Booking payment marked as failed');
       }
@@ -389,13 +392,15 @@ async function logActivity(
 
 /**
  * Update wallet balance for a user
+ * Credits pendingBalance (not available for withdrawal until check-in)
  */
 async function updateWalletBalance(
   prisma: any,
   userId: number,
   amount: number,
   type: string,
-  reference: string
+  reference: string,
+  bookingId: string
 ): Promise<void> {
   try {
     // Get or create wallet for user
@@ -408,18 +413,20 @@ async function updateWalletBalance(
         data: {
           userId,
           balance: 0,
+          pendingBalance: 0,
           currency: 'USD',
           isActive: true
         }
       });
     }
 
-    const newBalance = wallet.balance + amount;
+    // Credit to pendingBalance (not available for withdrawal until check-in)
+    const newPendingBalance = (wallet.pendingBalance || 0) + amount;
 
-    // Update wallet balance
+    // Update wallet pendingBalance
     await prisma.wallet.update({
       where: { userId },
-      data: { balance: newBalance }
+      data: { pendingBalance: newPendingBalance }
     });
 
     // Create wallet transaction record
@@ -428,21 +435,24 @@ async function updateWalletBalance(
         walletId: wallet.id,
         type: amount > 0 ? 'credit' : 'debit',
         amount: Math.abs(amount),
-        balanceBefore: wallet.balance,
-        balanceAfter: newBalance,
+        balanceBefore: wallet.pendingBalance || 0,
+        balanceAfter: newPendingBalance,
         reference,
-        description: `${type} - ${reference}`
+        description: `${type} - PENDING CHECK-IN - Booking: ${bookingId}`,
+        transactionId: bookingId
       }
     });
 
-    console.log('[XENTRIPAY_CALLBACK] Wallet updated successfully', {
+    console.log('[XENTRIPAY_CALLBACK] Wallet pending balance updated successfully', {
       userId,
       amount,
-      previousBalance: wallet.balance,
-      newBalance
+      bookingId,
+      previousPendingBalance: wallet.pendingBalance || 0,
+      newPendingBalance,
+      note: 'Funds will be available for withdrawal after check-in'
     });
   } catch (error) {
-    console.error('[XENTRIPAY_CALLBACK] Failed to update wallet balance:', error);
+    console.error('[XENTRIPAY_CALLBACK] Failed to update wallet pending balance:', error);
     throw error;
   }
 }
@@ -453,7 +463,8 @@ async function updateWalletBalance(
 async function sendPropertyBookingPaymentEmails(
   bookingId: string,
   status: 'completed' | 'failed',
-  failureReason?: string
+  failureReason?: string,
+  paymentReference?: string
 ): Promise<void> {
   try {
     const { PrismaClient } = require('@prisma/client');
@@ -537,7 +548,8 @@ async function sendPropertyBookingPaymentEmails(
         recipientType: 'guest',
         paymentStatus: 'completed',
         paymentAmount: booking.totalPrice,
-        paymentCurrency: 'USD'
+        paymentCurrency: 'USD',
+        paymentReference: paymentReference || bookingId
       });
 
       // Send notification to host
@@ -553,7 +565,8 @@ async function sendPropertyBookingPaymentEmails(
         recipientType: 'host',
         paymentStatus: 'completed',
         paymentAmount: booking.totalPrice,
-        paymentCurrency: 'USD'
+        paymentCurrency: 'USD',
+        paymentReference: paymentReference || bookingId
       });
 
       // Send notification to agent if exists
@@ -576,7 +589,8 @@ async function sendPropertyBookingPaymentEmails(
             recipientType: 'host', // Using 'host' as recipient type for agent too
             paymentStatus: 'completed',
             paymentAmount: booking.totalPrice,
-            paymentCurrency: 'USD'
+            paymentCurrency: 'USD',
+            paymentReference: paymentReference || bookingId
           }).catch(err => console.error('[XENTRIPAY_CALLBACK] Error sending agent notification:', err));
         }
       }
@@ -593,7 +607,8 @@ async function sendPropertyBookingPaymentEmails(
         booking: bookingInfo,
         recipientType: 'guest',
         paymentStatus: 'failed',
-        failureReason
+        failureReason,
+        paymentReference: paymentReference || bookingId
       });
     }
 

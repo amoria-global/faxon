@@ -145,6 +145,9 @@ model WithdrawalRequest {
   id                 String            @id @default(cuid())
   userId             Int
   amount             Float
+  feeAmount          Float             @default(0)
+  netAmount          Float?
+  feeTier            String?
   currency           String            @default("USD")
   method             String
   status             String            @default("PENDING")
@@ -302,6 +305,7 @@ model Booking {
   updatedAt                  DateTime          @updatedAt
   cancellationReason         String?
   cancelledAt                DateTime?
+  bookingCode                String?           @unique
   checkInCode                String?
   checkInValidated           Boolean           @default(false)
   checkInValidatedAt         DateTime?
@@ -514,6 +518,10 @@ model TourBooking {
   status               String         @default("pending")
   paymentStatus        String         @default("pending")
   paymentId            String?
+  bookingCode          String?        @unique
+  checkInCode          String?
+  checkInValidated     Boolean        @default(false)
+  checkInValidatedAt   DateTime?
   checkInStatus        String         @default("not_checked_in")
   checkInTime          DateTime?
   checkOutTime         DateTime?

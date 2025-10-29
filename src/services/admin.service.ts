@@ -6,6 +6,7 @@ import { BrevoMailingService } from '../utils/brevo.admin';
 import { XentriPayService } from './xentripay.service';
 import { PhoneUtils } from '../utils/phone.utils';
 import withdrawalNotificationService from './withdrawal-notification.service';
+import { calculateWithdrawalFee, shouldDoubleFee, validateWithdrawalWithFee, formatFeeForAdmin } from '../utils/withdrawal-fee.utility';
 import {
   AdminDashboardOverview,
   AdminUserFilters,
@@ -3326,7 +3327,21 @@ export class AdminService {
     }
 
     if (withdrawal.status === 'APPROVED' || withdrawal.status === 'COMPLETED') {
-      throw new Error('Withdrawal has already been approved');
+      throw new Error(`Withdrawal has already been ${withdrawal.status.toLowerCase()}. Cannot approve again.`);
+    }
+
+    if (withdrawal.status === 'PROCESSING') {
+      throw new Error('Withdrawal is currently being processed. Please wait.');
+    }
+
+    // Additional check: Prevent race conditions by checking again just before update
+    const currentStatus = await prisma.withdrawalRequest.findUnique({
+      where: { id: withdrawalId },
+      select: { status: true }
+    });
+
+    if (currentStatus && (currentStatus.status === 'APPROVED' || currentStatus.status === 'COMPLETED' || currentStatus.status === 'PROCESSING')) {
+      throw new Error(`Withdrawal status changed to ${currentStatus.status}. Cannot approve.`);
     }
 
     // Parse destination to get account details
@@ -3380,8 +3395,58 @@ export class AdminService {
       throw new Error('Payment service is not configured. Cannot process withdrawal.');
     }
 
+    // ⚠️ CRITICAL: Use fee stored in the withdrawal request (calculated during user request)
+    // This ensures the fee shown to the user matches what is actually deducted
+    let withdrawalFee: number;
+    let netAmount: number;
+    let feeTier: string;
+
+    if (withdrawal.feeAmount && withdrawal.netAmount) {
+      // Fee was already calculated during withdrawal request - use stored values
+      withdrawalFee = withdrawal.feeAmount;
+      netAmount = withdrawal.netAmount;
+      feeTier = withdrawal.feeTier || 'Unknown';
+
+      console.log(`[ADMIN_SERVICE] ✅ Using stored withdrawal fee from request:`, {
+        originalAmount: withdrawal.amount,
+        storedFee: withdrawalFee,
+        storedNetAmount: netAmount,
+        storedFeeTier: feeTier,
+        currency: withdrawal.currency
+      });
+    } else {
+      // Legacy support: Calculate fee if not stored (for old withdrawal requests)
+      console.warn(`[ADMIN_SERVICE] ⚠️ Withdrawal ${withdrawal.reference} missing fee data - calculating now`);
+
+      const isDoubleFee = shouldDoubleFee(accountInfo.methodType);
+      const feeValidation = validateWithdrawalWithFee(withdrawal.amount, withdrawal.currency, isDoubleFee);
+
+      if (!feeValidation.valid) {
+        throw new Error(feeValidation.error);
+      }
+
+      const feeCalculation = feeValidation.calculation!;
+      withdrawalFee = feeCalculation.feeAmount;
+      netAmount = feeCalculation.netAmount;
+      feeTier = feeCalculation.feeTier;
+
+      console.log(`[ADMIN_SERVICE] Calculated withdrawal fee:`, {
+        originalAmount: feeCalculation.originalAmount,
+        fee: withdrawalFee,
+        netAmount: netAmount,
+        feeTier: feeTier,
+        currency: feeCalculation.currency
+      });
+    }
+
+    // ⚠️ CRITICAL VALIDATION: Ensure net amount is positive
+    if (netAmount <= 0) {
+      throw new Error(`Invalid withdrawal: net amount (${netAmount}) must be positive. Original amount: ${withdrawal.amount}, Fee: ${withdrawalFee}`);
+    }
+
     let payoutResponse;
     let paymentTransaction;
+    let feeTransaction;
 
     try {
       // Format phone number for mobile money withdrawals
@@ -3397,13 +3462,13 @@ export class AdminService {
       // Generate unique payment transaction reference
       const paymentReference = `PAY-${withdrawal.reference}-${Date.now()}`;
 
-      // Create payment transaction record BEFORE sending to XentriPay
+      // Create payment transaction record BEFORE sending to XentriPay (using net amount)
       paymentTransaction = await prisma.paymentTransaction.create({
         data: {
           userId: withdrawal.userId,
           type: 'WITHDRAWAL',
           method: accountInfo.methodType,
-          amount: withdrawal.amount,
+          amount: netAmount, // Use net amount after fee deduction
           currency: withdrawal.currency,
           status: 'PROCESSING',
           reference: paymentReference,
@@ -3417,12 +3482,40 @@ export class AdminService {
             withdrawalReference: withdrawal.reference,
             providerName: accountInfo.providerName,
             approvedBy: adminId,
+            approvedAt: new Date().toISOString(),
+            withdrawalFee: withdrawalFee,
+            originalAmount: withdrawal.amount,
+            netAmount: netAmount,
+            feeTier: feeTier
+          }
+        }
+      });
+
+      // Create separate transaction record for the withdrawal fee (admin tracking only)
+      feeTransaction = await prisma.paymentTransaction.create({
+        data: {
+          userId: withdrawal.userId,
+          type: 'WITHDRAWAL_FEE',
+          method: accountInfo.methodType,
+          amount: withdrawalFee,
+          currency: withdrawal.currency,
+          status: 'COMPLETED',
+          reference: `FEE-${withdrawal.reference}-${Date.now()}`,
+          description: `Withdrawal Fee: ${withdrawalFee} ${withdrawal.currency} (${feeTier})`,
+          metadata: {
+            withdrawalRequestId: withdrawalId,
+            withdrawalReference: withdrawal.reference,
+            originalAmount: withdrawal.amount,
+            netAmount: netAmount,
+            feeTier: feeTier,
+            withdrawalFee: withdrawalFee,
+            approvedBy: adminId,
             approvedAt: new Date().toISOString()
           }
         }
       });
 
-      // Send payout request to XentriPay
+      // Send payout request to XentriPay (using net amount after fee deduction)
       payoutResponse = await this.xentriPayService.createPayout({
         customerReference: withdrawal.reference,
         telecomProviderId: accountInfo.providerCode,
@@ -3430,7 +3523,7 @@ export class AdminService {
         name: accountInfo.accountName,
         transactionType: 'PAYOUT',
         currency: withdrawal.currency,
-        amount: withdrawal.amount
+        amount: netAmount // Send net amount (original amount - fee)
       });
 
       console.log('XentriPay payout response:', payoutResponse);

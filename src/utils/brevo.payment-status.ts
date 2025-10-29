@@ -34,6 +34,7 @@ export interface PaymentStatusMailingContext {
   paymentAmount?: number;
   paymentCurrency?: string;
   failureReason?: string;
+  paymentReference?: string; // External payment reference (externalId from Transaction)
 }
 
 interface BrevoErrorResponse {
@@ -320,11 +321,12 @@ export class BrevoPaymentStatusMailingService {
     `;
   }
 
-  private getBookingDetailsTable(booking: PropertyBookingInfo | TourBookingInfo): string {
+  private getBookingDetailsTable(booking: PropertyBookingInfo | TourBookingInfo, paymentReference?: string): string {
     if ('property' in booking) {
       return `
         <table class="info-table">
-          <tr><td>Booking ID</td><td>${booking.id}</td></tr>
+          <tr><td>Booking ID</td><td>${booking.id.toUpperCase()}</td></tr>
+          ${paymentReference ? `<tr><td>Payment Reference</td><td><strong>${paymentReference}</strong></td></tr>` : ''}
           <tr><td>Property</td><td>${booking.property.name}</td></tr>
           <tr><td>Location</td><td>${booking.property.location}</td></tr>
           <tr><td>Check-in</td><td>${new Date(booking.checkIn).toLocaleDateString()}</td></tr>
@@ -336,7 +338,8 @@ export class BrevoPaymentStatusMailingService {
     } else {
       return `
         <table class="info-table">
-          <tr><td>Booking ID</td><td>${booking.id}</td></tr>
+          <tr><td>Booking ID</td><td>${booking.id.toUpperCase()}</td></tr>
+          ${paymentReference ? `<tr><td>Payment Reference</td><td><strong>${paymentReference}</strong></td></tr>` : ''}
           <tr><td>Tour</td><td>${booking.tour.title}</td></tr>
           <tr><td>Location</td><td>${booking.tour.location}</td></tr>
           <tr><td>Date</td><td>${new Date(booking.schedule.startDate).toLocaleDateString()}</td></tr>
@@ -350,8 +353,8 @@ export class BrevoPaymentStatusMailingService {
 
   // BOOKING RECEIVED TEMPLATE
   private getBookingReceivedTemplate(context: PaymentStatusMailingContext): string {
-    const { user, company, booking } = context;
-    const detailsTable = this.getBookingDetailsTable(booking);
+    const { user, company, booking, paymentReference } = context;
+    const detailsTable = this.getBookingDetailsTable(booking, paymentReference);
 
     return `
       <!DOCTYPE html><html><head>${this.getBaseTemplate()}</head><body>
@@ -378,7 +381,7 @@ export class BrevoPaymentStatusMailingService {
               ${detailsTable}
             </div>
             <div class="button-center">
-              <a href="https://jambolush.com/payment/pending?ref=${booking.id}" class="button">Complete Payment Now</a>
+              <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking" class="button">View Booking Details</a>
             </div>
             <div class="message" style="margin-top: 24px; font-size: 14px; color: #6b7280;">
               <strong>What happens next?</strong><br>
@@ -400,8 +403,8 @@ export class BrevoPaymentStatusMailingService {
 
   // PAYMENT COMPLETED TEMPLATE
   private getPaymentCompletedTemplate(context: PaymentStatusMailingContext): string {
-    const { user, company, booking } = context;
-    const detailsTable = this.getBookingDetailsTable(booking);
+    const { user, company, booking, paymentReference } = context;
+    const detailsTable = this.getBookingDetailsTable(booking, paymentReference);
 
     return `
       <!DOCTYPE html><html><head>${this.getBaseTemplate()}</head><body>
@@ -428,7 +431,7 @@ export class BrevoPaymentStatusMailingService {
               You can view your full booking details and contact information anytime from your dashboard.
             </div>
             <div class="button-center">
-              <a href="https://app.jambolush.com" class="button">View Booking Details</a>
+              <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking" class="button">View Booking Details</a>
             </div>
           </div>
           <div class="footer">
@@ -444,7 +447,7 @@ export class BrevoPaymentStatusMailingService {
 
   // PAYMENT FAILED TEMPLATE
   private getPaymentFailedTemplate(context: PaymentStatusMailingContext): string {
-    const { user, company, booking, failureReason } = context;
+    const { user, company, booking, failureReason, paymentReference } = context;
 
     return `
       <!DOCTYPE html><html><head>${this.getBaseTemplate()}</head><body>
@@ -458,7 +461,8 @@ export class BrevoPaymentStatusMailingService {
             <div class="alert-box alert-error">
               <div class="alert-title">❌ Payment Could Not Be Processed</div>
               <div class="alert-text">
-                Unfortunately, we couldn't process your payment for booking ID ${booking.id}.
+                Unfortunately, we couldn't process your payment for booking ID ${booking.id.toUpperCase()}.
+                ${paymentReference ? `<br><strong>Payment Reference:</strong> ${paymentReference}` : ''}
                 ${failureReason ? `<br><br><strong>Reason:</strong> ${failureReason}` : ''}
               </div>
             </div>
@@ -466,7 +470,7 @@ export class BrevoPaymentStatusMailingService {
               Don't worry! You can try again with a different payment method or contact our support team for assistance.
             </div>
             <div class="button-center">
-              <a href="https://jambolush.com/payment/failed?ref=${booking.id}" class="button">Retry Payment</a>
+              <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking" class="button">View Booking & Retry Payment</a>
             </div>
           </div>
           <div class="footer">
@@ -482,9 +486,9 @@ export class BrevoPaymentStatusMailingService {
 
   // HOST NEW BOOKING TEMPLATE
   private getHostNewBookingTemplate(context: PaymentStatusMailingContext): string {
-    const { user, company, booking } = context;
+    const { user, company, booking, paymentReference } = context;
     const guestInfo = 'property' in context.booking ? context.booking.guest : context.booking.user;
-    const detailsTable = this.getBookingDetailsTable(booking);
+    const detailsTable = this.getBookingDetailsTable(booking, paymentReference);
 
     return `
       <!DOCTYPE html><html><head>${this.getBaseTemplate()}</head><body>
@@ -526,9 +530,9 @@ export class BrevoPaymentStatusMailingService {
 
   // HOST PAYMENT CONFIRMED TEMPLATE
   private getHostPaymentConfirmedTemplate(context: PaymentStatusMailingContext): string {
-    const { user, company, booking } = context;
+    const { user, company, booking, paymentReference } = context;
     const guestInfo = 'property' in context.booking ? context.booking.guest : context.booking.user;
-    const detailsTable = this.getBookingDetailsTable(booking);
+    const detailsTable = this.getBookingDetailsTable(booking, paymentReference);
 
     return `
       <!DOCTYPE html><html><head>${this.getBaseTemplate()}</head><body>
@@ -557,7 +561,7 @@ export class BrevoPaymentStatusMailingService {
               3. If confirmed, provide check-in instructions to your guest
             </div>
             <div class="button-center">
-              <a href="https://app.jambolush.com/all/host/bookings" class="button">Review & Confirm Booking</a>
+              <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking" class="button">Review & Confirm Booking</a>
             </div>
           </div>
           <div class="footer">
@@ -584,9 +588,10 @@ export class BrevoPaymentStatusMailingService {
 
       IMPORTANT: Please complete your payment within 24 hours to secure your reservation.
 
-      Booking ID: ${booking.id}
+      Booking ID: ${booking.id.toUpperCase()}
+      ${context.paymentReference ? `Payment Reference: ${context.paymentReference}` : ''}
 
-      Complete payment: https://jambolush.com/payment/pending?ref=${booking.id}
+      View booking & complete payment: https://app.jambolush.com/view-details?ref=${encodeURIComponent(booking.id.toUpperCase())}&type=booking
 
       Questions? Contact us at ${context.company.supportEmail}
     `.trim();
@@ -598,9 +603,10 @@ export class BrevoPaymentStatusMailingService {
 
       Excellent news, ${context.user.firstName}!
 
-      Your payment has been successfully processed and your booking (ID: ${context.booking.id}) is now confirmed!
+      Your payment has been successfully processed and your booking (ID: ${context.booking.id.toUpperCase()}) is now confirmed!
+      ${context.paymentReference ? `Payment Reference: ${context.paymentReference}` : ''}
 
-      View booking details: https://app.jambolush.com
+      View booking details: https://app.jambolush.com/view-details?ref=${encodeURIComponent(context.booking.id.toUpperCase())}&type=booking
 
       We're excited to host you!
     `.trim();
@@ -612,10 +618,11 @@ export class BrevoPaymentStatusMailingService {
 
       Hi ${context.user.firstName},
 
-      Unfortunately, we couldn't process your payment for booking ID ${context.booking.id}.
+      Unfortunately, we couldn't process your payment for booking ID ${context.booking.id.toUpperCase()}.
+      ${context.paymentReference ? `Payment Reference: ${context.paymentReference}` : ''}
       ${context.failureReason ? `\nReason: ${context.failureReason}` : ''}
 
-      Retry payment: https://jambolush.com/payment/failed?ref=${context.booking.id}
+      View booking & retry payment: https://app.jambolush.com/view-details?ref=${encodeURIComponent(context.booking.id.toUpperCase())}&type=booking
 
       Need help? Contact us at ${context.company.supportEmail}
     `.trim();
@@ -640,7 +647,7 @@ export class BrevoPaymentStatusMailingService {
       You have a new booking request from ${guestInfo.firstName} ${guestInfo.lastName}.
 
       Status: Awaiting guest payment
-      Booking ID: ${context.booking.id}
+      Booking ID: ${context.booking.id.toUpperCase()}
 
       You'll be notified when payment is confirmed so you can review and confirm the booking.
     `.trim();
@@ -654,9 +661,9 @@ export class BrevoPaymentStatusMailingService {
 
       Hi ${context.user.firstName},
 
-      ${guestInfo.firstName} ${guestInfo.lastName} has completed payment for booking ID ${context.booking.id}.
+      ${guestInfo.firstName} ${guestInfo.lastName} has completed payment for booking ID ${context.booking.id.toUpperCase()}.
 
-      Please review and confirm this booking: https://app.jambolush.com/all/host/bookings
+      Please review and confirm this booking: https://app.jambolush.com/view-details?ref=${encodeURIComponent(context.booking.id.toUpperCase())}&type=booking
     `.trim();
   }
 }

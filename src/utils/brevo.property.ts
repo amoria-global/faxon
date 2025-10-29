@@ -326,7 +326,7 @@ export class BrevoPropertyMailingService {
               In the meantime, you can review your submission or add more details from your host dashboard.
             </div>
             <div class="button-center">
-              <a href="https://app.jambolush.com" class="button">View My Submission</a>
+              <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(property.id.toString())}&type=property" class="button">View My Property</a>
             </div>
           </div>
           <div class="footer">
@@ -351,7 +351,7 @@ export class BrevoPropertyMailingService {
             <div class="alert-text">Start sharing your listing to attract your first guests.</div>
           </div>
           <div class="button-center">
-            <a href="https://jambolush.com" class="button">View My Live Listing</a>
+            <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(property.id.toString())}&type=property" class="button">View My Live Listing</a>
           </div>`;
         break;
       case 'rejected':
@@ -363,7 +363,7 @@ export class BrevoPropertyMailingService {
             <div class="alert-text">${rejectionReason || 'Please review our listing guidelines and update your submission.'}</div>
           </div>
           <div class="button-center">
-            <a href="https://app.jambolush.com" class="button">Edit My Submission</a>
+            <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(property.id.toString())}&type=property" class="button">Edit My Submission</a>
           </div>`;
         break;
       default: // inactive or other
@@ -371,7 +371,7 @@ export class BrevoPropertyMailingService {
           <div class="greeting">Property Status Update</div>
           <div class="message">Hi ${host.firstName}, the status of your property "<strong>${property.name}</strong>" has been updated to <strong>${newStatus}</strong>. It is no longer visible to guests.</div>
           <div class="button-center">
-            <a href="https://app.jambolush.com" class="button">Manage My Property</a>
+            <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(property.id.toString())}&type=property" class="button">Manage My Property</a>
           </div>`;
         break;
     }
@@ -422,7 +422,7 @@ export class BrevoPropertyMailingService {
               You can view the full review and post a public response from your dashboard.
             </div>
             <div class="button-center">
-              <a href="https://app.jambolush.com" class="button">Read and Respond</a>
+              <a href="https://app.jambolush.com/view-details?ref=${encodeURIComponent(property.id.toString())}&type=property" class="button">Read and Respond</a>
             </div>
           </div>
           <div class="footer">
@@ -455,7 +455,7 @@ export class BrevoPropertyMailingService {
             </div>
             <div class="info-card">
               <div class="info-card-header"><span class="info-card-icon">🏠</span>Booking Details</div>
-              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id.toUpperCase()}</span></div>
               <div class="info-row"><span class="info-label">Property</span><span class="info-value">${data.booking.propertyName}</span></div>
               <div class="info-row"><span class="info-label">Check-In</span><span class="info-value">${checkInDate}</span></div>
               <div class="info-row"><span class="info-label">Check-Out</span><span class="info-value">${checkOutDate}</span></div>
@@ -499,7 +499,7 @@ export class BrevoPropertyMailingService {
             </div>
             <div class="info-card">
               <div class="info-card-header"><span class="info-card-icon">📋</span>Booking Details</div>
-              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id.toUpperCase()}</span></div>
               <div class="info-row"><span class="info-label">Guest Name</span><span class="info-value">${data.booking.guestName}</span></div>
               <div class="info-row"><span class="info-label">Guest Email</span><span class="info-value">${data.booking.guestEmail}</span></div>
               <div class="info-row"><span class="info-label">Guest Phone</span><span class="info-value">${data.booking.guestPhone}</span></div>
@@ -540,7 +540,7 @@ export class BrevoPropertyMailingService {
             </div>
             <div class="info-card">
               <div class="info-card-header"><span class="info-card-icon">🏠</span>Booking Information</div>
-              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id.toUpperCase()}</span></div>
               <div class="info-row"><span class="info-label">Property</span><span class="info-value">${data.booking.propertyName}</span></div>
               <div class="info-row"><span class="info-label">Host</span><span class="info-value">${data.booking.hostName}</span></div>
               <div class="info-row"><span class="info-label">Guest</span><span class="info-value">${data.booking.guestName}</span></div>
@@ -591,7 +591,7 @@ export class BrevoPropertyMailingService {
             </div>
             <div class="info-card">
               <div class="info-card-header"><span class="info-card-icon">🏠</span>Booking Details</div>
-              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id.toUpperCase()}</span></div>
               <div class="info-row"><span class="info-label">Property</span><span class="info-value">${data.booking.propertyName}</span></div>
               <div class="info-row"><span class="info-label">Check-In</span><span class="info-value">${checkInDate}</span></div>
               <div class="info-row"><span class="info-label">Check-Out</span><span class="info-value">${checkOutDate}</span></div>
@@ -636,7 +636,7 @@ export class BrevoPropertyMailingService {
             </div>
             <div class="info-card">
               <div class="info-card-header"><span class="info-card-icon">📋</span>Booking Details</div>
-              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id.toUpperCase()}</span></div>
               <div class="info-row"><span class="info-label">Guest Name</span><span class="info-value">${data.booking.guestName}</span></div>
               <div class="info-row"><span class="info-label">Guest Email</span><span class="info-value">${data.booking.guestEmail}</span></div>
               <div class="info-row"><span class="info-label">Guest Phone</span><span class="info-value">${data.booking.guestPhone}</span></div>
@@ -678,7 +678,7 @@ export class BrevoPropertyMailingService {
             </div>
             <div class="info-card">
               <div class="info-card-header"><span class="info-card-icon">🏠</span>Booking Information</div>
-              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id}</span></div>
+              <div class="info-row"><span class="info-label">Booking ID</span><span class="info-value">${data.booking.id.toUpperCase()}</span></div>
               <div class="info-row"><span class="info-label">Property</span><span class="info-value">${data.booking.propertyName}</span></div>
               <div class="info-row"><span class="info-label">Host</span><span class="info-value">${data.booking.hostName}</span></div>
               <div class="info-row"><span class="info-label">Guest</span><span class="info-value">${data.booking.guestName}</span></div>
@@ -717,7 +717,7 @@ export class BrevoPropertyMailingService {
       We've received your submission for "${context.property.name}" and it is now pending review.
       Our team will get back to you within 24-48 hours.
 
-      View your submission: https://app.jambolush.com
+      View your submission: https://app.jambolush.com/view-details?ref=${encodeURIComponent(context.property.id.toString())}&type=property
 
       Thanks,
       The ${context.company.name} Team
@@ -730,10 +730,10 @@ export class BrevoPropertyMailingService {
     
     switch(newStatus) {
         case 'active':
-            message = `Great news! Your property, "${property.name}", has been approved and is now live. View your listing: https://jambolush.com`;
+            message = `Great news! Your property, "${property.name}", has been approved and is now live. View your listing: https://app.jambolush.com/view-details?ref=${encodeURIComponent(property.id.toString())}&type=property`;
             break;
         case 'rejected':
-            message = `There was an issue with your property submission for "${property.name}". Please log in to your dashboard to see the required changes: https://app.jambolush.com`;
+            message = `There was an issue with your property submission for "${property.name}". Please log in to your dashboard to see the required changes: https://app.jambolush.com/view-details?ref=${encodeURIComponent(property.id.toString())}&type=property`;
             break;
         default:
             message = `The status of your property, "${property.name}", has been updated to "${newStatus}".`;
@@ -762,7 +762,7 @@ export class BrevoPropertyMailingService {
       Rating: ${review.rating} out of 5 stars
       Comment: "${review.comment}"
 
-      Respond to this review here: https://app.jambolush.com
+      Respond to this review here: https://app.jambolush.com/view-details?ref=${encodeURIComponent(context.property.id.toString())}&type=property
 
       The ${context.company.name} Team
     `.trim();
@@ -780,7 +780,7 @@ export class BrevoPropertyMailingService {
       Your booking at ${data.booking.propertyName} has been confirmed!
 
       Booking Details:
-      - Booking ID: ${data.booking.id}
+      - Booking ID: ${data.booking.id.toUpperCase()}
       - Check-In: ${checkInDate}
       - Check-Out: ${checkOutDate}
       - Total Amount: ${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}
@@ -809,7 +809,7 @@ export class BrevoPropertyMailingService {
       You have a new booking at ${data.booking.propertyName}!
 
       Booking Details:
-      - Booking ID: ${data.booking.id}
+      - Booking ID: ${data.booking.id.toUpperCase()}
       - Guest: ${data.booking.guestName}
       - Guest Email: ${data.booking.guestEmail}
       - Guest Phone: ${data.booking.guestPhone}
@@ -841,7 +841,7 @@ export class BrevoPropertyMailingService {
       A new booking has been made for a property you manage!
 
       Booking Details:
-      - Booking ID: ${data.booking.id}
+      - Booking ID: ${data.booking.id.toUpperCase()}
       - Property: ${data.booking.propertyName}
       - Host: ${data.booking.hostName}
       - Guest: ${data.booking.guestName}
@@ -872,7 +872,7 @@ export class BrevoPropertyMailingService {
       Your booking at ${data.booking.propertyName} has been confirmed!
 
       Booking Details:
-      - Booking ID: ${data.booking.id}
+      - Booking ID: ${data.booking.id.toUpperCase()}
       - Check-In: ${checkInDate}
       - Check-Out: ${checkOutDate}
       - Total Amount: ${data.booking.totalPrice.toLocaleString()} ${data.booking.currency}
@@ -902,7 +902,7 @@ export class BrevoPropertyMailingService {
       You have a new booking at ${data.booking.propertyName}!
 
       Booking Details:
-      - Booking ID: ${data.booking.id}
+      - Booking ID: ${data.booking.id.toUpperCase()}
       - Guest: ${data.booking.guestName}
       - Guest Email: ${data.booking.guestEmail}
       - Guest Phone: ${data.booking.guestPhone}
@@ -935,7 +935,7 @@ export class BrevoPropertyMailingService {
       A new booking has been made for a property you manage!
 
       Booking Details:
-      - Booking ID: ${data.booking.id}
+      - Booking ID: ${data.booking.id.toUpperCase()}
       - Property: ${data.booking.propertyName}
       - Host: ${data.booking.hostName}
       - Guest: ${data.booking.guestName}

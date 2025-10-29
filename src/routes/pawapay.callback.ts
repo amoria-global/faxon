@@ -332,7 +332,8 @@ async function handleFailedTransaction(
           booking: bookingInfo,
           recipientType: 'guest',
           paymentStatus: 'failed',
-          failureReason
+          failureReason,
+          paymentReference: transaction.externalId || internalRef
         }).catch(err => {
           console.error('[PAWAPAY_CALLBACK] Failed to send payment failed email to guest:', err);
         });
@@ -468,7 +469,8 @@ async function handleFailedTransaction(
           booking: bookingInfo,
           recipientType: 'guest',
           paymentStatus: 'failed',
-          failureReason
+          failureReason,
+          paymentReference: transaction.externalId || internalRef
         }).catch(err => {
           console.error('[PAWAPAY_CALLBACK] Failed to send tour booking failure email:', err);
         });
@@ -588,7 +590,8 @@ async function handleDepositCompletion(
             booking.property.host.id,
             splitAmounts.host,
             'PAYMENT_RECEIVED',
-            internalRef
+            internalRef,
+            booking.id
           ).catch(err => console.error('[PAWAPAY] Failed to update host wallet:', err));
         }
 
@@ -598,7 +601,8 @@ async function handleDepositCompletion(
             booking.property.agent.id,
             splitAmounts.agent,
             'COMMISSION_EARNED',
-            internalRef
+            internalRef,
+            booking.id
           ).catch(err => console.error('[PAWAPAY] Failed to update agent wallet:', err));
         }
 
@@ -608,7 +612,8 @@ async function handleDepositCompletion(
             1, // Platform account (user ID 1)
             splitAmounts.platform,
             'PLATFORM_FEE',
-            internalRef
+            internalRef,
+            booking.id
           ).catch(err => console.error('[PAWAPAY] Failed to update platform wallet:', err));
         }
 
@@ -708,7 +713,8 @@ async function handleDepositCompletion(
           recipientType: 'guest',
           paymentStatus: 'completed',
           paymentAmount: booking.totalPrice,
-          paymentCurrency: 'USD'
+          paymentCurrency: 'USD',
+          paymentReference: transaction.externalId || transaction.reference
         }).catch(err => console.error('[PAWAPAY_CALLBACK] Failed to send booking confirmation email:', err));
 
         // Send notification to host
@@ -725,7 +731,8 @@ async function handleDepositCompletion(
             recipientType: 'host',
             paymentStatus: 'completed',
             paymentAmount: booking.totalPrice,
-            paymentCurrency: 'USD'
+            paymentCurrency: 'USD',
+            paymentReference: transaction.externalId || transaction.reference
           }).catch(err => console.error('[PAWAPAY_CALLBACK] Failed to send host notification email:', err));
         }
 
@@ -743,7 +750,8 @@ async function handleDepositCompletion(
             recipientType: 'host',
             paymentStatus: 'completed',
             paymentAmount: splitAmounts.agent,
-            paymentCurrency: 'USD'
+            paymentCurrency: 'USD',
+            paymentReference: transaction.externalId || transaction.reference
           }).catch(err => console.error('[PAWAPAY_CALLBACK] Failed to send agent notification email:', err));
         }
       }
@@ -877,12 +885,14 @@ async function logActivity(
 
 /**
  * Update wallet balance for a user
+ * Credits pendingBalance (not available for withdrawal until check-in)
  */
 async function updateWalletBalance(
   userId: number,
   amount: number,
   type: string,
-  reference: string
+  reference: string,
+  bookingId: string
 ): Promise<void> {
   try {
     // Get or create wallet for user
@@ -895,18 +905,20 @@ async function updateWalletBalance(
         data: {
           userId,
           balance: 0,
+          pendingBalance: 0,
           currency: 'USD',
           isActive: true
         }
       });
     }
 
-    const newBalance = wallet.balance + amount;
+    // Credit to pendingBalance (not available for withdrawal until check-in)
+    const newPendingBalance = (wallet.pendingBalance || 0) + amount;
 
-    // Update wallet balance
+    // Update wallet pendingBalance
     await prisma.wallet.update({
       where: { userId },
-      data: { balance: newBalance }
+      data: { pendingBalance: newPendingBalance }
     });
 
     // Create wallet transaction record
@@ -915,21 +927,24 @@ async function updateWalletBalance(
         walletId: wallet.id,
         type: amount > 0 ? 'credit' : 'debit',
         amount: Math.abs(amount),
-        balanceBefore: wallet.balance,
-        balanceAfter: newBalance,
+        balanceBefore: wallet.pendingBalance || 0,
+        balanceAfter: newPendingBalance,
         reference,
-        description: `${type} - ${reference}`
+        description: `${type} - PENDING CHECK-IN - Booking: ${bookingId}`,
+        transactionId: bookingId
       }
     });
 
-    console.log('[PAWAPAY] Wallet updated successfully', {
+    console.log('[PAWAPAY] Wallet pending balance updated successfully', {
       userId,
       amount,
-      previousBalance: wallet.balance,
-      newBalance
+      bookingId,
+      previousPendingBalance: wallet.pendingBalance || 0,
+      newPendingBalance,
+      note: 'Funds will be available for withdrawal after check-in'
     });
   } catch (error) {
-    console.error('[PAWAPAY] Failed to update wallet balance:', error);
+    console.error('[PAWAPAY] Failed to update wallet pending balance:', error);
     throw error;
   }
 }

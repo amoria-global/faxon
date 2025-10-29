@@ -410,12 +410,14 @@ export class PawaPayService {
   }
 
   /**
-    * Generate a unique v4 UUID transaction ID
+    * Generate a unique transaction ID in format: Ref891288A6CEDD
     * @param prefix (No longer used, kept for compatibility if other code calls it)
-    * @returns Unique 36-character UUID
+    * @returns Unique transaction ID with 'Ref' prefix followed by 12 hex characters
   */
   generateTransactionId(prefix?: string): string {
-    return crypto.randomUUID();
+    // Generate 12 random hex characters (uppercase)
+    const randomHex = crypto.randomBytes(6).toString('hex').toUpperCase();
+    return `Ref${randomHex}`;
   }
 
 

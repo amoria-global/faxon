@@ -8,6 +8,7 @@ import smsService from '../services/sms.service';
 import { EmailService } from '../services/email.service';
 import withdrawalNotificationService from '../services/withdrawal-notification.service';
 import rateLimit from 'express-rate-limit';
+import { calculateWithdrawalFee, shouldDoubleFee } from '../utils/withdrawal-fee.utility';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -42,6 +43,51 @@ interface AuthenticatedRequest extends Request {
     userType?: string;
   };
 }
+
+/**
+ * Calculate withdrawal fee
+ * POST /api/payments/withdrawal/calculate-fee
+ */
+router.post('/calculate-fee',
+  authenticate,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { amount, method = 'MOBILE' } = req.body;
+
+      if (!amount || amount <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Valid amount is required'
+        });
+      }
+
+      // Determine if fee should be doubled based on method
+      const isDoubleFee = shouldDoubleFee(method);
+
+      // Calculate fee (wallet is in USD)
+      const feeCalculation = calculateWithdrawalFee(amount, 'USD', isDoubleFee);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          originalAmount: feeCalculation.originalAmount,
+          feeAmount: feeCalculation.feeAmount,
+          netAmount: feeCalculation.netAmount,
+          feeTier: feeCalculation.feeTier,
+          currency: feeCalculation.currency,
+          feePercentage: ((feeCalculation.feeAmount / feeCalculation.originalAmount) * 100).toFixed(2)
+        }
+      });
+
+    } catch (error: any) {
+      console.error('Calculate withdrawal fee error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to calculate withdrawal fee'
+      });
+    }
+  }
+);
 
 /**
  * Request withdrawal OTP
@@ -136,13 +182,20 @@ router.post('/request-otp',
         where: { userId }
       });
 
-      if (!wallet || wallet.balance < amount) {
+      // Calculate fee early to validate total required balance
+      // Need to assume default method for OTP stage (MOBILE)
+      const tempFeeCalc = calculateWithdrawalFee(amount, 'USD', false);
+      const totalRequired = amount + tempFeeCalc.feeAmount;
+
+      if (!wallet || wallet.balance < totalRequired) {
         return res.status(400).json({
           success: false,
-          message: 'Insufficient wallet balance',
+          message: `Insufficient wallet balance. You need ${totalRequired.toFixed(2)} USD (${amount.toFixed(2)} USD withdrawal + ${tempFeeCalc.feeAmount.toFixed(2)} USD fee) but only have ${wallet?.balance || 0} USD available.`,
           availableBalance: wallet?.balance || 0,
           currency: 'USD',
-          requestedAmount: amount
+          requestedAmount: amount,
+          feeAmount: tempFeeCalc.feeAmount,
+          totalRequired: totalRequired
         });
       }
 
@@ -276,18 +329,26 @@ router.post('/verify-and-withdraw',
         });
       }
 
+      // ⚠️ CRITICAL: Calculate withdrawal fee BEFORE balance validation
+      // This ensures we check if user has enough to cover BOTH withdrawal + fee
+      const isDoubleFee = shouldDoubleFee(method);
+      const feeCalculation = calculateWithdrawalFee(amount, 'USD', isDoubleFee);
+      const totalRequired = amount + feeCalculation.feeAmount;
+
       // Check wallet balance again (wallet is in USD)
       const wallet = await prisma.wallet.findUnique({
         where: { userId }
       });
 
-      if (!wallet || wallet.balance < amount) {
+      if (!wallet || wallet.balance < totalRequired) {
         return res.status(400).json({
           success: false,
-          message: 'Insufficient wallet balance',
+          message: `Insufficient wallet balance. You need ${totalRequired.toFixed(2)} USD (${amount.toFixed(2)} USD withdrawal + ${feeCalculation.feeAmount.toFixed(2)} USD fee) but only have ${wallet?.balance || 0} USD available.`,
           availableBalance: wallet?.balance || 0,
           currency: 'USD',
-          requestedAmount: amount
+          requestedAmount: amount,
+          feeAmount: feeCalculation.feeAmount,
+          totalRequired: totalRequired
         });
       }
 
@@ -350,6 +411,29 @@ router.post('/verify-and-withdraw',
         }
       }
 
+      console.log('[WITHDRAWAL_REQUEST] Fee calculation:', {
+        originalAmount: feeCalculation.originalAmount,
+        feeAmount: feeCalculation.feeAmount,
+        netAmount: feeCalculation.netAmount,
+        feeTier: feeCalculation.feeTier,
+        isDoubled: isDoubleFee,
+        totalRequired: totalRequired
+      });
+
+      // ⚠️ CRITICAL: Validate that the withdrawal amount covers the fee
+      if (feeCalculation.netAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Withdrawal amount (${amount} USD) is insufficient to cover the withdrawal fee (${feeCalculation.feeAmount} USD). Please request a higher amount.`,
+          feeCalculation: {
+            originalAmount: feeCalculation.originalAmount,
+            feeAmount: feeCalculation.feeAmount,
+            netAmount: feeCalculation.netAmount,
+            feeTier: feeCalculation.feeTier
+          }
+        });
+      }
+
       // Create withdrawal request with link to saved withdrawal method
       const reference = `WD-${Date.now()}-${userId}`;
 
@@ -357,6 +441,9 @@ router.post('/verify-and-withdraw',
         data: {
           userId,
           amount: amount,
+          feeAmount: feeCalculation.feeAmount,
+          netAmount: feeCalculation.netAmount,
+          feeTier: feeCalculation.feeTier,
           currency: 'USD',
           method: method as 'MOBILE' | 'BANK',
           destination: JSON.stringify(withdrawalDestination),
@@ -366,26 +453,27 @@ router.post('/verify-and-withdraw',
         }
       });
 
-      // Update wallet balance (wallet is in USD)
+      // ⚠️ CRITICAL FIX: Deduct TOTAL (withdrawal amount + fee) from wallet
+      // The user receives netAmount, but we must deduct the full amount + fee
       // Move from balance to pendingBalance (funds are locked for withdrawal)
       await prisma.wallet.update({
         where: { id: wallet.id },
         data: {
-          balance: wallet.balance - amount,
-          pendingBalance: wallet.pendingBalance + amount
+          balance: wallet.balance - totalRequired,
+          pendingBalance: wallet.pendingBalance + totalRequired
         }
       });
 
-      // Create wallet transaction record
+      // Create wallet transaction record showing the TOTAL deduction
       await prisma.walletTransaction.create({
         data: {
           walletId: wallet.id,
           type: 'WITHDRAWAL',
-          amount: -amount,
+          amount: -totalRequired,
           balanceBefore: wallet.balance,
-          balanceAfter: wallet.balance - amount,
+          balanceAfter: wallet.balance - totalRequired,
           reference,
-          description: `Withdrawal request - ${method} (moved to pending)`,
+          description: `Withdrawal request - ${method} (${amount} USD + ${feeCalculation.feeAmount} USD fee = ${totalRequired} USD total)`,
           transactionId: withdrawal.id
         }
       });
@@ -414,17 +502,22 @@ router.post('/verify-and-withdraw',
       const responseData: any = {
         withdrawalId: withdrawal.id,
         amount: withdrawal.amount,
+        feeAmount: withdrawal.feeAmount,
+        netAmount: withdrawal.netAmount,
+        feeTier: withdrawal.feeTier,
+        totalDeducted: totalRequired,
         currency: withdrawal.currency,
         method: withdrawal.method,
         status: withdrawal.status,
         reference: withdrawal.reference,
         estimatedDelivery: '1-3 business days',
-        newBalance: wallet.balance - amount
+        newBalance: wallet.balance - totalRequired,
+        feeNote: `Total deducted from wallet: ${totalRequired.toFixed(2)} ${withdrawal.currency} (${withdrawal.amount} ${withdrawal.currency} withdrawal + ${withdrawal.feeAmount} ${withdrawal.currency} fee). You will receive ${withdrawal.netAmount} ${withdrawal.currency}.`
       };
 
       res.status(200).json({
         success: true,
-        message: 'Withdrawal processed successfully',
+        message: `Withdrawal request created. You will receive ${withdrawal.netAmount} ${withdrawal.currency} after deducting the ${withdrawal.feeAmount} ${withdrawal.currency} withdrawal fee.`,
         data: responseData
       });
 
@@ -705,6 +798,24 @@ router.get('/info',
             maximum: 3500,  // USD
             daily: 1400,    // USD
             monthly: 7000   // USD
+          },
+          fees: {
+            tier1: {
+              range: 'Up to 1,000,000 RWF (~$769 USD)',
+              fee: '600 RWF (~$0.46 USD)',
+              feeDoubled: '1,200 RWF (~$0.92 USD)'
+            },
+            tier2: {
+              range: '1,000,001 - 5,000,000 RWF (~$769-$3,846 USD)',
+              fee: '1,200 RWF (~$0.92 USD)',
+              feeDoubled: '2,400 RWF (~$1.85 USD)'
+            },
+            tier3: {
+              range: 'Above 5,000,000 RWF (~$3,846 USD)',
+              fee: '3,000 RWF (~$2.31 USD)',
+              feeDoubled: '6,000 RWF (~$4.62 USD)'
+            },
+            note: 'Fees are automatically deducted from withdrawal amount. Fees are doubled for card/bank withdrawals.'
           },
           kyc: {
             completed: user.kycCompleted,
