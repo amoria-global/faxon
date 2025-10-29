@@ -5,6 +5,7 @@ export interface CreatePropertyBookingDto {
   checkIn: string;
   checkOut: string;
   guests: number;
+  totalPrice: number; // Amount calculated on frontend (includes fees, taxes, etc.)
   message?: string;
   specialRequests?: string;
   clientId?: number; // For agent bookings
@@ -70,6 +71,7 @@ export interface CreateTourBookingDto {
   tourId: string;
   scheduleId: string;
   numberOfParticipants: number;
+  totalAmount: number; // Amount calculated on frontend (includes fees, taxes, etc.)
   participants: TourParticipant[];
   specialRequests?: string;
   clientId?: number; // For agent bookings

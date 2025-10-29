@@ -5,6 +5,9 @@ import express, { Request, Response } from 'express';
 import crypto from 'crypto';
 import { XentriPayService } from '../services/xentripay.service';
 import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
+import { generateUniqueBookingCode } from '../utils/booking-code.utility';
+import smsService from '../services/sms.service';
+import { EmailService } from '../services/email.service';
 import config from '../config/config';
 
 const router = express.Router();
@@ -24,6 +27,7 @@ const xentriPayService = new XentriPayService({
 });
 
 const paymentEmailService = new BrevoPaymentStatusMailingService();
+const emailService = new EmailService();
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -164,6 +168,38 @@ async function handlePaymentSuccessDirectly(reference: string, prisma: any): Pro
           }
         });
 
+        // ✅ GENERATE AND SEND BOOKING CODE IMMEDIATELY AFTER PAYMENT COMPLETION
+        console.log('[XENTRIPAY_CALLBACK] Generating booking code for guest...');
+        try {
+          // Check if booking code already exists
+          if (!booking.bookingCode) {
+            const bookingCode = await generateUniqueBookingCode();
+
+            // Update booking with the generated code
+            await prisma.booking.update({
+              where: { id: booking.id },
+              data: { bookingCode: bookingCode }
+            });
+
+            // Send booking code to guest via SMS and Email
+            await sendBookingCodeNotification(
+              booking.guest.email,
+              booking.guest.phone,
+              booking.guest.firstName,
+              bookingCode,
+              booking.id,
+              booking.property.name
+            );
+
+            console.log(`[XENTRIPAY_CALLBACK] ✅ Booking code generated and sent: ${bookingCode}`);
+          } else {
+            console.log(`[XENTRIPAY_CALLBACK] Booking code already exists: ${booking.bookingCode}`);
+          }
+        } catch (codeError) {
+          console.error('[XENTRIPAY_CALLBACK] Failed to generate/send booking code:', codeError);
+          // Don't fail the payment completion if booking code generation fails
+        }
+
         // Calculate split amounts (platform gets 14%)
         const hasAgent = booking.property.agent !== null;
         const splitRules = calculateSplitRules(hasAgent);
@@ -214,7 +250,8 @@ async function handlePaymentSuccessDirectly(reference: string, prisma: any): Pro
             booking.property.host.id,
             splitAmounts.host,
             'PAYMENT_RECEIVED',
-            reference
+            reference,
+            booking.id
           ).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to update host wallet:', err));
         }
 
@@ -225,7 +262,8 @@ async function handlePaymentSuccessDirectly(reference: string, prisma: any): Pro
             booking.property.agent.id,
             splitAmounts.agent,
             'COMMISSION_EARNED',
-            reference
+            reference,
+            booking.id
           ).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to update agent wallet:', err));
         }
 
@@ -236,7 +274,8 @@ async function handlePaymentSuccessDirectly(reference: string, prisma: any): Pro
             1, // Platform account (user ID 1)
             splitAmounts.platform,
             'PLATFORM_FEE',
-            reference
+            reference,
+            booking.id
           ).catch((err: any) => console.error('[XENTRIPAY_CALLBACK] Failed to update platform wallet:', err));
         }
 
@@ -279,7 +318,7 @@ async function handlePaymentSuccessDirectly(reference: string, prisma: any): Pro
         console.log('[XENTRIPAY_CALLBACK] ✅ Booking payment processed successfully');
 
         // Send payment confirmation emails to guest, host, and agent
-        await sendPropertyBookingPaymentEmails(reference, 'completed');
+        await sendPropertyBookingPaymentEmails(reference, 'completed', undefined, reference);
       }
     }
   } catch (error) {
@@ -317,7 +356,7 @@ async function handlePaymentFailureDirectly(reference: string, prisma: any): Pro
         });
 
         // Send payment failure email to guest
-        await sendPropertyBookingPaymentEmails(reference, 'failed', failureReason);
+        await sendPropertyBookingPaymentEmails(reference, 'failed', failureReason, reference);
 
         console.log('[XENTRIPAY_CALLBACK] Booking payment marked as failed');
       }
@@ -389,13 +428,15 @@ async function logActivity(
 
 /**
  * Update wallet balance for a user
+ * Credits pendingBalance (not available for withdrawal until check-in)
  */
 async function updateWalletBalance(
   prisma: any,
   userId: number,
   amount: number,
   type: string,
-  reference: string
+  reference: string,
+  bookingId: string
 ): Promise<void> {
   try {
     // Get or create wallet for user
@@ -408,18 +449,20 @@ async function updateWalletBalance(
         data: {
           userId,
           balance: 0,
+          pendingBalance: 0,
           currency: 'USD',
           isActive: true
         }
       });
     }
 
-    const newBalance = wallet.balance + amount;
+    // Credit to pendingBalance (not available for withdrawal until check-in)
+    const newPendingBalance = (wallet.pendingBalance || 0) + amount;
 
-    // Update wallet balance
+    // Update wallet pendingBalance
     await prisma.wallet.update({
       where: { userId },
-      data: { balance: newBalance }
+      data: { pendingBalance: newPendingBalance }
     });
 
     // Create wallet transaction record
@@ -428,22 +471,142 @@ async function updateWalletBalance(
         walletId: wallet.id,
         type: amount > 0 ? 'credit' : 'debit',
         amount: Math.abs(amount),
-        balanceBefore: wallet.balance,
-        balanceAfter: newBalance,
+        balanceBefore: wallet.pendingBalance || 0,
+        balanceAfter: newPendingBalance,
         reference,
-        description: `${type} - ${reference}`
+        description: `${type} - PENDING CHECK-IN - Booking: ${bookingId}`,
+        transactionId: bookingId
       }
     });
 
-    console.log('[XENTRIPAY_CALLBACK] Wallet updated successfully', {
+    console.log('[XENTRIPAY_CALLBACK] Wallet pending balance updated successfully', {
       userId,
       amount,
-      previousBalance: wallet.balance,
-      newBalance
+      bookingId,
+      previousPendingBalance: wallet.pendingBalance || 0,
+      newPendingBalance,
+      note: 'Funds will be available for withdrawal after check-in'
     });
   } catch (error) {
-    console.error('[XENTRIPAY_CALLBACK] Failed to update wallet balance:', error);
+    console.error('[XENTRIPAY_CALLBACK] Failed to update wallet pending balance:', error);
     throw error;
+  }
+}
+
+/**
+ * Send booking code notification to guest via SMS and Email
+ */
+async function sendBookingCodeNotification(
+  email: string,
+  phone: string | null,
+  firstName: string,
+  bookingCode: string,
+  bookingId: string,
+  propertyOrTourName: string
+): Promise<void> {
+  try {
+    // Send SMS if phone number exists
+    if (phone) {
+      try {
+        const smsMessage = `Hi ${firstName}, your check-in code for ${propertyOrTourName} (Booking: ${bookingId.toUpperCase()}) is: ${bookingCode}. Please present this code at check-in. - Jambolush`;
+        await smsService.sendNotificationSMS(phone, smsMessage);
+        console.log(`[XENTRIPAY_CALLBACK] Booking code SMS sent to ${phone}`);
+      } catch (smsError) {
+        console.error(`[XENTRIPAY_CALLBACK] Failed to send booking code SMS:`, smsError);
+        // Continue to send email even if SMS fails
+      }
+    }
+
+    // Send Email (always)
+    try {
+      const emailSubject = `Your Check-In Code for ${propertyOrTourName}`;
+      const emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #083A85 0%, #0a4499 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border: 1px solid #ddd; }
+            .code-box { background: #083A85; color: white; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px; }
+            .code { font-size: 36px; font-weight: bold; letter-spacing: 8px; font-family: 'Courier New', monospace; }
+            .info-box { background: white; padding: 15px; border-left: 4px solid #083A85; margin: 20px 0; }
+            .footer { text-align: center; padding: 20px; color: #777; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Your Check-In Code</h1>
+            </div>
+            <div class="content">
+              <p>Hi ${firstName},</p>
+              <p>Your payment has been confirmed! Here is your check-in code that you'll need to present when you arrive:</p>
+
+              <div class="code-box">
+                <div style="font-size: 14px; margin-bottom: 10px;">Your Check-In Code:</div>
+                <div class="code">${bookingCode}</div>
+              </div>
+
+              <div class="info-box">
+                <strong>Booking Details:</strong><br>
+                <strong>Booking ID:</strong> ${bookingId.toUpperCase()}<br>
+                <strong>Property:</strong> ${propertyOrTourName}
+              </div>
+
+              <p><strong>Important:</strong></p>
+              <ul>
+                <li>Please keep this code safe and present it at check-in</li>
+                <li>The host/staff will ask you for this code to verify your booking</li>
+                <li>Do not share this code with anyone except authorized staff</li>
+              </ul>
+
+              <p>If you have any questions, please contact our support team.</p>
+            </div>
+            <div class="footer">
+              <p>This is an automated message from Jambolush</p>
+              <p>&copy; ${new Date().getFullYear()} Jambolush. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const emailText = `
+Hi ${firstName},
+
+Your payment has been confirmed! Here is your check-in code:
+
+CHECK-IN CODE: ${bookingCode}
+
+Booking Details:
+- Booking ID: ${bookingId.toUpperCase()}
+- Property: ${propertyOrTourName}
+
+Important:
+- Please keep this code safe and present it at check-in
+- The host/staff will ask you for this code to verify your booking
+- Do not share this code with anyone except authorized staff
+
+If you have any questions, please contact our support team.
+
+Jambolush
+      `;
+
+      await emailService.sendEmail({
+        to: email,
+        subject: emailSubject,
+        html: emailHtml,
+        text: emailText
+      });
+
+      console.log(`[XENTRIPAY_CALLBACK] Booking code email sent to ${email}`);
+    } catch (emailError) {
+      console.error(`[XENTRIPAY_CALLBACK] Failed to send booking code email:`, emailError);
+    }
+  } catch (error) {
+    console.error(`[XENTRIPAY_CALLBACK] Error sending booking code notification:`, error);
   }
 }
 
@@ -453,7 +616,8 @@ async function updateWalletBalance(
 async function sendPropertyBookingPaymentEmails(
   bookingId: string,
   status: 'completed' | 'failed',
-  failureReason?: string
+  failureReason?: string,
+  paymentReference?: string
 ): Promise<void> {
   try {
     const { PrismaClient } = require('@prisma/client');
@@ -537,7 +701,8 @@ async function sendPropertyBookingPaymentEmails(
         recipientType: 'guest',
         paymentStatus: 'completed',
         paymentAmount: booking.totalPrice,
-        paymentCurrency: 'USD'
+        paymentCurrency: 'USD',
+        paymentReference: paymentReference || bookingId
       });
 
       // Send notification to host
@@ -553,7 +718,8 @@ async function sendPropertyBookingPaymentEmails(
         recipientType: 'host',
         paymentStatus: 'completed',
         paymentAmount: booking.totalPrice,
-        paymentCurrency: 'USD'
+        paymentCurrency: 'USD',
+        paymentReference: paymentReference || bookingId
       });
 
       // Send notification to agent if exists
@@ -576,7 +742,8 @@ async function sendPropertyBookingPaymentEmails(
             recipientType: 'host', // Using 'host' as recipient type for agent too
             paymentStatus: 'completed',
             paymentAmount: booking.totalPrice,
-            paymentCurrency: 'USD'
+            paymentCurrency: 'USD',
+            paymentReference: paymentReference || bookingId
           }).catch(err => console.error('[XENTRIPAY_CALLBACK] Error sending agent notification:', err));
         }
       }
@@ -593,7 +760,8 @@ async function sendPropertyBookingPaymentEmails(
         booking: bookingInfo,
         recipientType: 'guest',
         paymentStatus: 'failed',
-        failureReason
+        failureReason,
+        paymentReference: paymentReference || bookingId
       });
     }
 

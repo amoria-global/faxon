@@ -1163,7 +1163,20 @@ export class StatusPollerService {
       console.log(`[STATUS_POLLER] Checking withdrawal ${withdrawal.reference} status from provider`);
 
       // Check status from XentriPay using withdrawal reference
-      const providerStatus = await this.xentriPayService.getPayoutStatus(withdrawal.reference);
+      // Note: If duplicate references exist, XentriPay may return multiple results
+      let providerStatus;
+      try {
+        providerStatus = await this.xentriPayService.getPayoutStatus(withdrawal.reference);
+      } catch (error: any) {
+        // If query returns non-unique results (duplicate references), skip this check
+        if (error.message?.includes('did not return a unique result')) {
+          console.error(`[STATUS_POLLER] ❌ Duplicate withdrawal reference ${withdrawal.reference} - cannot check status`);
+          console.error(`[STATUS_POLLER] This withdrawal request has a duplicate reference. Please check database for duplicates.`);
+          return; // Skip this withdrawal
+        }
+        throw error; // Re-throw other errors
+      }
+
       console.log(`[STATUS_POLLER] XentriPay status for ${withdrawal.reference}:`, providerStatus.data?.status);
 
       const newStatus = this.mapXentriPayStatus(providerStatus.data?.status);
@@ -1920,6 +1933,13 @@ export class StatusPollerService {
     try {
       console.log(`[STATUS_POLLER] Sending successful payment notifications for booking ${booking.id}`);
 
+      // Get transaction to retrieve externalId for payment reference
+      const transaction = await prisma.transaction.findUnique({
+        where: { id: transactionId },
+        select: { externalId: true, reference: true }
+      });
+      const paymentReference = transaction?.externalId || transaction?.reference || transactionId;
+
       const bookingInfo: any = {
         id: booking.id,
         propertyId: booking.propertyId,
@@ -1975,7 +1995,8 @@ export class StatusPollerService {
         recipientType: 'guest',
         paymentStatus: 'completed',
         paymentAmount: booking.totalPrice,
-        paymentCurrency: 'USD'
+        paymentCurrency: 'USD',
+        paymentReference
       }).catch(err => console.error('[STATUS_POLLER] Failed to send guest email:', err));
 
       // Send to host
@@ -1992,7 +2013,8 @@ export class StatusPollerService {
           recipientType: 'host',
           paymentStatus: 'completed',
           paymentAmount: booking.totalPrice,
-          paymentCurrency: 'USD'
+          paymentCurrency: 'USD',
+          paymentReference
         }).catch(err => console.error('[STATUS_POLLER] Failed to send host email:', err));
       }
 
@@ -2010,7 +2032,8 @@ export class StatusPollerService {
           recipientType: 'host',
           paymentStatus: 'completed',
           paymentAmount: booking.totalPrice,
-          paymentCurrency: 'USD'
+          paymentCurrency: 'USD',
+          paymentReference
         }).catch(err => console.error('[STATUS_POLLER] Failed to send agent email:', err));
       }
 
@@ -2119,6 +2142,13 @@ export class StatusPollerService {
     tourBooking: any
   ): Promise<void> {
     try {
+      // Get transaction to retrieve externalId for payment reference
+      const transaction = await prisma.transaction.findUnique({
+        where: { id: transactionId },
+        select: { externalId: true, reference: true }
+      });
+      const paymentReference = transaction?.externalId || transaction?.reference || transactionId;
+
       const bookingInfo: any = {
         id: tourBooking.id,
         tourId: String(tourBooking.tourId),
@@ -2192,7 +2222,8 @@ export class StatusPollerService {
         recipientType: 'guest',
         paymentStatus: 'completed',
         paymentAmount: tourBooking.totalAmount,
-        paymentCurrency: tourBooking.currency
+        paymentCurrency: tourBooking.currency,
+        paymentReference
       }).catch(err => console.error('[STATUS_POLLER] Failed to send tour guest email:', err));
 
       // Send to tour guide
@@ -2208,7 +2239,8 @@ export class StatusPollerService {
         recipientType: 'guide',
         paymentStatus: 'completed',
         paymentAmount: tourBooking.totalAmount,
-        paymentCurrency: tourBooking.currency
+        paymentCurrency: tourBooking.currency,
+        paymentReference
       }).catch(err => console.error('[STATUS_POLLER] Failed to send tour guide email:', err));
 
       // Send to admin
@@ -2356,12 +2388,19 @@ export class StatusPollerService {
 
   /**
    * Update wallet balance for a user
+   * For booking-related payments, funds go to pendingBalance until check-in
+   * @param userId - User ID
+   * @param amount - Amount to add
+   * @param type - Transaction type (PAYMENT_RECEIVED, COMMISSION_EARNED, etc.)
+   * @param reference - Transaction reference
+   * @param isPending - Whether funds should go to pendingBalance (default: true for bookings)
    */
   private async updateWalletBalance(
     userId: number,
     amount: number,
     type: string,
-    reference: string
+    reference: string,
+    isPending: boolean = true // Default to pending for check-in requirement
   ): Promise<void> {
     try {
       // Get or create wallet for user
@@ -2374,18 +2413,36 @@ export class StatusPollerService {
           data: {
             userId,
             balance: 0,
+            pendingBalance: 0,
             currency: 'USD',
             isActive: true
           }
         });
       }
 
-      const newBalance = wallet.balance + amount;
+      // Determine if this is a booking-related payment (not platform fee)
+      const isBookingPayment = type === 'PAYMENT_RECEIVED' || type === 'COMMISSION_EARNED' || type === 'TOUR_PAYMENT_RECEIVED';
 
-      // Update wallet balance
+      let newBalance = wallet.balance;
+      let newPendingBalance = wallet.pendingBalance;
+
+      // For booking payments, add to pendingBalance until check-in
+      // For other payments (platform fees, etc.), add directly to balance
+      if (isBookingPayment && isPending) {
+        newPendingBalance = wallet.pendingBalance + amount;
+        console.log(`[STATUS_POLLER] Adding $${amount} to PENDING balance for user ${userId} (awaiting check-in)`);
+      } else {
+        newBalance = wallet.balance + amount;
+        console.log(`[STATUS_POLLER] Adding $${amount} to AVAILABLE balance for user ${userId}`);
+      }
+
+      // Update wallet
       await prisma.wallet.update({
         where: { userId },
-        data: { balance: newBalance }
+        data: {
+          balance: newBalance,
+          pendingBalance: newPendingBalance
+        }
       });
 
       // Create wallet transaction record
@@ -2395,13 +2452,16 @@ export class StatusPollerService {
           type: amount > 0 ? 'credit' : 'debit',
           amount: Math.abs(amount),
           balanceBefore: wallet.balance,
-          balanceAfter: newBalance,
+          balanceAfter: isBookingPayment && isPending ? wallet.balance : newBalance, // Balance stays same if pending
           reference,
-          description: `${type} - ${reference}`
+          description: isBookingPayment && isPending
+            ? `${type} - ${reference} (PENDING CHECK-IN)`
+            : `${type} - ${reference}`,
+          transactionId: reference
         }
       });
 
-      console.log(`[STATUS_POLLER] Wallet updated for user ${userId}: +$${amount} (${type})`);
+      console.log(`[STATUS_POLLER] Wallet updated for user ${userId}: +$${amount} (${type})${isBookingPayment && isPending ? ' - PENDING' : ''}`);
     } catch (error: any) {
       console.error(`[STATUS_POLLER] Failed to update wallet for user ${userId}:`, error);
       throw error;
@@ -2480,13 +2540,14 @@ export class StatusPollerService {
         ).catch((err: any) => console.error('[STATUS_POLLER] Failed to update agent wallet:', err));
       }
 
-      // Update platform wallet
+      // Update platform wallet (platform fees go directly to available balance, not pending)
       if (splitAmounts.platform > 0) {
         await this.updateWalletBalance(
           1, // Platform account (user ID 1)
           splitAmounts.platform,
           'PLATFORM_FEE',
-          transactionReference
+          transactionReference,
+          false // Platform fees are immediately available, not pending check-in
         ).catch((err: any) => console.error('[STATUS_POLLER] Failed to update platform wallet:', err));
       }
 
@@ -2523,8 +2584,22 @@ export class StatusPollerService {
       const platformFee = Math.round((tourBooking.totalAmount * 14 / 100) * 100) / 100;
       const guideAmount = tourBooking.totalAmount - platformFee;
 
-      // Update tour guide wallet
+      // Create tour earnings record (pending until check-in)
       if (tourBooking.tour?.tourGuide) {
+        await prisma.tourEarnings.create({
+          data: {
+            tourGuideId: tourBooking.tour.tourGuide.id,
+            tourId: tourBooking.tourId,
+            bookingId: tourBooking.id,
+            amount: tourBooking.totalAmount,
+            commission: platformFee,
+            netAmount: guideAmount,
+            currency: tourBooking.currency,
+            status: 'pending' // Pending until check-in
+          }
+        }).catch((err: any) => console.error('[STATUS_POLLER] Failed to create tour earnings:', err));
+
+        // Update tour guide wallet (funds go to pending balance until check-in)
         await this.updateWalletBalance(
           tourBooking.tour.tourGuide.id,
           guideAmount,
@@ -2533,13 +2608,14 @@ export class StatusPollerService {
         ).catch((err: any) => console.error('[STATUS_POLLER] Failed to update guide wallet:', err));
       }
 
-      // Update platform wallet
+      // Update platform wallet (platform fees go directly to available balance, not pending)
       if (platformFee > 0) {
         await this.updateWalletBalance(
           1, // Platform account (user ID 1)
           platformFee,
           'PLATFORM_FEE',
-          transactionReference
+          transactionReference,
+          false // Platform fees are immediately available, not pending check-in
         ).catch((err: any) => console.error('[STATUS_POLLER] Failed to update platform wallet:', err));
       }
 

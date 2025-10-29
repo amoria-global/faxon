@@ -1390,6 +1390,38 @@ export class UnifiedTransactionController {
         providerName: provider.name
       });
 
+      // Send email notification to admin for approval
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: parseInt(userId) },
+          select: { email: true, firstName: true, lastName: true }
+        });
+
+        if (user) {
+          const { BrevoWithdrawalMethodService } = require('../utils/brevo.withdrawal-method');
+          const emailService = new BrevoWithdrawalMethodService();
+
+          await emailService.sendAdminNotificationForNewMethod({
+            id: method.id,
+            userId: parseInt(userId),
+            userEmail: user.email,
+            userFirstName: user.firstName,
+            userLastName: user.lastName,
+            methodType,
+            accountName,
+            accountDetails: enhancedAccountDetails,
+            createdAt: method.createdAt
+          });
+
+          logger.info('Admin notification sent for new withdrawal method', 'UnifiedTransactionController', {
+            methodId: method.id
+          });
+        }
+      } catch (emailError: any) {
+        // Don't fail the request if email fails
+        logger.error('Failed to send admin notification email', 'UnifiedTransactionController', emailError);
+      }
+
       res.status(201).json({
         success: true,
         message: `${provider.name} withdrawal method added successfully (pending approval)`,
@@ -1615,6 +1647,36 @@ export class UnifiedTransactionController {
         adminId
       });
 
+      // Send approval email notification to user
+      try {
+        const { BrevoWithdrawalMethodService } = require('../utils/brevo.withdrawal-method');
+        const emailService = new BrevoWithdrawalMethodService();
+
+        const accountDetails = method.accountDetails as any;
+
+        await emailService.sendUserApprovalNotification({
+          id: method.id,
+          userId: method.userId,
+          userEmail: method.user.email,
+          userFirstName: method.user.firstName,
+          userLastName: method.user.lastName,
+          methodType: method.methodType,
+          accountName: method.accountName,
+          accountDetails: accountDetails || {},
+          createdAt: method.createdAt,
+          approvedBy: adminId.toString(),
+          approvedAt: updated.approvedAt || new Date()
+        });
+
+        logger.info('User approval notification sent', 'UnifiedTransactionController', {
+          methodId: id,
+          userEmail: method.user.email
+        });
+      } catch (emailError: any) {
+        // Don't fail the request if email fails
+        logger.error('Failed to send user approval notification', 'UnifiedTransactionController', emailError);
+      }
+
       res.status(200).json({
         success: true,
         message: `Withdrawal method approved successfully for ${method.user.firstName} ${method.user.lastName}`,
@@ -1683,6 +1745,37 @@ export class UnifiedTransactionController {
         adminId,
         reason
       });
+
+      // Send rejection email notification to user
+      try {
+        const { BrevoWithdrawalMethodService } = require('../utils/brevo.withdrawal-method');
+        const emailService = new BrevoWithdrawalMethodService();
+
+        const accountDetails = method.accountDetails as any;
+
+        await emailService.sendUserRejectionNotification({
+          id: method.id,
+          userId: method.userId,
+          userEmail: method.user.email,
+          userFirstName: method.user.firstName,
+          userLastName: method.user.lastName,
+          methodType: method.methodType,
+          accountName: method.accountName,
+          accountDetails: accountDetails || {},
+          createdAt: method.createdAt,
+          rejectedBy: adminId.toString(),
+          rejectionReason: reason,
+          rejectedAt: updated.rejectedAt || new Date()
+        });
+
+        logger.info('User rejection notification sent', 'UnifiedTransactionController', {
+          methodId: id,
+          userEmail: method.user.email
+        });
+      } catch (emailError: any) {
+        // Don't fail the request if email fails
+        logger.error('Failed to send user rejection notification', 'UnifiedTransactionController', emailError);
+      }
 
       res.status(200).json({
         success: true,

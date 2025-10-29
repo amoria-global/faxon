@@ -11,7 +11,7 @@ import notificationRoutes from './routes/notification.routes';
 import helpRoutes from './routes/help.routes';
 import settingsRoutes from './routes/settings.routes';
 import adminRoutes from './routes/admin.routes';
-import publicRoutes from './routes/public.routes';
+// import publicRoutes from './routes/public.routes'; // TODO: Create this file if needed
 import XentriPayRoutes from './routes/xentripay.routes';
 import pawaPayRoutes from './routes/pawapay.routes'; // PawaPay routes
 import pawaPayCallbackRoutes from './routes/pawapay.callback'; // PawaPay callback
@@ -21,11 +21,11 @@ import agentCommissionRoutes from './routes/agent-commission.routes'; // NEW
 import bookingLeadsRoutes from './routes/booking-leads.routes'; // NEW - Booking leads/archive management
 import { ReminderSchedulerService } from './services/reminder-scheduler.service'; // NEW
 import { BookingCleanupSchedulerService } from './services/booking-cleanup-scheduler.service'; // NEW
-import { EmailService } from './services/email.service';
 import { StatusPollerService } from './services/status-poller.service';
 import { PawaPayService } from './services/pawapay.service';
 import { XentriPayService } from './services/xentripay.service';
 import unifiedTransactionRoutes from './routes/unified-transaction.routes';
+import checkinRoutes from './routes/checkin.routes';
 
 const app = express();
 
@@ -96,7 +96,7 @@ if (process.env.ENABLE_KYC_REMINDERS !== 'false') reminderScheduler.start();
 if (process.env.ENABLE_BOOKING_CLEANUP !== 'false') bookingCleanupScheduler.start();
 
 // Routes
-app.use('/api/public', publicRoutes); // Public routes (no auth required)
+// app.use('/api/public', publicRoutes); // Public routes (no auth required) - TODO: Uncomment when public.routes.ts is created
 app.use('/api/auth', authRoutes);
 app.use('/api/payments/withdrawal', withdrawalRoutes);
 app.use('/api/properties', propertyRoutes);
@@ -116,6 +116,7 @@ app.use('/api/booking-cleanup', bookingCleanupRoutes); // NEW: Booking cleanup r
 app.use('/api', agentCommissionRoutes); // NEW: Agent commission and owner management routes
 app.use('/api/admin/booking-leads', bookingLeadsRoutes); // NEW: Booking leads/archive management (admin only)
 app.use('/api/transactions', unifiedTransactionRoutes); // NEW: Unified transaction routes (all providers)
+app.use('/api/checkin', checkinRoutes); // NEW: Check-in/check-out routes
 
 // Health check
 app.get('/health', (req, res) => {

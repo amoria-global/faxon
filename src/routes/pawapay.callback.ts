@@ -7,6 +7,8 @@ import { PawaPayWebhookData } from '../types/pawapay.types';
 import { validatePawaPayWebhook, logPawaPayRequest } from '../middleware/pawapay.middleware';
 import { EmailService } from '../services/email.service';
 import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
+import { generateUniqueBookingCode } from '../utils/booking-code.utility';
+import smsService from '../services/sms.service';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -332,7 +334,8 @@ async function handleFailedTransaction(
           booking: bookingInfo,
           recipientType: 'guest',
           paymentStatus: 'failed',
-          failureReason
+          failureReason,
+          paymentReference: transaction.externalId || internalRef
         }).catch(err => {
           console.error('[PAWAPAY_CALLBACK] Failed to send payment failed email to guest:', err);
         });
@@ -468,7 +471,8 @@ async function handleFailedTransaction(
           booking: bookingInfo,
           recipientType: 'guest',
           paymentStatus: 'failed',
-          failureReason
+          failureReason,
+          paymentReference: transaction.externalId || internalRef
         }).catch(err => {
           console.error('[PAWAPAY_CALLBACK] Failed to send tour booking failure email:', err);
         });
@@ -539,6 +543,38 @@ async function handleDepositCompletion(
           }
         });
 
+        // ✅ GENERATE AND SEND BOOKING CODE IMMEDIATELY AFTER PAYMENT COMPLETION
+        console.log('[PAWAPAY_CALLBACK] Generating booking code for guest...');
+        try {
+          // Check if booking code already exists
+          if (!booking.bookingCode) {
+            const bookingCode = await generateUniqueBookingCode();
+
+            // Update booking with the generated code
+            await prisma.booking.update({
+              where: { id: booking.id },
+              data: { bookingCode: bookingCode }
+            });
+
+            // Send booking code to guest via SMS and Email
+            await sendBookingCodeNotification(
+              booking.guest.email,
+              booking.guest.phone,
+              booking.guest.firstName,
+              bookingCode,
+              booking.id,
+              booking.property.name
+            );
+
+            console.log(`[PAWAPAY_CALLBACK] ✅ Booking code generated and sent: ${bookingCode}`);
+          } else {
+            console.log(`[PAWAPAY_CALLBACK] Booking code already exists: ${booking.bookingCode}`);
+          }
+        } catch (codeError) {
+          console.error('[PAWAPAY_CALLBACK] Failed to generate/send booking code:', codeError);
+          // Don't fail the payment completion if booking code generation fails
+        }
+
         // Calculate split amounts (platform gets 14%)
         const hasAgent = booking.property.agent !== null;
         const splitRules = calculateSplitRules(hasAgent);
@@ -588,7 +624,8 @@ async function handleDepositCompletion(
             booking.property.host.id,
             splitAmounts.host,
             'PAYMENT_RECEIVED',
-            internalRef
+            internalRef,
+            booking.id
           ).catch(err => console.error('[PAWAPAY] Failed to update host wallet:', err));
         }
 
@@ -598,7 +635,8 @@ async function handleDepositCompletion(
             booking.property.agent.id,
             splitAmounts.agent,
             'COMMISSION_EARNED',
-            internalRef
+            internalRef,
+            booking.id
           ).catch(err => console.error('[PAWAPAY] Failed to update agent wallet:', err));
         }
 
@@ -608,7 +646,8 @@ async function handleDepositCompletion(
             1, // Platform account (user ID 1)
             splitAmounts.platform,
             'PLATFORM_FEE',
-            internalRef
+            internalRef,
+            booking.id
           ).catch(err => console.error('[PAWAPAY] Failed to update platform wallet:', err));
         }
 
@@ -708,7 +747,8 @@ async function handleDepositCompletion(
           recipientType: 'guest',
           paymentStatus: 'completed',
           paymentAmount: booking.totalPrice,
-          paymentCurrency: 'USD'
+          paymentCurrency: 'USD',
+          paymentReference: transaction.externalId || transaction.reference
         }).catch(err => console.error('[PAWAPAY_CALLBACK] Failed to send booking confirmation email:', err));
 
         // Send notification to host
@@ -725,7 +765,8 @@ async function handleDepositCompletion(
             recipientType: 'host',
             paymentStatus: 'completed',
             paymentAmount: booking.totalPrice,
-            paymentCurrency: 'USD'
+            paymentCurrency: 'USD',
+            paymentReference: transaction.externalId || transaction.reference
           }).catch(err => console.error('[PAWAPAY_CALLBACK] Failed to send host notification email:', err));
         }
 
@@ -743,7 +784,8 @@ async function handleDepositCompletion(
             recipientType: 'host',
             paymentStatus: 'completed',
             paymentAmount: splitAmounts.agent,
-            paymentCurrency: 'USD'
+            paymentCurrency: 'USD',
+            paymentReference: transaction.externalId || transaction.reference
           }).catch(err => console.error('[PAWAPAY_CALLBACK] Failed to send agent notification email:', err));
         }
       }
@@ -758,7 +800,7 @@ async function handleDepositCompletion(
             tourGuide: { select: { id: true, email: true, firstName: true, lastName: true } }
           }
         },
-        user: { select: { id: true, email: true, firstName: true, lastName: true } }
+        user: { select: { id: true, email: true, firstName: true, lastName: true, phone: true } }
       }
     });
 
@@ -770,6 +812,38 @@ async function handleDepositCompletion(
           status: 'confirmed'
         }
       });
+
+      // ✅ GENERATE AND SEND BOOKING CODE FOR TOUR BOOKINGS
+      console.log('[PAWAPAY_CALLBACK] Generating booking code for tour guest...');
+      try {
+        // Check if booking code already exists
+        if (!tourBooking.bookingCode) {
+          const bookingCode = await generateUniqueBookingCode();
+
+          // Update tour booking with the generated code
+          await prisma.tourBooking.update({
+            where: { id: tourBooking.id },
+            data: { bookingCode: bookingCode }
+          });
+
+          // Send booking code to guest via SMS and Email
+          await sendBookingCodeNotification(
+            tourBooking.user.email,
+            tourBooking.user.phone,
+            tourBooking.user.firstName,
+            bookingCode,
+            tourBooking.id,
+            tourBooking.tour.title
+          );
+
+          console.log(`[PAWAPAY_CALLBACK] ✅ Tour booking code generated and sent: ${bookingCode}`);
+        } else {
+          console.log(`[PAWAPAY_CALLBACK] Tour booking code already exists: ${tourBooking.bookingCode}`);
+        }
+      } catch (codeError) {
+        console.error('[PAWAPAY_CALLBACK] Failed to generate/send tour booking code:', codeError);
+        // Don't fail the payment completion if booking code generation fails
+      }
 
       // Calculate platform fee (14%)
       const platformFee = tourBooking.totalAmount * 0.14;
@@ -849,6 +923,123 @@ function calculateSplitAmounts(amount: number, rules: { platform: number; agent:
 }
 
 /**
+ * Send booking code notification to guest via SMS and Email
+ */
+async function sendBookingCodeNotification(
+  email: string,
+  phone: string | null,
+  firstName: string,
+  bookingCode: string,
+  bookingId: string,
+  propertyOrTourName: string
+): Promise<void> {
+  try {
+    // Send SMS if phone number exists
+    if (phone) {
+      try {
+        const smsMessage = `Hi ${firstName}, your check-in code for ${propertyOrTourName} (Booking: ${bookingId.toUpperCase()}) is: ${bookingCode}. Please present this code at check-in. - Jambolush`;
+        await smsService.sendNotificationSMS(phone, smsMessage);
+        console.log(`[PAWAPAY_CALLBACK] Booking code SMS sent to ${phone}`);
+      } catch (smsError) {
+        console.error(`[PAWAPAY_CALLBACK] Failed to send booking code SMS:`, smsError);
+        // Continue to send email even if SMS fails
+      }
+    }
+
+    // Send Email (always)
+    try {
+      const emailSubject = `Your Check-In Code for ${propertyOrTourName}`;
+      const emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #083A85 0%, #0a4499 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border: 1px solid #ddd; }
+            .code-box { background: #083A85; color: white; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px; }
+            .code { font-size: 36px; font-weight: bold; letter-spacing: 8px; font-family: 'Courier New', monospace; }
+            .info-box { background: white; padding: 15px; border-left: 4px solid #083A85; margin: 20px 0; }
+            .footer { text-align: center; padding: 20px; color: #777; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Your Check-In Code</h1>
+            </div>
+            <div class="content">
+              <p>Hi ${firstName},</p>
+              <p>Your payment has been confirmed! Here is your check-in code that you'll need to present when you arrive:</p>
+
+              <div class="code-box">
+                <div style="font-size: 14px; margin-bottom: 10px;">Your Check-In Code:</div>
+                <div class="code">${bookingCode}</div>
+              </div>
+
+              <div class="info-box">
+                <strong>Booking Details:</strong><br>
+                <strong>Booking ID:</strong> ${bookingId.toUpperCase()}<br>
+                <strong>${propertyOrTourName.includes('Tour') ? 'Tour' : 'Property'}:</strong> ${propertyOrTourName}
+              </div>
+
+              <p><strong>Important:</strong></p>
+              <ul>
+                <li>Please keep this code safe and present it at check-in</li>
+                <li>The host/staff will ask you for this code to verify your booking</li>
+                <li>Do not share this code with anyone except authorized staff</li>
+              </ul>
+
+              <p>If you have any questions, please contact our support team.</p>
+            </div>
+            <div class="footer">
+              <p>This is an automated message from Jambolush</p>
+              <p>&copy; ${new Date().getFullYear()} Jambolush. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const emailText = `
+Hi ${firstName},
+
+Your payment has been confirmed! Here is your check-in code:
+
+CHECK-IN CODE: ${bookingCode}
+
+Booking Details:
+- Booking ID: ${bookingId.toUpperCase()}
+- ${propertyOrTourName.includes('Tour') ? 'Tour' : 'Property'}: ${propertyOrTourName}
+
+Important:
+- Please keep this code safe and present it at check-in
+- The host/staff will ask you for this code to verify your booking
+- Do not share this code with anyone except authorized staff
+
+If you have any questions, please contact our support team.
+
+Jambolush
+      `;
+
+      await emailService.sendEmail({
+        to: email,
+        subject: emailSubject,
+        html: emailHtml,
+        text: emailText
+      });
+
+      console.log(`[PAWAPAY_CALLBACK] Booking code email sent to ${email}`);
+    } catch (emailError) {
+      console.error(`[PAWAPAY_CALLBACK] Failed to send booking code email:`, emailError);
+    }
+  } catch (error) {
+    console.error(`[PAWAPAY_CALLBACK] Error sending booking code notification:`, error);
+  }
+}
+
+/**
  * Log activity for a user
  */
 async function logActivity(
@@ -877,12 +1068,14 @@ async function logActivity(
 
 /**
  * Update wallet balance for a user
+ * Credits pendingBalance (not available for withdrawal until check-in)
  */
 async function updateWalletBalance(
   userId: number,
   amount: number,
   type: string,
-  reference: string
+  reference: string,
+  bookingId: string
 ): Promise<void> {
   try {
     // Get or create wallet for user
@@ -895,18 +1088,20 @@ async function updateWalletBalance(
         data: {
           userId,
           balance: 0,
+          pendingBalance: 0,
           currency: 'USD',
           isActive: true
         }
       });
     }
 
-    const newBalance = wallet.balance + amount;
+    // Credit to pendingBalance (not available for withdrawal until check-in)
+    const newPendingBalance = (wallet.pendingBalance || 0) + amount;
 
-    // Update wallet balance
+    // Update wallet pendingBalance
     await prisma.wallet.update({
       where: { userId },
-      data: { balance: newBalance }
+      data: { pendingBalance: newPendingBalance }
     });
 
     // Create wallet transaction record
@@ -915,21 +1110,24 @@ async function updateWalletBalance(
         walletId: wallet.id,
         type: amount > 0 ? 'credit' : 'debit',
         amount: Math.abs(amount),
-        balanceBefore: wallet.balance,
-        balanceAfter: newBalance,
+        balanceBefore: wallet.pendingBalance || 0,
+        balanceAfter: newPendingBalance,
         reference,
-        description: `${type} - ${reference}`
+        description: `${type} - PENDING CHECK-IN - Booking: ${bookingId}`,
+        transactionId: bookingId
       }
     });
 
-    console.log('[PAWAPAY] Wallet updated successfully', {
+    console.log('[PAWAPAY] Wallet pending balance updated successfully', {
       userId,
       amount,
-      previousBalance: wallet.balance,
-      newBalance
+      bookingId,
+      previousPendingBalance: wallet.pendingBalance || 0,
+      newPendingBalance,
+      note: 'Funds will be available for withdrawal after check-in'
     });
   } catch (error) {
-    console.error('[PAWAPAY] Failed to update wallet balance:', error);
+    console.error('[PAWAPAY] Failed to update wallet pending balance:', error);
     throw error;
   }
 }

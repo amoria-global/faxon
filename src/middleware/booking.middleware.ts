@@ -59,6 +59,12 @@ export const validatePropertyBooking = (req: AuthenticatedRequest, res: Response
     errors.push('Number of guests must be between 1 and 20');
   }
 
+  if (!data.totalPrice) {
+    errors.push('Total price is required');
+  } else if (isNaN(Number(data.totalPrice)) || data.totalPrice <= 0) {
+    errors.push('Total price must be a valid positive number');
+  }
+
   // Optional field validation
   if (data.message && data.message.length > 500) {
     errors.push('Message must be less than 500 characters');
@@ -124,6 +130,12 @@ export const validateTourBooking = (req: AuthenticatedRequest, res: Response, ne
     errors.push('Number of participants is required');
   } else if (data.numberOfParticipants < 1 || data.numberOfParticipants > 50) {
     errors.push('Number of participants must be between 1 and 50');
+  }
+
+  if (!data.totalAmount) {
+    errors.push('Total amount is required');
+  } else if (isNaN(Number(data.totalAmount)) || data.totalAmount <= 0) {
+    errors.push('Total amount must be a valid positive number');
   }
 
   if (!data.participants) {
