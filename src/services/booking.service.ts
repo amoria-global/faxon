@@ -254,20 +254,55 @@ export class BookingService {
         id: bookingId,
         OR: [
           { guestId: userId },
-          { property: { hostId: userId } }
+          { property: { hostId: userId } },
+          { property: { agentId: userId } }  // Agent who uploaded the property
         ]
       },
       include: {
         property: {
-          include: { host: true }
+          include: {
+            host: true,
+            agent: true
+          }
         },
         guest: true
       }
     });
 
-    if (!booking) return null;
+    if (booking) {
+      return this.transformToPropertyBookingInfo(booking);
+    }
 
-    return this.transformToPropertyBookingInfo(booking);
+    // If not found with direct access, check if agent has client relationship with host
+    const bookingForAgentClient = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        property: {
+          include: {
+            host: true,
+            agent: true
+          }
+        },
+        guest: true
+      }
+    });
+
+    if (bookingForAgentClient && bookingForAgentClient.property.hostId) {
+      // Check if agent manages this host's properties
+      const agentClientRelation = await prisma.agentBooking.findFirst({
+        where: {
+          agentId: userId,
+          clientId: bookingForAgentClient.property.hostId,
+          status: 'active'
+        }
+      });
+
+      if (agentClientRelation) {
+        return this.transformToPropertyBookingInfo(bookingForAgentClient);
+      }
+    }
+
+    return null;
   }
 
   async updatePropertyBooking(bookingId: string, userId: number, data: UpdatePropertyBookingDto): Promise<PropertyBookingInfo> {
@@ -1553,5 +1588,90 @@ export class BookingService {
       'no_show': '#6b7280'
     };
     return colors[status] || '#9ca3af';
+  }
+
+  // --- GENERAL BOOKING METHOD (PROPERTY OR TOUR) ---
+  async getBookingById(
+    bookingId: string,
+    userId: number,
+    type?: 'property' | 'tour'
+  ): Promise<PropertyBookingInfo | TourBookingInfo | null> {
+    // If type is specified, only search that table
+    if (type === 'property') {
+      return this.getPropertyBookingById(bookingId, userId);
+    }
+
+    if (type === 'tour') {
+      return this.getTourBookingById(bookingId, userId);
+    }
+
+    // If no type specified, search both tables (property first, then tour)
+    // First, try to find as property booking
+    const propertyBooking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        property: {
+          include: {
+            host: true,
+            agent: true
+          }
+        },
+        guest: true,
+        agentCommissions: {
+          where: { agentId: userId }
+        }
+      }
+    });
+
+    if (propertyBooking) {
+      // Check access control: guest, host, or agent
+      const isGuest = propertyBooking.guestId === userId;
+      const isHost = propertyBooking.property.hostId === userId;
+      const isAgent = propertyBooking.property.agentId === userId;
+
+      if (!isGuest && !isHost && !isAgent) {
+        // Check if user is an agent managing this host's properties
+        const agentClientRelation = await prisma.agentBooking.findFirst({
+          where: {
+            agentId: userId,
+            clientId: propertyBooking.property.hostId || 0,
+            status: 'active'
+          }
+        });
+
+        if (!agentClientRelation) {
+          return null; // Access denied
+        }
+      }
+
+      return this.transformToPropertyBookingInfo(propertyBooking);
+    }
+
+    // If not found as property booking, try tour booking
+    const tourBooking = await prisma.tourBooking.findUnique({
+      where: { id: bookingId },
+      include: {
+        tour: {
+          include: { tourGuide: true }
+        },
+        schedule: true,
+        user: true
+      }
+    });
+
+    if (tourBooking) {
+      // Check access control: guest or tour guide
+      const isGuest = tourBooking.userId === userId;
+      const isTourGuide = tourBooking.tourGuideId === userId;
+
+      if (!isGuest && !isTourGuide) {
+        return null; // Access denied
+      }
+
+      return this.transformToTourBookingInfo(tourBooking);
+    }
+
+    // Not found in either table
+    return null;
   }
 }

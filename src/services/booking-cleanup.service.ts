@@ -12,14 +12,16 @@ export class BookingCleanupService {
   private emailService = new BrevoBookingMailingService();
   /**
    * Process expired pending bookings and remove them along with their blocked dates
+   * @param timeoutMinutes - Number of minutes before a booking is considered expired (default: 30)
    */
-  async processExpiredBookings(): Promise<{
+  async processExpiredBookings(timeoutMinutes: number = 30): Promise<{
     propertyBookingsRemoved: number;
     tourBookingsRemoved: number;
     blockedDatesRemoved: number;
     propertyBookingsArchived: number;
     tourBookingsArchived: number;
     adminsNotified: number;
+    usersNotified: number;
     errors: string[];
   }> {
     const results = {
@@ -29,34 +31,37 @@ export class BookingCleanupService {
       propertyBookingsArchived: 0,
       tourBookingsArchived: 0,
       adminsNotified: 0,
+      usersNotified: 0,
       errors: [] as string[]
     };
 
     try {
-      // Calculate cutoff time (24 hours ago)
+      // Calculate cutoff time (30 minutes ago by default)
       const cutoffDate = new Date();
-      cutoffDate.setHours(cutoffDate.getHours() - 24);
+      cutoffDate.setMinutes(cutoffDate.getMinutes() - timeoutMinutes);
 
-      console.log(`🧹 Checking for expired bookings created before ${cutoffDate.toISOString()}`);
+      console.log(`🧹 Checking for expired bookings created before ${cutoffDate.toISOString()} (${timeoutMinutes} minutes timeout)`);
 
       // Clean up property bookings
-      const propertyBookingsResult = await this.cleanupPropertyBookings(cutoffDate);
+      const propertyBookingsResult = await this.cleanupPropertyBookings(cutoffDate, timeoutMinutes);
       results.propertyBookingsRemoved = propertyBookingsResult.removed;
       results.blockedDatesRemoved = propertyBookingsResult.blockedDatesRemoved;
       results.propertyBookingsArchived = propertyBookingsResult.archived;
+      results.usersNotified = propertyBookingsResult.usersNotified;
       results.errors.push(...propertyBookingsResult.errors);
 
       // Clean up tour bookings
-      const tourBookingsResult = await this.cleanupTourBookings(cutoffDate);
+      const tourBookingsResult = await this.cleanupTourBookings(cutoffDate, timeoutMinutes);
       results.tourBookingsRemoved = tourBookingsResult.removed;
       results.tourBookingsArchived = tourBookingsResult.archived;
+      results.usersNotified += tourBookingsResult.usersNotified;
       results.errors.push(...tourBookingsResult.errors);
 
       // Send admin notification if there are archived bookings
       const totalArchived = results.propertyBookingsArchived + results.tourBookingsArchived;
       if (totalArchived > 0) {
         try {
-          await this.notifyAdminsOfExpiredBookings(results);
+          await this.notifyAdminsOfExpiredBookings(results, timeoutMinutes);
           results.adminsNotified = 1;
         } catch (emailError: any) {
           results.errors.push(`Admin notification failed: ${emailError.message}`);
@@ -73,23 +78,92 @@ export class BookingCleanupService {
   }
 
   /**
+   * Process failed bookings and remove their blocked dates
+   */
+  async processFailedBookings(): Promise<{
+    propertyBookingsProcessed: number;
+    tourBookingsProcessed: number;
+    blockedDatesRemoved: number;
+    errors: string[];
+  }> {
+    const results = {
+      propertyBookingsProcessed: 0,
+      tourBookingsProcessed: 0,
+      blockedDatesRemoved: 0,
+      errors: [] as string[]
+    };
+
+    try {
+      console.log('🔍 Checking for failed bookings with blocked dates...');
+
+      // Handle property bookings with failed payments
+      const failedPropertyBookings = await prisma.booking.findMany({
+        where: {
+          paymentStatus: 'failed',
+          status: { in: ['pending', 'cancelled'] }
+        },
+        select: {
+          id: true
+        }
+      });
+
+      console.log(`📋 Found ${failedPropertyBookings.length} failed property bookings`);
+
+      for (const booking of failedPropertyBookings) {
+        try {
+          // Remove blocked dates for this failed booking
+          const blockedDatesDeleted = await prisma.blockedDate.deleteMany({
+            where: {
+              reason: { contains: `Booking ID: ${booking.id}` },
+              isActive: true
+            }
+          });
+
+          results.blockedDatesRemoved += blockedDatesDeleted.count;
+          results.propertyBookingsProcessed++;
+
+          if (blockedDatesDeleted.count > 0) {
+            console.log(`✅ Removed ${blockedDatesDeleted.count} blocked date(s) for failed booking ${booking.id}`);
+          }
+
+        } catch (error: any) {
+          results.errors.push(`Failed to process failed booking ${booking.id}: ${error.message}`);
+          console.error(`❌ Error processing failed booking ${booking.id}:`, error);
+        }
+      }
+
+      if (results.propertyBookingsProcessed > 0) {
+        console.log(`📊 Processed ${results.propertyBookingsProcessed} failed property bookings and removed ${results.blockedDatesRemoved} blocked dates`);
+      }
+
+    } catch (error: any) {
+      results.errors.push(`Failed bookings cleanup error: ${error.message}`);
+      console.error('❌ Error during failed bookings cleanup:', error);
+    }
+
+    return results;
+  }
+
+  /**
    * Clean up expired property bookings
    */
-  private async cleanupPropertyBookings(cutoffDate: Date): Promise<{
+  private async cleanupPropertyBookings(cutoffDate: Date, timeoutMinutes: number): Promise<{
     removed: number;
     archived: number;
     blockedDatesRemoved: number;
+    usersNotified: number;
     errors: string[];
   }> {
     const result = {
       removed: 0,
       archived: 0,
       blockedDatesRemoved: 0,
+      usersNotified: 0,
       errors: [] as string[]
     };
 
     try {
-      // Find all pending bookings created more than 24 hours ago with pending payment
+      // Find all pending bookings created more than timeoutMinutes ago with pending payment
       const expiredBookings = await prisma.booking.findMany({
         where: {
           createdAt: { lt: cutoffDate },
@@ -138,12 +212,13 @@ export class BookingCleanupService {
               status: booking.status,
               paymentStatus: booking.paymentStatus,
               bookingCreatedAt: booking.createdAt,
-              archiveReason: 'Expired - No payment received within 24 hours',
+              archiveReason: `Expired - No payment received within ${timeoutMinutes} minutes`,
               leadStatus: 'new',
               metadata: {
                 transactionId: booking.transactionId,
                 paymentMethod: booking.paymentMethod,
-                deletedAt: new Date().toISOString()
+                deletedAt: new Date().toISOString(),
+                timeoutMinutes
               } as any // Type assertion for JSON field
             }
           });
@@ -159,6 +234,23 @@ export class BookingCleanupService {
           });
 
           result.blockedDatesRemoved += blockedDatesDeleted.count;
+
+          // Send notification to user about expired booking
+          try {
+            await this.emailService.sendBookingExpiredNotification({
+              userEmail: booking.guest.email,
+              userName: booking.guest.firstName,
+              bookingId: booking.id,
+              propertyName: booking.property.name,
+              checkIn: booking.checkIn.toISOString(),
+              checkOut: booking.checkOut.toISOString(),
+              totalPrice: booking.totalPrice,
+              timeoutMinutes
+            });
+            result.usersNotified++;
+          } catch (emailError: any) {
+            console.error(`Failed to notify user ${booking.guest.email}:`, emailError);
+          }
 
           // Delete the booking
           await prisma.booking.delete({
@@ -191,19 +283,21 @@ export class BookingCleanupService {
   /**
    * Clean up expired tour bookings
    */
-  private async cleanupTourBookings(cutoffDate: Date): Promise<{
+  private async cleanupTourBookings(cutoffDate: Date, timeoutMinutes: number): Promise<{
     removed: number;
     archived: number;
+    usersNotified: number;
     errors: string[];
   }> {
     const result = {
       removed: 0,
       archived: 0,
+      usersNotified: 0,
       errors: [] as string[]
     };
 
     try {
-      // Find all pending tour bookings created more than 24 hours ago with pending payment
+      // Find all pending tour bookings created more than timeoutMinutes ago with pending payment
       const expiredBookings = await prisma.tourBooking.findMany({
         where: {
           createdAt: { lt: cutoffDate },
@@ -260,12 +354,13 @@ export class BookingCleanupService {
               status: booking.status,
               paymentStatus: booking.paymentStatus,
               bookingCreatedAt: booking.createdAt,
-              archiveReason: 'Expired - No payment received within 24 hours',
+              archiveReason: `Expired - No payment received within ${timeoutMinutes} minutes`,
               leadStatus: 'new',
               metadata: {
                 paymentId: booking.paymentId,
                 checkInStatus: booking.checkInStatus,
-                deletedAt: new Date().toISOString()
+                deletedAt: new Date().toISOString(),
+                timeoutMinutes
               } as any // Type assertion for JSON field
             }
           });
@@ -279,6 +374,23 @@ export class BookingCleanupService {
               bookedSlots: { decrement: booking.numberOfParticipants }
             }
           });
+
+          // Send notification to user about expired tour booking
+          try {
+            await this.emailService.sendTourBookingExpiredNotification({
+              userEmail: booking.user.email,
+              userName: booking.user.firstName,
+              bookingId: booking.id,
+              tourName: booking.tour.title,
+              tourDate: booking.schedule.startDate.toISOString(),
+              totalAmount: booking.totalAmount,
+              currency: booking.currency,
+              timeoutMinutes
+            });
+            result.usersNotified++;
+          } catch (emailError: any) {
+            console.error(`Failed to notify user ${booking.user.email}:`, emailError);
+          }
 
           // Delete the booking
           await prisma.tourBooking.delete({
@@ -310,12 +422,15 @@ export class BookingCleanupService {
   /**
    * Send notification to admins about expired bookings
    */
-  private async notifyAdminsOfExpiredBookings(results: {
-    propertyBookingsArchived: number;
-    tourBookingsArchived: number;
-    propertyBookingsRemoved: number;
-    tourBookingsRemoved: number;
-  }): Promise<void> {
+  private async notifyAdminsOfExpiredBookings(
+    results: {
+      propertyBookingsArchived: number;
+      tourBookingsArchived: number;
+      propertyBookingsRemoved: number;
+      tourBookingsRemoved: number;
+    },
+    timeoutMinutes: number
+  ): Promise<void> {
     // Get all admin users
     const admins = await prisma.user.findMany({
       where: {
@@ -346,7 +461,8 @@ export class BookingCleanupService {
           tourBookingsArchived: results.tourBookingsArchived,
           totalArchived,
           totalRemoved,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          timeoutMinutes
         });
       } catch (error) {
         console.error(`Failed to send notification to ${admin.email}:`, error);
@@ -383,17 +499,19 @@ export class BookingCleanupService {
 
   /**
    * Manually trigger cleanup (for testing or admin purposes)
+   * @param timeoutMinutes - Optional timeout in minutes (default: 30)
    */
-  async manualCleanup(): Promise<{
+  async manualCleanup(timeoutMinutes: number = 30): Promise<{
     propertyBookingsRemoved: number;
     tourBookingsRemoved: number;
     blockedDatesRemoved: number;
     propertyBookingsArchived: number;
     tourBookingsArchived: number;
     adminsNotified: number;
+    usersNotified: number;
     errors: string[];
   }> {
-    console.log('🔧 Manual cleanup triggered');
-    return await this.processExpiredBookings();
+    console.log(`🔧 Manual cleanup triggered with ${timeoutMinutes} minutes timeout`);
+    return await this.processExpiredBookings(timeoutMinutes);
   }
 }

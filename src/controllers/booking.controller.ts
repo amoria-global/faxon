@@ -28,6 +28,63 @@ export class BookingController {
     this.bookingService = new BookingService();
   }
 
+  // --- GENERAL BOOKING ENDPOINTS ---
+  getBookingById = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      const userId = parseInt(req.user.userId);
+      const bookingId = req.params.bookingId;
+      const type = req.query.type as 'property' | 'tour' | undefined;
+
+      if (!bookingId) {
+        res.status(400).json({
+          success: false,
+          message: 'Booking ID is required'
+        });
+        return;
+      }
+
+      // Validate type parameter if provided
+      if (type && type !== 'property' && type !== 'tour') {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid type parameter. Must be "property" or "tour"'
+        });
+        return;
+      }
+
+      const booking = await this.bookingService.getBookingById(bookingId, userId, type);
+
+      if (!booking) {
+        res.status(404).json({
+          success: false,
+          message: 'Booking not found or access denied'
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        message: 'Booking retrieved successfully',
+        data: booking
+      });
+    } catch (error: any) {
+      console.error('Error fetching booking:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve booking',
+        error: error.message
+      });
+    }
+  };
+
   // --- PROPERTY BOOKING ENDPOINTS ---
   createPropertyBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {

@@ -3416,10 +3416,10 @@ export class AdminService {
       });
     } else {
       // Legacy support: Calculate fee if not stored (for old withdrawal requests)
-      console.warn(`[ADMIN_SERVICE] ⚠️ Withdrawal ${withdrawal.reference} missing fee data - calculating now`);
+      console.warn(`[ADMIN_SERVICE] ⚠️ Withdrawal ${withdrawal.reference} missing fee data - calculating now with live exchange rate`);
 
       const isDoubleFee = shouldDoubleFee(accountInfo.methodType);
-      const feeValidation = validateWithdrawalWithFee(withdrawal.amount, withdrawal.currency, isDoubleFee);
+      const feeValidation = await validateWithdrawalWithFee(withdrawal.amount, withdrawal.currency, isDoubleFee);
 
       if (!feeValidation.valid) {
         throw new Error(feeValidation.error);
@@ -3430,12 +3430,13 @@ export class AdminService {
       netAmount = feeCalculation.netAmount;
       feeTier = feeCalculation.feeTier;
 
-      console.log(`[ADMIN_SERVICE] Calculated withdrawal fee:`, {
+      console.log(`[ADMIN_SERVICE] Calculated withdrawal fee with live exchange rate:`, {
         originalAmount: feeCalculation.originalAmount,
         fee: withdrawalFee,
         netAmount: netAmount,
         feeTier: feeTier,
-        currency: feeCalculation.currency
+        currency: feeCalculation.currency,
+        exchangeRate: feeCalculation.exchangeRate
       });
     }
 
@@ -3701,14 +3702,19 @@ export class AdminService {
       }
     });
 
-    // Refund wallet balance (move from pending back to available)
+    // Refund wallet balance
+    // - Withdrawal amount: move from pending back to available balance
+    // - Fee: refund to available balance (was deducted, now return it)
     const wallet = await prisma.wallet.findUnique({
       where: { userId: withdrawal.userId }
     });
 
     if (wallet) {
-      const newPendingBalance = Math.max(0, wallet.pendingBalance - withdrawal.amount);
-      const newBalance = wallet.balance + withdrawal.amount;
+      const withdrawalFee = withdrawal.feeAmount || 0;
+      const totalRefund = withdrawal.amount + withdrawalFee;  // Refund both withdrawal + fee
+
+      const newPendingBalance = Math.max(0, wallet.pendingBalance - withdrawal.amount);  // Remove from pending
+      const newBalance = wallet.balance + totalRefund;  // Add both back to available
 
       await prisma.wallet.update({
         where: { userId: withdrawal.userId },
@@ -3723,13 +3729,24 @@ export class AdminService {
         data: {
           walletId: wallet.id,
           type: 'credit',
-          amount: withdrawal.amount,
+          amount: totalRefund,
           balanceBefore: wallet.balance,
           balanceAfter: newBalance,
           reference: `REFUND-${withdrawal.reference}`,
-          description: `Withdrawal rejected - ${reason} (moved from pending to balance)`,
+          description: `Withdrawal rejected - ${reason} (${withdrawal.amount} from pending + ${withdrawalFee} fee refunded = ${totalRefund} total)`,
           transactionId: withdrawal.id
         }
+      });
+
+      console.log('[ADMIN_SERVICE] ✅ Withdrawal rejected, full refund issued:', {
+        withdrawalId: withdrawal.id,
+        withdrawalAmount: withdrawal.amount,
+        feeAmount: withdrawalFee,
+        totalRefund,
+        previousBalance: wallet.balance,
+        newBalance,
+        previousPending: wallet.pendingBalance,
+        newPending: newPendingBalance
       });
     }
 

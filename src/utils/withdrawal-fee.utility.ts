@@ -10,6 +10,8 @@
  * Note: Fees can be doubled for certain withdrawal types (e.g., card withdrawals)
  */
 
+import { currencyExchangeService } from '../services/currency-exchange.service';
+
 export interface WithdrawalFeeCalculation {
   originalAmount: number;
   feeAmount: number;
@@ -17,26 +19,36 @@ export interface WithdrawalFeeCalculation {
   feeTier: string;
   currency: string;
   isDoubled: boolean;
+  exchangeRate?: number; // The actual rate used for conversion
 }
 
 /**
- * Calculate withdrawal fee based on amount and currency
+ * Calculate withdrawal fee based on amount and currency (with live exchange rate)
  * @param amount - Withdrawal amount in specified currency
  * @param currency - Currency code (RWF, USD, etc.)
  * @param isDoubled - Whether to double the fee (for specific withdrawal types)
- * @returns WithdrawalFeeCalculation object with fee details
+ * @returns Promise<WithdrawalFeeCalculation> object with fee details
  */
-export function calculateWithdrawalFee(
+export async function calculateWithdrawalFee(
   amount: number,
   currency: string = 'RWF',
   isDoubled: boolean = false
-): WithdrawalFeeCalculation {
+): Promise<WithdrawalFeeCalculation> {
   let baseFee: number;
   let feeTier: string;
+  let exchangeRate: number | undefined;
 
-  // Convert to RWF if needed for tier calculation
-  // Approximate USD to RWF conversion rate: 1 USD = 1,300 RWF
-  const amountInRWF = currency.toUpperCase() === 'USD' ? amount * 1300 : amount;
+  // Convert to RWF if needed for tier calculation using LIVE exchange rate
+  let amountInRWF: number;
+
+  if (currency.toUpperCase() === 'USD') {
+    // Use payout rate for withdrawals (user is withdrawing USD, converting to RWF)
+    const conversion = await currencyExchangeService.convertUSDToRWF_Payout(amount);
+    amountInRWF = conversion.rwfAmount;
+    exchangeRate = conversion.rate;
+  } else {
+    amountInRWF = amount;
+  }
 
   // Determine base fee based on tier
   if (amountInRWF <= 1000000) {
@@ -54,10 +66,15 @@ export function calculateWithdrawalFee(
   const feeAmountInRWF = isDoubled ? baseFee * 2 : baseFee;
 
   // Convert fee back to original currency if needed
-  // Round to 2 decimal places for USD
-  const feeAmount = currency.toUpperCase() === 'USD'
-    ? Math.round((feeAmountInRWF / 1300) * 100) / 100
-    : feeAmountInRWF;
+  let feeAmount: number;
+
+  if (currency.toUpperCase() === 'USD') {
+    // Convert RWF fee to USD using payout rate
+    const feeConversion = await currencyExchangeService.convertRWFToUSD_Payout(feeAmountInRWF);
+    feeAmount = feeConversion.usdAmount;
+  } else {
+    feeAmount = feeAmountInRWF;
+  }
 
   // Calculate net amount after fee deduction
   const netAmount = Math.round((amount - feeAmount) * 100) / 100;
@@ -68,7 +85,8 @@ export function calculateWithdrawalFee(
     netAmount,
     feeTier: isDoubled ? `${feeTier} (Doubled)` : feeTier,
     currency: currency.toUpperCase(),
-    isDoubled
+    isDoubled,
+    exchangeRate
   };
 }
 
@@ -99,14 +117,14 @@ export function formatFeeForAdmin(calculation: WithdrawalFeeCalculation): string
  * @param amount - Original withdrawal amount
  * @param currency - Currency code
  * @param isDoubled - Whether fee is doubled
- * @returns { valid: boolean, error?: string, calculation?: WithdrawalFeeCalculation }
+ * @returns Promise<{ valid: boolean, error?: string, calculation?: WithdrawalFeeCalculation }>
  */
-export function validateWithdrawalWithFee(
+export async function validateWithdrawalWithFee(
   amount: number,
   currency: string = 'RWF',
   isDoubled: boolean = false
-): { valid: boolean; error?: string; calculation?: WithdrawalFeeCalculation } {
-  const calculation = calculateWithdrawalFee(amount, currency, isDoubled);
+): Promise<{ valid: boolean; error?: string; calculation?: WithdrawalFeeCalculation }> {
+  const calculation = await calculateWithdrawalFee(amount, currency, isDoubled);
 
   // Check if net amount is positive
   if (calculation.netAmount <= 0) {

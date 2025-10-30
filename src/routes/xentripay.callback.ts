@@ -337,28 +337,88 @@ async function handlePaymentFailureDirectly(reference: string, prisma: any): Pro
       const booking = await prisma.booking.findFirst({
         where: { transactionId: reference },
         include: {
-          guest: { select: { id: true } }
+          property: {
+            select: {
+              name: true,
+              location: true
+            }
+          },
+          guest: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true
+            }
+          }
         }
       });
 
       if (booking) {
-        await prisma.booking.update({
-          where: { id: booking.id },
-          data: {
-            paymentStatus: 'failed'
-          }
-        });
-
+        // Log activity before deletion
         await logActivity(prisma, booking.guestId, 'PAYMENT_FAILED', 'booking', booking.id, {
           provider: 'Xentripay',
           reference,
           failureReason
         });
 
-        // Send payment failure email to guest
+        // Send payment failure email to guest BEFORE deletion
         await sendPropertyBookingPaymentEmails(reference, 'failed', failureReason, reference);
 
-        console.log('[XENTRIPAY_CALLBACK] Booking payment marked as failed');
+        // Immediately remove blocked dates and archive the booking on payment failure
+        console.log(`[XENTRIPAY_CALLBACK] Immediately cleaning up failed booking ${booking.id}`);
+        try {
+          // Archive the booking
+          await prisma.bookingArchive.create({
+            data: {
+              originalBookingId: booking.id,
+              propertyId: booking.propertyId,
+              propertyName: booking.property.name,
+              propertyLocation: booking.property.location,
+              guestId: booking.guestId,
+              guestName: `${booking.guest.firstName} ${booking.guest.lastName}`,
+              guestEmail: booking.guest.email,
+              guestPhone: booking.guest.phone,
+              checkIn: booking.checkIn,
+              checkOut: booking.checkOut,
+              guests: booking.guests,
+              totalPrice: booking.totalPrice,
+              message: booking.message,
+              specialRequests: booking.specialRequests,
+              status: booking.status,
+              paymentStatus: 'failed',
+              bookingCreatedAt: booking.createdAt,
+              archiveReason: `Payment failed - ${failureReason}`,
+              leadStatus: 'new',
+              metadata: {
+                transactionId: booking.transactionId,
+                paymentMethod: booking.paymentMethod,
+                failureReason,
+                deletedAt: new Date().toISOString()
+              }
+            }
+          });
+
+          // Remove blocked dates for this booking
+          const blockedDatesDeleted = await prisma.blockedDate.deleteMany({
+            where: {
+              reason: { contains: `Booking ID: ${booking.id}` },
+              isActive: true
+            }
+          });
+
+          // Delete the booking
+          await prisma.booking.delete({
+            where: { id: booking.id }
+          });
+
+          console.log(`[XENTRIPAY_CALLBACK] ✅ Archived and removed failed booking ${booking.id} and ${blockedDatesDeleted.count} blocked date(s)`);
+        } catch (cleanupError) {
+          console.error(`[XENTRIPAY_CALLBACK] ❌ Failed to cleanup booking ${booking.id}:`, cleanupError);
+        }
+
+        console.log('[XENTRIPAY_CALLBACK] Booking payment marked as failed and cleaned up');
       }
     }
   } catch (error) {
@@ -704,6 +764,31 @@ async function sendPropertyBookingPaymentEmails(
         paymentCurrency: 'USD',
         paymentReference: paymentReference || bookingId
       });
+
+      // Send admin notification for completed payment
+      try {
+        const { adminNotifications } = await import('../utils/admin-notifications.js');
+        await adminNotifications.sendCompletedPaymentNotification({
+          transactionId: paymentReference || bookingId,
+          bookingId: booking.id,
+          user: {
+            id: booking.guestId,
+            email: booking.guest.email,
+            firstName: booking.guest.firstName,
+            lastName: booking.guest.lastName
+          },
+          amount: booking.totalPrice,
+          currency: 'RWF',
+          paymentMethod: 'Mobile Money',
+          propertyOrTour: {
+            name: booking.property.name,
+            type: 'property'
+          }
+        });
+      } catch (adminNotifError) {
+        console.error('[XENTRIPAY_CALLBACK] Failed to send admin notification:', adminNotifError);
+        // Don't fail payment processing if admin notification fails
+      }
 
       // Send notification to host
       await paymentEmailService.sendPaymentConfirmedToHost({
