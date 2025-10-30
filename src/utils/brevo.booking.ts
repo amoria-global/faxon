@@ -465,6 +465,280 @@ export class BrevoBookingMailingService {
     `.trim();
   }
 
+  // --- USER NOTIFICATION: BOOKING EXPIRED ---
+  async sendBookingExpiredNotification(data: {
+    userEmail: string;
+    userName: string;
+    bookingId: string;
+    propertyName: string;
+    checkIn: string;
+    checkOut: string;
+    totalPrice: number;
+    timeoutMinutes: number;
+  }): Promise<void> {
+    const emailData: BrevoEmailData = {
+      sender: this.defaultSender,
+      to: [{
+        email: data.userEmail,
+        name: data.userName
+      }],
+      subject: `⏰ Booking Expired - ${data.propertyName}`,
+      htmlContent: this.buildBookingExpiredHtmlContent(data),
+      textContent: this.buildBookingExpiredTextContent(data)
+    };
+
+    await this.makeRequest('/smtp/email', emailData);
+    console.log(`Booking expiration notification sent to ${data.userEmail}`);
+  }
+
+  private buildBookingExpiredHtmlContent(data: {
+    userName: string;
+    bookingId: string;
+    propertyName: string;
+    checkIn: string;
+    checkOut: string;
+    totalPrice: number;
+    timeoutMinutes: number;
+  }): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #ff6b35; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }
+          .content { background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; }
+          .info-box { background-color: white; padding: 15px; margin: 15px 0; border-left: 4px solid #ff6b35; }
+          .button { display: inline-block; padding: 12px 24px; background-color: #083A85; color: white; text-decoration: none; border-radius: 5px; margin: 15px 0; }
+          .footer { text-align: center; padding: 20px; color: #777; font-size: 12px; }
+          .alert { background-color: #fff3cd; border: 1px solid #ffc107; padding: 12px; margin: 15px 0; border-radius: 4px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>⏰ Booking Expired</h1>
+          </div>
+          <div class="content">
+            <p>Hi ${data.userName},</p>
+
+            <div class="alert">
+              <strong>⚠️ Your booking reservation has expired</strong><br>
+              Payment was not completed within ${data.timeoutMinutes} minutes.
+            </div>
+
+            <p>Your booking request for <strong>${data.propertyName}</strong> could not be confirmed because payment was not received within the required time frame.</p>
+
+            <div class="info-box">
+              <h3>Booking Details</h3>
+              <p><strong>Booking ID:</strong> ${data.bookingId.toUpperCase()}</p>
+              <p><strong>Property:</strong> ${data.propertyName}</p>
+              <p><strong>Check-in:</strong> ${new Date(data.checkIn).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              <p><strong>Check-out:</strong> ${new Date(data.checkOut).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              <p><strong>Total Price:</strong> $${data.totalPrice.toFixed(2)}</p>
+            </div>
+
+            <h3>What Happens Now?</h3>
+            <ul>
+              <li>The dates you selected are now available for other guests</li>
+              <li>You can create a new booking if you'd still like to reserve this property</li>
+              <li>Complete payment within ${data.timeoutMinutes} minutes to secure your reservation</li>
+            </ul>
+
+            <div style="text-align: center;">
+              <a href="https://jambolush.com/properties/${data.propertyName.toLowerCase().replace(/\s+/g, '-')}" class="button">
+                Book Again
+              </a>
+            </div>
+
+            <p style="margin-top: 20px;">If you have any questions or need assistance, please contact our support team.</p>
+
+            <div class="footer">
+              <p>Thank you for choosing Jambolush!</p>
+              <p>© ${new Date().getFullYear()} Jambolush. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private buildBookingExpiredTextContent(data: {
+    userName: string;
+    bookingId: string;
+    propertyName: string;
+    checkIn: string;
+    checkOut: string;
+    totalPrice: number;
+    timeoutMinutes: number;
+  }): string {
+    return `
+      BOOKING EXPIRED
+
+      Hi ${data.userName},
+
+      Your booking request for ${data.propertyName} has expired because payment was not completed within ${data.timeoutMinutes} minutes.
+
+      BOOKING DETAILS
+      ================
+      Booking ID: ${data.bookingId.toUpperCase()}
+      Property: ${data.propertyName}
+      Check-in: ${new Date(data.checkIn).toLocaleDateString()}
+      Check-out: ${new Date(data.checkOut).toLocaleDateString()}
+      Total Price: $${data.totalPrice.toFixed(2)}
+
+      WHAT HAPPENS NOW?
+      - The dates you selected are now available for other guests
+      - You can create a new booking if you'd still like to reserve this property
+      - Complete payment within ${data.timeoutMinutes} minutes to secure your reservation
+
+      Book again at: https://jambolush.com
+
+      If you have any questions, please contact our support team.
+
+      Thank you for choosing Jambolush!
+      © ${new Date().getFullYear()} Jambolush. All rights reserved.
+    `.trim();
+  }
+
+  // --- USER NOTIFICATION: TOUR BOOKING EXPIRED ---
+  async sendTourBookingExpiredNotification(data: {
+    userEmail: string;
+    userName: string;
+    bookingId: string;
+    tourName: string;
+    tourDate: string;
+    totalAmount: number;
+    currency: string;
+    timeoutMinutes: number;
+  }): Promise<void> {
+    const emailData: BrevoEmailData = {
+      sender: this.defaultSender,
+      to: [{
+        email: data.userEmail,
+        name: data.userName
+      }],
+      subject: `⏰ Tour Booking Expired - ${data.tourName}`,
+      htmlContent: this.buildTourBookingExpiredHtmlContent(data),
+      textContent: this.buildTourBookingExpiredTextContent(data)
+    };
+
+    await this.makeRequest('/smtp/email', emailData);
+    console.log(`Tour booking expiration notification sent to ${data.userEmail}`);
+  }
+
+  private buildTourBookingExpiredHtmlContent(data: {
+    userName: string;
+    bookingId: string;
+    tourName: string;
+    tourDate: string;
+    totalAmount: number;
+    currency: string;
+    timeoutMinutes: number;
+  }): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #ff6b35; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }
+          .content { background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; }
+          .info-box { background-color: white; padding: 15px; margin: 15px 0; border-left: 4px solid #ff6b35; }
+          .button { display: inline-block; padding: 12px 24px; background-color: #083A85; color: white; text-decoration: none; border-radius: 5px; margin: 15px 0; }
+          .footer { text-align: center; padding: 20px; color: #777; font-size: 12px; }
+          .alert { background-color: #fff3cd; border: 1px solid #ffc107; padding: 12px; margin: 15px 0; border-radius: 4px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>⏰ Tour Booking Expired</h1>
+          </div>
+          <div class="content">
+            <p>Hi ${data.userName},</p>
+
+            <div class="alert">
+              <strong>⚠️ Your tour booking reservation has expired</strong><br>
+              Payment was not completed within ${data.timeoutMinutes} minutes.
+            </div>
+
+            <p>Your booking request for <strong>${data.tourName}</strong> could not be confirmed because payment was not received within the required time frame.</p>
+
+            <div class="info-box">
+              <h3>Booking Details</h3>
+              <p><strong>Booking ID:</strong> ${data.bookingId.toUpperCase()}</p>
+              <p><strong>Tour:</strong> ${data.tourName}</p>
+              <p><strong>Tour Date:</strong> ${new Date(data.tourDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              <p><strong>Total Amount:</strong> ${data.totalAmount.toFixed(2)} ${data.currency}</p>
+            </div>
+
+            <h3>What Happens Now?</h3>
+            <ul>
+              <li>Your reserved spots have been released and are now available for other guests</li>
+              <li>You can create a new booking if you'd still like to join this tour</li>
+              <li>Complete payment within ${data.timeoutMinutes} minutes to secure your spots</li>
+            </ul>
+
+            <div style="text-align: center;">
+              <a href="https://jambolush.com/tours" class="button">
+                Browse Tours
+              </a>
+            </div>
+
+            <p style="margin-top: 20px;">If you have any questions or need assistance, please contact our support team.</p>
+
+            <div class="footer">
+              <p>Thank you for choosing Jambolush!</p>
+              <p>© ${new Date().getFullYear()} Jambolush. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private buildTourBookingExpiredTextContent(data: {
+    userName: string;
+    bookingId: string;
+    tourName: string;
+    tourDate: string;
+    totalAmount: number;
+    currency: string;
+    timeoutMinutes: number;
+  }): string {
+    return `
+      TOUR BOOKING EXPIRED
+
+      Hi ${data.userName},
+
+      Your tour booking request for ${data.tourName} has expired because payment was not completed within ${data.timeoutMinutes} minutes.
+
+      BOOKING DETAILS
+      ================
+      Booking ID: ${data.bookingId.toUpperCase()}
+      Tour: ${data.tourName}
+      Tour Date: ${new Date(data.tourDate).toLocaleDateString()}
+      Total Amount: ${data.totalAmount.toFixed(2)} ${data.currency}
+
+      WHAT HAPPENS NOW?
+      - Your reserved spots have been released and are now available for other guests
+      - You can create a new booking if you'd still like to join this tour
+      - Complete payment within ${data.timeoutMinutes} minutes to secure your spots
+
+      Browse tours at: https://jambolush.com/tours
+
+      If you have any questions, please contact our support team.
+
+      Thank you for choosing Jambolush!
+      © ${new Date().getFullYear()} Jambolush. All rights reserved.
+    `.trim();
+  }
+
   // --- ADMIN NOTIFICATION: EXPIRED BOOKINGS ---
   async sendExpiredBookingsNotification(data: {
     adminEmail: string;
@@ -474,6 +748,7 @@ export class BrevoBookingMailingService {
     totalArchived: number;
     totalRemoved: number;
     timestamp: string;
+    timeoutMinutes?: number;
   }): Promise<void> {
     const emailData: BrevoEmailData = {
       sender: this.defaultSender,
@@ -499,6 +774,7 @@ export class BrevoBookingMailingService {
     totalArchived: number;
     totalRemoved: number;
     timestamp: string;
+    timeoutMinutes?: number;
   }): string {
     return `
       <!DOCTYPE html>
@@ -528,7 +804,7 @@ export class BrevoBookingMailingService {
 
             <div class="alert">
               <strong>⚠️ Automatic Cleanup Report</strong><br>
-              The system has automatically cleaned up expired bookings that were created more than 24 hours ago with pending payments.
+              The system has automatically cleaned up expired bookings that were created more than ${data.timeoutMinutes || 30} minutes ago with pending payments.
             </div>
 
             <div class="stats-box">
@@ -589,13 +865,14 @@ export class BrevoBookingMailingService {
     totalArchived: number;
     totalRemoved: number;
     timestamp: string;
+    timeoutMinutes?: number;
   }): string {
     return `
       EXPIRED BOOKINGS ALERT
 
       Hi ${data.adminName},
 
-      The system has automatically cleaned up expired bookings that were created more than 24 hours ago with pending payments.
+      The system has automatically cleaned up expired bookings that were created more than ${data.timeoutMinutes || 30} minutes ago with pending payments.
 
       CLEANUP SUMMARY
       ================

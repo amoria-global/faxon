@@ -212,4 +212,9 @@ router.get('/host/guest-bookings', (req, res, next) => {
   next();
 }, bookingController.searchPropertyBookings);
 
+// --- GENERAL BOOKING ROUTES (MUST BE LAST - matches any /:bookingId) ---
+// Get any booking by ID (property or tour) - Universal access control with optional type parameter
+// Place at end to avoid conflicting with specific routes like /properties, /tours, /calendar, etc.
+router.get('/:bookingId', validateBookingAccess, bookingController.getBookingById);
+
 export default router;

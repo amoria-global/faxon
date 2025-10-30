@@ -241,43 +241,66 @@ export class EmailService {
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #374151; background: #f9fafb; padding: 10px; }
-        .email-wrapper { width: 98%; max-width: 600px; margin: 0 auto; }
+        .email-wrapper { width: 100%; max-width: 600px; margin: 0 auto; }
         .email-container { background: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); border: 1px solid #e5e7eb; overflow: hidden; }
         .header { background: linear-gradient(135deg, #083A85 0%, #0a4499 100%); padding: 32px 24px; text-align: center; color: white; }
-        .logo { max-width: 120px; margin-bottom: 8px; }
-        .header-title { font-size: 24px; font-weight: 600; margin-bottom: 6px; }
+        .logo { max-width: 120px; margin-bottom: 8px; height: auto; }
+        .header-title { font-size: 24px; font-weight: 600; margin-bottom: 6px; word-wrap: break-word; }
         .header-subtitle { font-size: 14px; font-weight: 400; opacity: 0.9; }
         .content { padding: 28px 20px; background: #ffffff; }
         .greeting { font-size: 20px; font-weight: 600; color: #111827; margin-bottom: 16px; }
-        .message { font-size: 15px; line-height: 1.6; color: #4b5563; margin-bottom: 20px; }
+        .message { font-size: 15px; line-height: 1.6; color: #4b5563; margin-bottom: 20px; word-wrap: break-word; }
         .button { display: inline-block; background: #083A85; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 15px; text-align: center; }
         .button:hover { background: #0a4499; }
         .button-center { text-align: center; margin: 24px 0; }
-        .info-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px; margin: 20px 0; }
+
+        /* Fixed responsive card and table styling */
+        .info-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px; margin: 20px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
         .info-card-header { font-weight: 600; color: #374151; margin-bottom: 12px; font-size: 14px; }
-        .info-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+        .info-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f5f9; gap: 10px; }
         .info-row:last-child { border-bottom: none; }
-        .info-label { font-weight: 500; color: #374151; font-size: 13px; }
-        .info-value { color: #6b7280; font-size: 13px; text-align: right; }
-        .alert-box { border-radius: 8px; padding: 16px; margin: 20px 0; border-left: 3px solid; }
+        .info-label { font-weight: 500; color: #374151; font-size: 13px; flex-shrink: 0; min-width: 40%; }
+        .info-value { color: #6b7280; font-size: 13px; text-align: right; word-wrap: break-word; overflow-wrap: break-word; max-width: 60%; }
+
+        .alert-box { border-radius: 8px; padding: 16px; margin: 20px 0; border-left: 3px solid; word-wrap: break-word; }
         .alert-success { background: #f0fdf4; border-left-color: #22c55e; color: #15803d; }
         .alert-warning { background: #fffbeb; border-left-color: #f59e0b; color: #d97706; }
         .alert-error { background: #fef2f2; border-left-color: #ef4444; color: #dc2626; }
         .alert-info { background: #eff6ff; border-left-color: #3b82f6; color: #1e40af; }
         .alert-title { font-weight: 600; margin-bottom: 6px; font-size: 14px; }
-        .alert-text { font-size: 13px; line-height: 1.5; }
+        .alert-text { font-size: 13px; line-height: 1.5; word-wrap: break-word; }
+
         .footer { background: #083A85; color: white; padding: 24px 20px; text-align: center; }
         .footer-text { font-size: 12px; color: #e5e7eb; line-height: 1.5; }
         ul { margin: 12px 0; padding-left: 24px; }
-        li { font-size: 13px; color: #4b5563; margin-bottom: 6px; }
+        li { font-size: 13px; color: #4b5563; margin-bottom: 6px; word-wrap: break-word; }
+
+        /* Mobile responsive adjustments */
         @media (max-width: 600px) {
-          .email-wrapper { width: 100%; }
+          body { padding: 5px; }
+          .email-wrapper { width: 100%; max-width: 100%; }
+          .email-container { border-radius: 8px; }
           .content { padding: 20px 16px; }
           .header { padding: 24px 16px; }
+          .header-title { font-size: 20px; }
           .footer { padding: 20px 16px; }
+
+          /* Fix table overflow on mobile */
+          .info-card { padding: 12px; }
           .info-row { flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 0; }
-          .info-label { min-width: auto; }
-          .info-value { text-align: left; }
+          .info-label { min-width: auto; width: 100%; }
+          .info-value { text-align: left; max-width: 100%; width: 100%; }
+
+          /* Better text sizing on mobile */
+          .greeting { font-size: 18px; }
+          .message, .alert-text { font-size: 14px; }
+          .button { display: block; width: 100%; padding: 14px 20px; }
+        }
+
+        @media (max-width: 480px) {
+          .header-title { font-size: 18px; }
+          .greeting { font-size: 16px; }
+          .info-label, .info-value { font-size: 12px; }
         }
       </style>
     `;

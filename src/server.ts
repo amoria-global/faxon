@@ -88,7 +88,7 @@ const statusPoller = new StatusPollerService(
 );
 
 const reminderScheduler = new ReminderSchedulerService(2);
-const bookingCleanupScheduler = new BookingCleanupSchedulerService(6);
+const bookingCleanupScheduler = new BookingCleanupSchedulerService(0.25); // Check every 15 minutes (0.25 hours)
 
 // Start schedulers if enabled
 if (process.env.ENABLE_STATUS_POLLING !== 'false') statusPoller.startPolling();

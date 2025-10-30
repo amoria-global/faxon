@@ -58,24 +58,32 @@ export class BookingCleanupSchedulerService {
   private async runCleanup(): Promise<void> {
     try {
       console.log('🧹 Running booking cleanup cycle...');
-      const results = await this.cleanupService.processExpiredBookings();
+
+      // Process expired bookings (30 minutes timeout)
+      const results = await this.cleanupService.processExpiredBookings(30);
+
+      // Process failed bookings (remove blocked dates)
+      const failedResults = await this.cleanupService.processFailedBookings();
 
       const totalRemoved = results.propertyBookingsRemoved + results.tourBookingsRemoved;
+      const totalBlockedDatesRemoved = results.blockedDatesRemoved + failedResults.blockedDatesRemoved;
 
-      if (totalRemoved > 0 || results.errors.length > 0) {
+      if (totalRemoved > 0 || failedResults.blockedDatesRemoved > 0 || results.errors.length > 0) {
         console.log('📊 Cleanup Results:', {
           propertyBookingsRemoved: results.propertyBookingsRemoved,
           tourBookingsRemoved: results.tourBookingsRemoved,
-          blockedDatesRemoved: results.blockedDatesRemoved,
+          blockedDatesRemoved: totalBlockedDatesRemoved,
+          failedBookingsProcessed: failedResults.propertyBookingsProcessed,
+          usersNotified: results.usersNotified,
           totalRemoved,
-          errors: results.errors.length
+          errors: results.errors.length + failedResults.errors.length
         });
       } else {
-        console.log('✨ No expired bookings found');
+        console.log('✨ No expired or failed bookings found');
       }
 
-      if (results.errors.length > 0) {
-        console.error('⚠️  Errors during cleanup:', results.errors);
+      if (results.errors.length > 0 || failedResults.errors.length > 0) {
+        console.error('⚠️  Errors during cleanup:', [...results.errors, ...failedResults.errors]);
       }
     } catch (error: any) {
       console.error('❌ Error in cleanup cycle:', error);

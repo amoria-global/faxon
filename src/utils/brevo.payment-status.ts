@@ -275,47 +275,67 @@ export class BrevoPaymentStatusMailingService {
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #374151; background: #f9fafb; }
-        .email-wrapper { width: 100%; max-width: 600px; margin: 0 auto; padding: 20px; }
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #374151; background: #f9fafb; padding: 10px; }
+        .email-wrapper { width: 100%; max-width: 600px; margin: 0 auto; }
         .email-container { background: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); border: 1px solid #e5e7eb; overflow: hidden; }
         .header { background: linear-gradient(135deg, #083A85 0%, #0a4499 100%); padding: 32px 24px; text-align: center; color: white; }
-        .logo { font-size: 24px; font-weight: 600; margin-bottom: 6px; }
+        .logo { font-size: 24px; font-weight: 600; margin-bottom: 6px; word-wrap: break-word; }
         .header-subtitle { font-size: 14px; font-weight: 400; opacity: 0.9; }
         .content { padding: 32px 24px; }
         .greeting { font-size: 20px; font-weight: 600; color: #111827; margin-bottom: 16px; }
-        .message { font-size: 15px; line-height: 1.8; color: #4b5563; margin-bottom: 20px; }
+        .message { font-size: 15px; line-height: 1.8; color: #4b5563; margin-bottom: 20px; word-wrap: break-word; }
         .button { display: inline-block; background: #083A85; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-weight: 600; font-size: 15px; text-align: center; margin: 10px 0; }
         .button:hover { background: #0a4499; }
         .button-center { text-align: center; margin: 24px 0; }
 
-        /* Better Table Styling */
-        .info-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin: 24px 0; }
+        /* Fixed responsive table styling */
+        .info-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin: 24px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
         .info-card-header { font-weight: 600; color: #374151; margin-bottom: 16px; font-size: 16px; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
-        .info-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+        .info-table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 280px; }
         .info-table tr { border-bottom: 1px solid #f1f5f9; }
         .info-table tr:last-child { border-bottom: none; }
-        .info-table td { padding: 12px 8px; font-size: 14px; vertical-align: top; }
+        .info-table td { padding: 12px 8px; font-size: 14px; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }
         .info-table td:first-child { font-weight: 500; color: #374151; width: 40%; }
-        .info-table td:last-child { color: #6b7280; text-align: right; }
+        .info-table td:last-child { color: #6b7280; text-align: right; width: 60%; }
 
-        .alert-box { border-radius: 8px; padding: 18px; margin: 24px 0; border-left: 4px solid; }
+        .alert-box { border-radius: 8px; padding: 18px; margin: 24px 0; border-left: 4px solid; word-wrap: break-word; }
         .alert-success { background: #f0fdf4; border-left-color: #22c55e; color: #15803d; }
         .alert-warning { background: #fffbeb; border-left-color: #f59e0b; color: #d97706; }
         .alert-error { background: #fef2f2; border-left-color: #ef4444; color: #dc2626; }
         .alert-info { background: #eff6ff; border-left-color: #3b82f6; color: #1e40af; }
         .alert-title { font-weight: 600; margin-bottom: 8px; font-size: 15px; }
-        .alert-text { font-size: 14px; line-height: 1.6; }
+        .alert-text { font-size: 14px; line-height: 1.6; word-wrap: break-word; }
 
         .footer { background: #f9fafb; color: #6b7280; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; }
         .footer-text { font-size: 13px; line-height: 1.6; }
 
+        /* Mobile responsive adjustments */
         @media (max-width: 600px) {
-          .email-wrapper { padding: 10px; }
+          body { padding: 5px; }
+          .email-wrapper { width: 100%; max-width: 100%; }
+          .email-container { border-radius: 8px; }
           .content { padding: 24px 16px; }
           .header { padding: 24px 16px; }
+          .logo { font-size: 20px; }
           .footer { padding: 20px 16px; }
+
+          /* Fix table overflow on mobile */
+          .info-card { padding: 12px; }
+          .info-table { min-width: 260px; }
           .info-table td { padding: 10px 4px; font-size: 13px; }
           .info-table td:first-child { width: 45%; }
+          .info-table td:last-child { width: 55%; text-align: left; }
+
+          /* Better text sizing on mobile */
+          .greeting { font-size: 18px; }
+          .message, .alert-text { font-size: 14px; }
+          .button { display: block; width: 100%; padding: 14px 20px; }
+        }
+
+        @media (max-width: 480px) {
+          .logo { font-size: 18px; }
+          .greeting { font-size: 16px; }
+          .info-table td { font-size: 12px; padding: 8px 4px; }
         }
       </style>
     `;
@@ -372,7 +392,7 @@ export class BrevoPaymentStatusMailingService {
             <div class="alert-box alert-warning">
               <div class="alert-title">⏰ Action Required: Complete Payment</div>
               <div class="alert-text">
-                Your booking is currently pending payment. Please complete your payment within 24 hours to confirm your reservation.
+                Your booking is currently pending payment. Please complete your payment within 1 hour to confirm your reservation.
                 If payment is not received, this booking will be automatically cancelled.
               </div>
             </div>
@@ -586,7 +606,7 @@ export class BrevoPaymentStatusMailingService {
 
       Thank you for choosing ${context.company.name}! We've received your booking request for ${bookingName}.
 
-      IMPORTANT: Please complete your payment within 24 hours to secure your reservation.
+      IMPORTANT: Please complete your payment within 1 hour to secure your reservation.
 
       Booking ID: ${booking.id.toUpperCase()}
       ${context.paymentReference ? `Payment Reference: ${context.paymentReference}` : ''}

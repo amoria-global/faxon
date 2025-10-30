@@ -133,19 +133,19 @@ router.post('/agent/properties/:id/images', validateAgent, validateAgentProperty
 // Create booking (for guests)
 router.post('/bookings', propertyController.createBooking);
 
+// Agent booking management (MUST be before /:id/bookings to avoid route conflict)
+router.get('/agent/bookings', validateAgent, propertyController.getAgentBookings);
+router.get('/agent/bookings/calendar', validateAgent, propertyController.getAgentBookingCalendar);
+router.put('/agent/bookings/:bookingId', validateAgent, validateBookingUpdate, propertyController.updateAgentBooking);
+
 // Host booking management
 router.get('/host/bookings', validateHost, propertyController.getHostBookings);
 router.get('/host/bookings/calendar', validateHost, propertyController.getBookingCalendar);
 router.put('/host/bookings/:bookingId', validateHost, validateBookingUpdate, propertyController.updateBooking);
 router.patch('/host/bookings/bulk-update', validateHost, propertyController.bulkUpdateBookings);
 
-// Property-specific bookings
+// Property-specific bookings (MUST be after /agent/bookings and /host/bookings to avoid matching them)
 router.get('/:id/bookings', validateHost, propertyController.getPropertyBookings);
-
-// Agent booking management
-router.get('/agent/bookings', validateAgent, propertyController.getAgentBookings);
-router.get('/agent/bookings/calendar', validateAgent, propertyController.getAgentBookingCalendar);
-router.put('/agent/bookings/:bookingId', validateAgent, validateBookingUpdate, propertyController.updateAgentBooking);
 
 // --- GUEST MANAGEMENT --- 
 // Host guest management

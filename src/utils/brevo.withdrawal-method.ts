@@ -564,13 +564,25 @@ ${this.companyInfo.website}
           ul { margin: 12px 0; padding-left: 24px; }
           li { font-size: 13px; color: #4b5563; margin-bottom: 6px; }
           @media (max-width: 600px) {
-            .email-wrapper { width: 100%; }
+            body { padding: 5px; }
+            .email-wrapper { width: 100%; max-width: 100%; }
+            .email-container { border-radius: 8px; }
             .content { padding: 20px 16px; }
             .header { padding: 24px 16px; }
+            .header-title { font-size: 20px; }
             .footer { padding: 20px 16px; }
+            .info-card { padding: 12px; }
             .info-row { flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 0; }
-            .info-label { min-width: auto; }
-            .info-value { text-align: left; max-width: 100%; }
+            .info-label { min-width: auto; width: 100%; }
+            .info-value { text-align: left; max-width: 100%; width: 100%; }
+            .greeting { font-size: 18px; }
+            .message, .alert-text { font-size: 14px; }
+            .button { display: block; width: 100%; padding: 14px 20px; }
+          }
+          @media (max-width: 480px) {
+            .header-title { font-size: 18px; }
+            .greeting { font-size: 16px; }
+            .info-label, .info-value { font-size: 12px; }
           }
         </style>
       </head>

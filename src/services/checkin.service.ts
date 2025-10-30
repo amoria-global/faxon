@@ -8,6 +8,7 @@ import { verifyBookingCode, generateUniqueBookingCode } from '../utils/booking-c
 import smsService from './sms.service';
 import { EmailService } from './email.service';
 import { encodeId } from '../utils/encoder.utils';
+import { adminNotifications } from '../utils/admin-notifications';
 
 const prisma = new PrismaClient();
 const emailService = new EmailService();
@@ -457,6 +458,52 @@ export class CheckInService {
 
       console.log(`[CHECKIN] ✅ Check-in confirmed for booking ${bookingId}`);
 
+      // Send admin notification for check-in
+      try {
+        if (updatedBooking) {
+          let guestInfo, propertyOrTourInfo, hostInfo;
+
+          if (isPropertyBooking) {
+            guestInfo = (updatedBooking as any).guest;
+            propertyOrTourInfo = {
+              id: (updatedBooking as any).property.id,
+              name: (updatedBooking as any).property.name,
+              type: 'property' as const
+            };
+            hostInfo = (updatedBooking as any).property.host;
+          } else {
+            guestInfo = (updatedBooking as any).user;
+            propertyOrTourInfo = {
+              id: (updatedBooking as any).tour.id,
+              name: (updatedBooking as any).tour.title,
+              type: 'tour' as const
+            };
+            hostInfo = (updatedBooking as any).tour.tourGuide;
+          }
+
+          await adminNotifications.sendCheckinNotification({
+            bookingId,
+            user: {
+              id: guestInfo.id,
+              email: guestInfo.email,
+              firstName: guestInfo.firstName,
+              lastName: guestInfo.lastName
+            },
+            propertyOrTour: propertyOrTourInfo,
+            host: {
+              id: hostInfo.id,
+              firstName: hostInfo.firstName,
+              lastName: hostInfo.lastName
+            },
+            checkInDate: new Date(),
+            guests: isPropertyBooking ? (updatedBooking as any).guests : (updatedBooking as any).numberOfParticipants
+          });
+        }
+      } catch (adminNotifError) {
+        console.error(`[CHECKIN] Failed to send admin notification:`, adminNotifError);
+        // Don't fail the check-in if admin notification fails
+      }
+
       // Send check-in confirmation notification to guest
       if (updatedBooking) {
         try {
@@ -645,13 +692,14 @@ export class CheckInService {
   private async processPropertyCheckIn(booking: any, checkInBy: number): Promise<void> {
     console.log(`[CHECKIN] Processing property check-in for booking ${booking.id}`);
 
-    // Update booking with check-in details
+    // Update booking with check-in details and change status to checked_in
     await prisma.booking.update({
       where: { id: booking.id },
       data: {
         checkInValidated: true,
         checkInValidatedAt: new Date(),
-        checkInValidatedBy: checkInBy
+        checkInValidatedBy: checkInBy,
+        status: 'checked_in' // Change status from 'confirmed' to 'checked_in'
       }
     });
 
@@ -703,12 +751,15 @@ export class CheckInService {
   private async processTourCheckIn(booking: any, checkInBy: number): Promise<void> {
     console.log(`[CHECKIN] Processing tour check-in for booking ${booking.id}`);
 
-    // Update tour booking with check-in details
+    // Update tour booking with check-in details and change status to checked_in
     await prisma.tourBooking.update({
       where: { id: booking.id },
       data: {
         checkInStatus: 'checked_in',
-        checkInTime: new Date()
+        checkInTime: new Date(),
+        checkInValidated: true,
+        checkInValidatedAt: new Date(),
+        status: 'checked_in' // Change status from 'confirmed' to 'checked_in'
       }
     });
 
@@ -871,13 +922,14 @@ export class CheckInService {
           };
         }
 
-        // Update booking with check-out details
+        // Update booking with check-out details and change status to checked_out
         const updatedBooking = await prisma.booking.update({
           where: { id: bookingId },
           data: {
             checkOutValidated: true,
             checkOutValidatedAt: new Date(),
-            checkOutValidatedBy: checkOutBy
+            checkOutValidatedBy: checkOutBy,
+            status: 'checked_out' // Change status from 'checked_in' to 'checked_out'
           },
           include: {
             property: true,
@@ -902,6 +954,35 @@ export class CheckInService {
         }
 
         console.log(`[CHECKOUT] ✅ Check-out confirmed for booking ${bookingId}`);
+
+        // Send admin notification for check-out
+        try {
+          if (propertyBooking.property.host) {
+            await adminNotifications.sendCheckoutNotification({
+              bookingId,
+              user: {
+                id: updatedBooking.guest.id,
+                email: updatedBooking.guest.email,
+                firstName: updatedBooking.guest.firstName,
+                lastName: updatedBooking.guest.lastName
+              },
+              propertyOrTour: {
+                id: updatedBooking.property.id,
+                name: updatedBooking.property.name,
+                type: 'property'
+              },
+              host: {
+                id: propertyBooking.property.host.id,
+                firstName: propertyBooking.property.host.firstName,
+                lastName: propertyBooking.property.host.lastName
+              },
+              checkOutDate: updatedBooking.checkOut
+            });
+          }
+        } catch (adminNotifError) {
+          console.error(`[CHECKOUT] Failed to send admin notification:`, adminNotifError);
+          // Don't fail the checkout if admin notification fails
+        }
 
         return {
           success: true,
@@ -950,11 +1031,12 @@ export class CheckInService {
           };
         }
 
-        // Update tour booking with check-out time
+        // Update tour booking with check-out time and change status to checked_out
         const updatedTourBooking = await prisma.tourBooking.update({
           where: { id: bookingId },
           data: {
-            checkOutTime: new Date()
+            checkOutTime: new Date(),
+            status: 'checked_out' // Change status from 'checked_in' to 'checked_out'
           },
           include: {
             tour: true,
@@ -963,6 +1045,33 @@ export class CheckInService {
         });
 
         console.log(`[CHECKOUT] ✅ Check-out confirmed for tour booking ${bookingId}`);
+
+        // Send admin notification for tour check-out
+        try {
+          await adminNotifications.sendCheckoutNotification({
+            bookingId,
+            user: {
+              id: updatedTourBooking.user.id,
+              email: updatedTourBooking.user.email,
+              firstName: updatedTourBooking.user.firstName,
+              lastName: updatedTourBooking.user.lastName
+            },
+            propertyOrTour: {
+              id: tourBooking.tour.id,
+              name: updatedTourBooking.tour.title,
+              type: 'tour'
+            },
+            host: {
+              id: tourBooking.tour.tourGuide.id,
+              firstName: tourBooking.tour.tourGuide.firstName,
+              lastName: tourBooking.tour.tourGuide.lastName
+            },
+            checkOutDate: updatedTourBooking.checkOutTime!
+          });
+        } catch (adminNotifError) {
+          console.error(`[CHECKOUT] Failed to send admin notification:`, adminNotifError);
+          // Don't fail the checkout if admin notification fails
+        }
 
         return {
           success: true,

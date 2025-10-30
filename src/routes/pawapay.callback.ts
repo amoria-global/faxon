@@ -9,6 +9,7 @@ import { EmailService } from '../services/email.service';
 import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
 import { generateUniqueBookingCode } from '../utils/booking-code.utility';
 import smsService from '../services/sms.service';
+import { BookingCleanupService } from '../services/booking-cleanup.service';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -239,13 +240,21 @@ async function handleFailedTransaction(
       },
       include: {
         property: {
-          select: { name: true }
+          select: {
+            name: true,
+            location: true,
+            images: true,
+            pricePerNight: true
+          }
         },
         guest: {
           select: {
             id: true,
             email: true,
-            firstName: true
+            firstName: true,
+            lastName: true,
+            phone: true,
+            profileImage: true
           }
         }
       }
@@ -254,12 +263,90 @@ async function handleFailedTransaction(
     if (booking) {
       console.log(`[PAWAPAY_CALLBACK] Found property booking ${booking.id} for failed payment`);
 
-      await prisma.booking.update({
-        where: { id: booking.id },
-        data: {
-          paymentStatus: 'failed'
-        }
-      });
+      // Prepare booking info for email BEFORE deletion
+      const bookingInfo: any = {
+        id: booking.id,
+        propertyId: booking.propertyId,
+        property: {
+          name: booking.property.name,
+          location: booking.property.location,
+          images: typeof booking.property.images === 'string' ? JSON.parse(booking.property.images) : booking.property.images || {},
+          pricePerNight: booking.property.pricePerNight,
+          hostName: 'Property Host', // Generic name since we don't have host details in failed payment scenario
+          hostEmail: '',
+          hostPhone: undefined
+        },
+        guestId: booking.guestId,
+        guest: {
+          firstName: booking.guest.firstName,
+          lastName: booking.guest.lastName,
+          email: booking.guest.email,
+          phone: booking.guest.phone || undefined,
+          profileImage: booking.guest.profileImage || undefined
+        },
+        checkIn: booking.checkIn.toISOString(),
+        checkOut: booking.checkOut.toISOString(),
+        guests: booking.guests,
+        nights: Math.ceil((booking.checkOut.getTime() - booking.checkIn.getTime()) / (1000 * 60 * 60 * 24)),
+        totalPrice: booking.totalPrice,
+        status: booking.status,
+        paymentStatus: 'failed',
+        createdAt: booking.createdAt.toISOString(),
+        updatedAt: booking.updatedAt.toISOString()
+      };
+
+      // Immediately remove blocked dates and archive the booking on payment failure
+      console.log(`[PAWAPAY_CALLBACK] Immediately cleaning up failed booking ${booking.id}`);
+      try {
+        // Archive the booking
+        await prisma.bookingArchive.create({
+          data: {
+            originalBookingId: booking.id,
+            propertyId: booking.propertyId,
+            propertyName: booking.property.name,
+            propertyLocation: booking.property.location,
+            guestId: booking.guestId,
+            guestName: `${booking.guest.firstName} ${booking.guest.lastName}`,
+            guestEmail: booking.guest.email,
+            guestPhone: booking.guest.phone,
+            checkIn: booking.checkIn,
+            checkOut: booking.checkOut,
+            guests: booking.guests,
+            totalPrice: booking.totalPrice,
+            message: booking.message,
+            specialRequests: booking.specialRequests,
+            status: booking.status,
+            paymentStatus: 'failed',
+            bookingCreatedAt: booking.createdAt,
+            archiveReason: `Payment failed - ${failureReason}`,
+            leadStatus: 'new',
+            metadata: {
+              transactionId: booking.transactionId,
+              paymentMethod: booking.paymentMethod,
+              failureReason,
+              deletedAt: new Date().toISOString()
+            } as any
+          }
+        });
+
+        // Remove blocked dates for this booking
+        const blockedDatesDeleted = await prisma.blockedDate.deleteMany({
+          where: {
+            reason: { contains: `Booking ID: ${booking.id}` },
+            isActive: true
+          }
+        });
+
+        // Delete the booking
+        await prisma.booking.delete({
+          where: { id: booking.id }
+        });
+
+        console.log(`[PAWAPAY_CALLBACK] ✅ Archived and removed failed booking ${booking.id} and ${blockedDatesDeleted.count} blocked date(s)`);
+      } catch (cleanupError) {
+        console.error(`[PAWAPAY_CALLBACK] ❌ Failed to cleanup booking ${booking.id}:`, cleanupError);
+        // Continue to send email even if cleanup fails
+      }
 
       // Log activity
       await logActivity(booking.guestId, 'PAYMENT_FAILED', 'booking', booking.id, {
@@ -270,76 +357,30 @@ async function handleFailedTransaction(
 
       console.log(`[PAWAPAY_CALLBACK] Sending payment failure email for booking ${booking.id}`);
 
-      // Fetch full booking details for Brevo email service
-      const fullBooking = await prisma.booking.findFirst({
-        where: { id: booking.id },
-        include: {
-          property: {
-            include: {
-              host: true
-            }
-          },
-          guest: true
-        }
+      const company = {
+        name: 'Jambolush',
+        website: 'https://jambolush.com',
+        supportEmail: 'support@jambolush.com',
+        logo: 'https://jambolush.com/favicon.ico'
+      };
+
+      // Send payment failed email using Brevo service
+      await paymentEmailService.sendPaymentFailedEmail({
+        user: {
+          firstName: booking.guest.firstName,
+          lastName: booking.guest.lastName,
+          email: booking.guest.email,
+          id: booking.guestId
+        },
+        company,
+        booking: bookingInfo,
+        recipientType: 'guest',
+        paymentStatus: 'failed',
+        failureReason,
+        paymentReference: transaction.externalId || internalRef
+      }).catch(err => {
+        console.error('[PAWAPAY_CALLBACK] Failed to send payment failed email to guest:', err);
       });
-
-      if (fullBooking && fullBooking.guest && fullBooking.property.host) {
-        const bookingInfo: any = {
-          id: fullBooking.id,
-          propertyId: fullBooking.propertyId,
-          property: {
-            name: fullBooking.property.name,
-            location: fullBooking.property.location,
-            images: typeof fullBooking.property.images === 'string' ? JSON.parse(fullBooking.property.images) : fullBooking.property.images || {},
-            pricePerNight: fullBooking.property.pricePerNight,
-            hostName: `${fullBooking.property.host.firstName} ${fullBooking.property.host.lastName}`,
-            hostEmail: fullBooking.property.host.email,
-            hostPhone: fullBooking.property.host.phone || undefined
-          },
-          guestId: fullBooking.guestId,
-          guest: {
-            firstName: fullBooking.guest.firstName,
-            lastName: fullBooking.guest.lastName,
-            email: fullBooking.guest.email,
-            phone: fullBooking.guest.phone || undefined,
-            profileImage: fullBooking.guest.profileImage || undefined
-          },
-          checkIn: fullBooking.checkIn.toISOString(),
-          checkOut: fullBooking.checkOut.toISOString(),
-          guests: fullBooking.guests,
-          nights: Math.ceil((fullBooking.checkOut.getTime() - fullBooking.checkIn.getTime()) / (1000 * 60 * 60 * 24)),
-          totalPrice: fullBooking.totalPrice,
-          status: fullBooking.status,
-          paymentStatus: fullBooking.paymentStatus,
-          createdAt: fullBooking.createdAt.toISOString(),
-          updatedAt: fullBooking.updatedAt.toISOString()
-        };
-
-        const company = {
-          name: 'Jambolush',
-          website: 'https://jambolush.com',
-          supportEmail: 'support@jambolush.com',
-          logo: 'https://jambolush.com/favicon.ico'
-        };
-
-        // Send payment failed email using Brevo service
-        await paymentEmailService.sendPaymentFailedEmail({
-          user: {
-            firstName: fullBooking.guest.firstName,
-            lastName: fullBooking.guest.lastName,
-            email: fullBooking.guest.email,
-            id: fullBooking.guestId
-          },
-          company,
-          booking: bookingInfo,
-          recipientType: 'guest',
-          paymentStatus: 'failed',
-          failureReason,
-          paymentReference: transaction.externalId || internalRef
-        }).catch(err => {
-          console.error('[PAWAPAY_CALLBACK] Failed to send payment failed email to guest:', err);
-        });
-      }
     } else {
       console.log(`[PAWAPAY_CALLBACK] No property booking found for reference ${internalRef}`);
     }
@@ -352,105 +393,139 @@ async function handleFailedTransaction(
       },
       include: {
         tour: {
-          select: { title: true }
+          include: { tourGuide: true }
         },
-        user: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true
-          }
-        }
+        schedule: true,
+        user: true
       }
     });
 
     if (tourBooking) {
       console.log(`[PAWAPAY_CALLBACK] Found tour booking ${tourBooking.id} for failed payment`);
 
-      await prisma.tourBooking.update({
-        where: { id: tourBooking.id },
-        data: {
-          paymentStatus: 'failed'
-        }
-      });
-
-      // Log activity
-      await logActivity(tourBooking.userId, 'TOUR_PAYMENT_FAILED', 'tour_booking', tourBooking.id, {
-        provider: 'PawaPay',
-        failureReason,
-        reference: internalRef
-      });
-
-      console.log(`[PAWAPAY_CALLBACK] Sending payment failure email for tour booking ${tourBooking.id}`);
-
-      // Fetch full tour booking details for Brevo email service
-      const fullTourBooking = await prisma.tourBooking.findFirst({
-        where: { id: tourBooking.id },
-        include: {
-          tour: { include: { tourGuide: true } },
-          schedule: true,
-          user: true
-        }
-      });
-
-      if (fullTourBooking && fullTourBooking.user && fullTourBooking.tour.tourGuide) {
+      // Prepare booking info for email BEFORE deletion
+      if (tourBooking.user && tourBooking.tour.tourGuide) {
         const bookingInfo: any = {
-          id: fullTourBooking.id,
-          tourId: String(fullTourBooking.tourId),
+          id: tourBooking.id,
+          tourId: String(tourBooking.tourId),
           tour: {
-            title: fullTourBooking.tour.title,
-            description: fullTourBooking.tour.description,
-            category: fullTourBooking.tour.category,
-            type: fullTourBooking.tour.type,
-            duration: fullTourBooking.tour.duration,
-            difficulty: fullTourBooking.tour.difficulty,
-            location: `${fullTourBooking.tour.locationCity}, ${fullTourBooking.tour.locationCountry}`,
-            images: JSON.parse(String(fullTourBooking.tour.images) || '{}'),
-            price: fullTourBooking.tour.price,
-            currency: fullTourBooking.tour.currency,
-            inclusions: JSON.parse(String(fullTourBooking.tour.inclusions) || '[]'),
-            exclusions: JSON.parse(String(fullTourBooking.tour.exclusions) || '[]'),
-            requirements: JSON.parse(String(fullTourBooking.tour.requirements) || '[]'),
-            meetingPoint: fullTourBooking.tour.meetingPoint
+            title: tourBooking.tour.title,
+            description: tourBooking.tour.description,
+            category: tourBooking.tour.category,
+            type: tourBooking.tour.type,
+            duration: tourBooking.tour.duration,
+            difficulty: tourBooking.tour.difficulty,
+            location: `${tourBooking.tour.locationCity}, ${tourBooking.tour.locationCountry}`,
+            images: JSON.parse(String(tourBooking.tour.images) || '{}'),
+            price: tourBooking.tour.price,
+            currency: tourBooking.tour.currency,
+            inclusions: JSON.parse(String(tourBooking.tour.inclusions) || '[]'),
+            exclusions: JSON.parse(String(tourBooking.tour.exclusions) || '[]'),
+            requirements: JSON.parse(String(tourBooking.tour.requirements) || '[]'),
+            meetingPoint: tourBooking.tour.meetingPoint
           },
-          scheduleId: fullTourBooking.scheduleId,
+          scheduleId: tourBooking.scheduleId,
           schedule: {
-            startDate: fullTourBooking.schedule.startDate.toISOString(),
-            endDate: fullTourBooking.schedule.endDate.toISOString(),
-            startTime: fullTourBooking.schedule.startTime,
-            endTime: fullTourBooking.schedule.endTime || undefined,
-            availableSlots: fullTourBooking.schedule.availableSlots,
-            bookedSlots: fullTourBooking.schedule.bookedSlots
+            startDate: tourBooking.schedule.startDate.toISOString(),
+            endDate: tourBooking.schedule.endDate.toISOString(),
+            startTime: tourBooking.schedule.startTime,
+            endTime: tourBooking.schedule.endTime || undefined,
+            availableSlots: tourBooking.schedule.availableSlots,
+            bookedSlots: tourBooking.schedule.bookedSlots
           },
-          tourGuideId: fullTourBooking.tourGuideId,
+          tourGuideId: tourBooking.tourGuideId,
           tourGuide: {
-            firstName: fullTourBooking.tour.tourGuide.firstName,
-            lastName: fullTourBooking.tour.tourGuide.lastName,
-            email: fullTourBooking.tour.tourGuide.email,
-            phone: fullTourBooking.tour.tourGuide.phone || undefined,
-            profileImage: fullTourBooking.tour.tourGuide.profileImage || undefined,
-            bio: fullTourBooking.tour.tourGuide.bio || undefined,
-            rating: fullTourBooking.tour.tourGuide.rating || undefined,
-            totalTours: fullTourBooking.tour.tourGuide.totalTours || undefined
+            firstName: tourBooking.tour.tourGuide.firstName,
+            lastName: tourBooking.tour.tourGuide.lastName,
+            email: tourBooking.tour.tourGuide.email,
+            phone: tourBooking.tour.tourGuide.phone || undefined,
+            profileImage: tourBooking.tour.tourGuide.profileImage || undefined,
+            bio: tourBooking.tour.tourGuide.bio || undefined,
+            rating: tourBooking.tour.tourGuide.rating || undefined,
+            totalTours: tourBooking.tour.tourGuide.totalTours || undefined
           },
-          userId: fullTourBooking.userId,
+          userId: tourBooking.userId,
           user: {
-            firstName: fullTourBooking.user.firstName,
-            lastName: fullTourBooking.user.lastName,
-            email: fullTourBooking.user.email,
-            phone: fullTourBooking.user.phone || undefined,
-            profileImage: fullTourBooking.user.profileImage || undefined
+            firstName: tourBooking.user.firstName,
+            lastName: tourBooking.user.lastName,
+            email: tourBooking.user.email,
+            phone: tourBooking.user.phone || undefined,
+            profileImage: tourBooking.user.profileImage || undefined
           },
-          numberOfParticipants: fullTourBooking.numberOfParticipants,
-          participants: JSON.parse(String(fullTourBooking.participants) || '[]'),
-          totalAmount: fullTourBooking.totalAmount,
-          currency: fullTourBooking.currency,
-          status: fullTourBooking.status,
-          paymentStatus: fullTourBooking.paymentStatus,
-          bookingDate: fullTourBooking.bookingDate.toISOString(),
-          createdAt: fullTourBooking.createdAt.toISOString(),
-          updatedAt: fullTourBooking.updatedAt.toISOString()
+          numberOfParticipants: tourBooking.numberOfParticipants,
+          participants: JSON.parse(String(tourBooking.participants) || '[]'),
+          totalAmount: tourBooking.totalAmount,
+          currency: tourBooking.currency,
+          status: tourBooking.status,
+          paymentStatus: 'failed',
+          bookingDate: tourBooking.bookingDate.toISOString(),
+          createdAt: tourBooking.createdAt.toISOString(),
+          updatedAt: tourBooking.updatedAt.toISOString()
         };
+
+        // Immediately archive and clean up the failed tour booking
+        console.log(`[PAWAPAY_CALLBACK] Immediately cleaning up failed tour booking ${tourBooking.id}`);
+        try {
+          // Archive the booking
+          await prisma.tourBookingArchive.create({
+            data: {
+              originalBookingId: tourBooking.id,
+              tourId: tourBooking.tourId,
+              tourTitle: tourBooking.tour.title,
+              tourLocation: `${tourBooking.tour.locationCity}, ${tourBooking.tour.locationCountry}`,
+              userId: tourBooking.userId,
+              userName: `${tourBooking.user.firstName} ${tourBooking.user.lastName}`,
+              userEmail: tourBooking.user.email,
+              userPhone: tourBooking.user.phone,
+              tourGuideId: tourBooking.tourGuideId,
+              scheduleId: tourBooking.scheduleId,
+              scheduleStartDate: tourBooking.schedule.startDate,
+              numberOfParticipants: tourBooking.numberOfParticipants,
+              participants: tourBooking.participants as any,
+              totalAmount: tourBooking.totalAmount,
+              currency: tourBooking.currency,
+              specialRequests: tourBooking.specialRequests,
+              status: tourBooking.status,
+              paymentStatus: 'failed',
+              bookingCreatedAt: tourBooking.createdAt,
+              archiveReason: `Payment failed - ${failureReason}`,
+              leadStatus: 'new',
+              metadata: {
+                paymentId: tourBooking.paymentId,
+                checkInStatus: tourBooking.checkInStatus,
+                failureReason,
+                deletedAt: new Date().toISOString()
+              } as any
+            }
+          });
+
+          // Decrement the booked slots in the tour schedule
+          await prisma.tourSchedule.update({
+            where: { id: tourBooking.scheduleId },
+            data: {
+              bookedSlots: { decrement: tourBooking.numberOfParticipants }
+            }
+          });
+
+          // Delete the booking
+          await prisma.tourBooking.delete({
+            where: { id: tourBooking.id }
+          });
+
+          console.log(`[PAWAPAY_CALLBACK] ✅ Archived and removed failed tour booking ${tourBooking.id} and freed ${tourBooking.numberOfParticipants} slot(s)`);
+        } catch (cleanupError) {
+          console.error(`[PAWAPAY_CALLBACK] ❌ Failed to cleanup tour booking ${tourBooking.id}:`, cleanupError);
+          // Continue to send email even if cleanup fails
+        }
+
+        // Log activity
+        await logActivity(tourBooking.userId, 'TOUR_PAYMENT_FAILED', 'tour_booking', tourBooking.id, {
+          provider: 'PawaPay',
+          failureReason,
+          reference: internalRef
+        });
+
+        console.log(`[PAWAPAY_CALLBACK] Sending payment failure email for tour booking ${tourBooking.id}`);
 
         const company = {
           name: 'Jambolush',
@@ -462,10 +537,10 @@ async function handleFailedTransaction(
         // Send payment failed email using Brevo service
         await paymentEmailService.sendPaymentFailedEmail({
           user: {
-            firstName: fullTourBooking.user.firstName,
-            lastName: fullTourBooking.user.lastName,
-            email: fullTourBooking.user.email,
-            id: fullTourBooking.userId
+            firstName: tourBooking.user.firstName,
+            lastName: tourBooking.user.lastName,
+            email: tourBooking.user.email,
+            id: tourBooking.userId
           },
           company,
           booking: bookingInfo,
@@ -750,6 +825,31 @@ async function handleDepositCompletion(
           paymentCurrency: 'USD',
           paymentReference: transaction.externalId || transaction.reference
         }).catch(err => console.error('[PAWAPAY_CALLBACK] Failed to send booking confirmation email:', err));
+
+        // Send admin notification for completed payment
+        try {
+          const { adminNotifications } = await import('../utils/admin-notifications.js');
+          await adminNotifications.sendCompletedPaymentNotification({
+            transactionId: transaction.id,
+            bookingId: booking.id,
+            user: {
+              id: booking.guestId,
+              email: booking.guest.email,
+              firstName: booking.guest.firstName,
+              lastName: booking.guest.lastName
+            },
+            amount: booking.totalPrice,
+            currency: 'USD',
+            paymentMethod: 'Mobile Money',
+            propertyOrTour: {
+              name: booking.property.name,
+              type: 'property'
+            }
+          });
+        } catch (adminNotifError) {
+          console.error('[PAWAPAY_CALLBACK] Failed to send admin notification:', adminNotifError);
+          // Don't fail payment processing if admin notification fails
+        }
 
         // Send notification to host
         if (booking.property.host) {
@@ -1156,6 +1256,48 @@ async function handlePayoutCompletion(
           completedAt: new Date()
         }
       });
+
+      // ⚠️ CRITICAL: Release pending balance (withdrawal completed, remove from pending)
+      // Only the withdrawal amount was in pending (fee was already deducted)
+      const wallet = await prisma.wallet.findUnique({
+        where: { userId: withdrawal.userId }
+      });
+
+      if (wallet && wallet.pendingBalance >= withdrawal.amount) {
+        await prisma.wallet.update({
+          where: { userId: withdrawal.userId },
+          data: {
+            pendingBalance: wallet.pendingBalance - withdrawal.amount  // Remove from pending (money sent out)
+          }
+        });
+
+        // Create transaction record for pending balance release
+        await prisma.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: 'WITHDRAWAL_COMPLETED',
+            amount: -withdrawal.amount,
+            balanceBefore: wallet.pendingBalance,
+            balanceAfter: wallet.pendingBalance - withdrawal.amount,
+            reference: internalRef,
+            description: `Withdrawal completed - ${withdrawal.amount} ${withdrawal.currency} released from pending balance`,
+            transactionId: withdrawal.id
+          }
+        });
+
+        console.log('[PAWAPAY] ✅ Released pending balance for withdrawal:', {
+          withdrawalId: withdrawal.id,
+          amount: withdrawal.amount,
+          previousPending: wallet.pendingBalance,
+          newPending: wallet.pendingBalance - withdrawal.amount
+        });
+      } else if (wallet) {
+        console.warn('[PAWAPAY] ⚠️ Insufficient pending balance for withdrawal completion:', {
+          withdrawalId: withdrawal.id,
+          requestedAmount: withdrawal.amount,
+          availablePending: wallet.pendingBalance
+        });
+      }
 
       // Log activity
       await logActivity(withdrawal.userId, 'WITHDRAWAL_COMPLETED', 'withdrawal', withdrawal.id, {
