@@ -48,13 +48,11 @@ export class KYCReminderService {
         errors: string[];
     }> {
         if (this.isRunning) {
-            console.log('⏸️  KYC Reminder service already running, skipping...');
             return { kycReminders: 0, passwordReminders: 0, deactivations: 0, errors: [] };
         }
 
         this.isRunning = true;
         const startTime = Date.now();
-        console.log(`🔄 Starting KYC Reminder Service at ${new Date().toISOString()}`);
 
         const results = {
             kycReminders: 0,
@@ -79,13 +77,16 @@ export class KYCReminderService {
             results.deactivations = deactivationResults.deactivated;
             results.errors.push(...deactivationResults.errors);
 
-            const duration = Date.now() - startTime;
-            console.log(`✅ KYC Reminder Service completed in ${duration}ms:`, {
-                kycReminders: results.kycReminders,
-                passwordReminders: results.passwordReminders,
-                deactivations: results.deactivations,
-                errorCount: results.errors.length
-            });
+            // Only log if actions were taken or errors occurred
+            if (results.kycReminders > 0 || results.passwordReminders > 0 || results.deactivations > 0 || results.errors.length > 0) {
+                const duration = Date.now() - startTime;
+                console.log(`✅ KYC Reminder Service completed in ${duration}ms:`, {
+                    kycReminders: results.kycReminders,
+                    passwordReminders: results.passwordReminders,
+                    deactivations: results.deactivations,
+                    errorCount: results.errors.length
+                });
+            }
 
         } catch (error: any) {
             console.error('❌ KYC Reminder Service error:', error);
@@ -126,8 +127,6 @@ export class KYCReminderService {
                 }
             });
 
-            console.log(`📧 Found ${usersNeedingReminders.length} users needing KYC reminders`);
-
             for (const user of usersNeedingReminders) {
                 try {
                     const hoursSinceRegistration = this.getHoursSince(user.createdAt);
@@ -140,8 +139,6 @@ export class KYCReminderService {
                         await this.sendKYCReminder(user, dueStage);
                         await this.logReminderSent(user.id, dueStage.stage, dueStage.emailType);
                         sent.push(user.id);
-
-                        console.log(`✉️  Sent ${dueStage.stage} KYC reminder to ${user.email}`);
                     }
                 } catch (error: any) {
                     errors.push(`User ${user.id}: ${error.message}`);
@@ -184,8 +181,6 @@ export class KYCReminderService {
                 }
             });
 
-            console.log(`🔑 Found ${usersNeedingPassword.length} users needing password setup`);
-
             for (const user of usersNeedingPassword) {
                 try {
                     const hoursSinceRegistration = this.getHoursSince(user.createdAt);
@@ -198,8 +193,6 @@ export class KYCReminderService {
                         await this.sendPasswordSetupReminder(user);
                         await this.logReminderSent(user.id, dueStage.stage, 'password_setup');
                         sent.push(user.id);
-
-                        console.log(`🔑 Sent password setup reminder to ${user.email}`);
                     }
                 } catch (error: any) {
                     errors.push(`User ${user.id}: ${error.message}`);
@@ -241,8 +234,6 @@ export class KYCReminderService {
                 }
             });
 
-            console.log(`⚠️  Found ${accountsToDeactivate.length} accounts to deactivate`);
-
             for (const user of accountsToDeactivate) {
                 try {
                     // Deactivate account
@@ -257,8 +248,6 @@ export class KYCReminderService {
                     // Send deactivation email
                     await this.sendDeactivationEmail(user);
                     deactivated.push(user.id);
-
-                    console.log(`🚫 Deactivated account: ${user.email}`);
                 } catch (error: any) {
                     errors.push(`User ${user.id}: ${error.message}`);
                     console.error(`❌ Error deactivating ${user.email}:`, error);
@@ -292,12 +281,9 @@ export class KYCReminderService {
             });
 
             if (accountsToDelete.length > 0) {
-                console.log(`🗑️  Scheduling ${accountsToDelete.length} accounts for permanent deletion`);
-
                 // In production, you might want to archive data first
                 // For now, we'll just log it
                 for (const user of accountsToDelete) {
-                    console.log(`📋 Account ready for deletion: ${user.email} (ID: ${user.id})`);
                     // Uncomment to actually delete:
                     // await prisma.user.delete({ where: { id: user.id } });
                 }

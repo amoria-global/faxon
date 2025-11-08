@@ -409,10 +409,10 @@ export class TourController {
       const reviewData: CreateTourReviewDto = req.body;
 
       // Validate required fields
-      if (!reviewData.bookingId || !reviewData.tourId || !reviewData.rating || !reviewData.comment) {
+      if (!reviewData.tourId || !reviewData.rating || !reviewData.comment) {
         res.status(400).json({
           success: false,
-          message: 'Booking ID, tour ID, rating, and comment are required'
+          message: 'Tour ID, rating, and comment are required'
         });
         return;
       }

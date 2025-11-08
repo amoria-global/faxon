@@ -13,9 +13,15 @@ export const config = {
 
   // Default split rules for bookings
   defaultSplitRules: {
-    host: parseFloat(process.env.DEFAULT_HOST_SPLIT || '78.95'), // 70% to service provider
-    agent: parseFloat(process.env.DEFAULT_AGENT_SPLIT || '4.38'), // 20% to agent/affiliate
-    platform: parseFloat(process.env.DEFAULT_PLATFORM_SPLIT || '16.67') // 10% to platform
+    host: parseFloat(process.env.DEFAULT_HOST_SPLIT || '78.95'), // Host always gets 78.95%
+    agent: parseFloat(process.env.DEFAULT_AGENT_SPLIT || '4.39'), // Agent gets 4.39% (if exists)
+    platform: parseFloat(process.env.DEFAULT_PLATFORM_SPLIT || '16.67') // Platform gets 16.67% (or 21.06% if no agent)
+  },
+
+  // Tour split rules
+  tourSplitRules: {
+    guide: parseFloat(process.env.TOUR_GUIDE_SPLIT || '84'), // Guide gets 84%
+    platform: parseFloat(process.env.TOUR_PLATFORM_SPLIT || '16') // Platform gets 16%
   },
 
   // Brevo API
@@ -354,6 +360,13 @@ export function validateConfig() {
   const total = host + agent + platform;
   if (Math.abs(total - 100) > 0.01) {
     errors.push(`Invalid default split rules: Host(${host}%) + Agent(${agent}%) + Platform(${platform}%) = ${total}% (must equal 100%)`);
+  }
+
+  // Validate tour split rules
+  const { guide, platform: tourPlatform } = config.tourSplitRules;
+  const tourTotal = guide + tourPlatform;
+  if (Math.abs(tourTotal - 100) > 0.01) {
+    errors.push(`Invalid tour split rules: Guide(${guide}%) + Platform(${tourPlatform}%) = ${tourTotal}% (must equal 100%)`);
   }
 
   // Validate notification settings

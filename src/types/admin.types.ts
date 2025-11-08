@@ -8,7 +8,6 @@ export type AdminPermission =
   | 'tours.view' | 'tours.create' | 'tours.edit' | 'tours.delete' | 'tours.verify'
   | 'bookings.view' | 'bookings.edit' | 'bookings.cancel' | 'bookings.refund'
   | 'payments.view' | 'payments.process' | 'payments.refund' | 'payments.dispute'
-  | 'escrow.view' | 'escrow.manage' | 'escrow.release' | 'escrow.dispute'
   | 'reviews.view' | 'reviews.moderate' | 'reviews.delete'
   | 'analytics.view' | 'reports.generate' | 'exports.create'
   | 'settings.view' | 'settings.edit' | 'system.manage';
@@ -35,7 +34,6 @@ export interface AdminDashboardOverview {
     cancelledBookings: number;
     totalRevenue: number;
     platformFees: number;
-    escrowHeld: number;
     disputesOpen: number;
   };
   growth: {
@@ -206,7 +204,9 @@ export interface AdminPropertyListItem {
   location: string;
   type: string;
   category: string;
-  pricePerNight: number;
+  pricingType?: 'night' | 'month';
+  pricePerNight: number | null;
+  pricePerMonth?: number | null;
   currency: string;
   status: string;
   isVerified: boolean;
@@ -418,7 +418,6 @@ export interface AdminBookingDetails extends AdminBookingListItem {
   checkInTime?: string;
   checkOutTime?: string;
   paymentTransactions: AdminPaymentTransaction[];
-  escrowTransactions: AdminEscrowTransaction[];
 }
 
 // === REVIEW MANAGEMENT TYPES ===
@@ -532,38 +531,6 @@ export interface AdminPaymentTransaction {
   // Metadata
   metadata?: any;
 
-  // Deprecated fields (for backward compatibility)
-  escrowStatus?: string;
-  isEscrowBased: boolean;
-}
-
-export interface AdminEscrowTransaction {
-  id: string;
-  userId: number;
-  userName: string;
-  userEmail: string;
-  recipientId?: number | any;
-  recipientName?: string;
-  recipientEmail?: string;
-  type: string;
-  amount: number;
-  currency: string;
-  status: string;
-  reference: string;
-  description?: string  | any;
-  escrowId?: string | any;
-  fundedAt?: string;
-  releasedAt?: string;
-  releasedBy?: number | any;
-  releaseReason?: string | any;
-  disputedAt?: string;
-  disputedBy?: number | any;
-  disputeReason?: string | any;
-  resolvedAt?: string;
-  cancelledAt?: string;
-  cancellationReason?: string |  any;
-  createdAt: string;
-  metadata?: any;
 }
 
 export interface AdminWithdrawalRequest {
@@ -637,7 +604,6 @@ export interface AdminSystemAnalytics {
   payments: {
     totalVolume: number;
     totalFees: number;
-    escrowHeld: number;
     disputes: number;
     successRate: number;
     averageProcessingTime: number;
@@ -674,7 +640,6 @@ export interface AdminFinancialReport {
     hostPayouts: number;
     tourGuidePayouts: number;
     agentCommissions: number;
-    escrowHeld: number;
     refundsIssued: number;
     chargebacks: number;
     operatingProfit: number;
@@ -717,12 +682,10 @@ export interface AdminSystemSettings {
     tourCommission: number;
     agentCommission: number;
     paymentProcessingFee: number;
-    escrowFee: number;
     disputeFee: number;
   };
   limits: {
     maxBookingAmount: number;
-    maxEscrowHoldPeriod: number;
     maxWithdrawalAmount: number;
     maxPropertiesPerHost: number;
     maxToursPerGuide: number;
@@ -744,7 +707,6 @@ export interface AdminSystemSettings {
   };
   integrations: {
     paymentGateways: Record<string, any>;
-    escrowProvider: Record<string, any>;
     emailProvider: Record<string, any>;
     smsProvider: Record<string, any>;
   };

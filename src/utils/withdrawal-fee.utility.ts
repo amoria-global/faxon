@@ -7,7 +7,10 @@
  * - 1,000,001 to 5,000,000 RWF: 1,200 RWF
  * - Above 5,000,000 RWF: 3,000 RWF
  *
- * Note: Fees can be doubled for certain withdrawal types (e.g., card withdrawals)
+ * NEW BEHAVIOR:
+ * - User receives the FULL requested withdrawal amount
+ * - Fee is deducted from the remaining wallet balance
+ * - NO fee doubling for any payment method (all methods use same base fee)
  */
 
 import { currencyExchangeService } from '../services/currency-exchange.service';
@@ -24,9 +27,9 @@ export interface WithdrawalFeeCalculation {
 
 /**
  * Calculate withdrawal fee based on amount and currency (with live exchange rate)
- * @param amount - Withdrawal amount in specified currency
+ * @param amount - Withdrawal amount in specified currency (user will receive this exact amount)
  * @param currency - Currency code (RWF, USD, etc.)
- * @param isDoubled - Whether to double the fee (for specific withdrawal types)
+ * @param isDoubled - Whether to double the fee (DEPRECATED - always false, no doubling)
  * @returns Promise<WithdrawalFeeCalculation> object with fee details
  */
 export async function calculateWithdrawalFee(
@@ -62,8 +65,8 @@ export async function calculateWithdrawalFee(
     feeTier = 'Tier 3 (Above 5M RWF)';
   }
 
-  // Double fee if specified
-  const feeAmountInRWF = isDoubled ? baseFee * 2 : baseFee;
+  // NO DOUBLING: Fee is always the base fee regardless of payment method
+  const feeAmountInRWF = baseFee;
 
   // Convert fee back to original currency if needed
   let feeAmount: number;
@@ -76,30 +79,30 @@ export async function calculateWithdrawalFee(
     feeAmount = feeAmountInRWF;
   }
 
-  // Calculate net amount after fee deduction
-  const netAmount = Math.round((amount - feeAmount) * 100) / 100;
+  // User receives the FULL requested amount (netAmount = originalAmount)
+  // Fee is deducted from remaining balance separately
+  const netAmount = amount;
 
   return {
     originalAmount: amount,
     feeAmount,
     netAmount,
-    feeTier: isDoubled ? `${feeTier} (Doubled)` : feeTier,
+    feeTier,
     currency: currency.toUpperCase(),
-    isDoubled,
+    isDoubled: false, // Always false - no doubling
     exchangeRate
   };
 }
 
 /**
  * Determine if withdrawal fee should be doubled
- * Currently based on withdrawal method/type
+ * DEPRECATED: Fee doubling has been disabled - always returns false
  * @param paymentMethod - Payment method (MOBILE_MONEY, CARD, BANK_TRANSFER, etc.)
- * @returns boolean - true if fee should be doubled
+ * @returns boolean - always false (no fee doubling)
  */
 export function shouldDoubleFee(paymentMethod: string): boolean {
-  // Double fees for card/bank withdrawals (higher processing costs)
-  const doubledMethods = ['CARD', 'BANK', 'BANK_TRANSFER', 'VISA', 'MASTERCARD'];
-  return doubledMethods.includes(paymentMethod.toUpperCase());
+  // NO DOUBLING: All withdrawal methods use the same base fee
+  return false;
 }
 
 /**
@@ -112,11 +115,11 @@ export function formatFeeForAdmin(calculation: WithdrawalFeeCalculation): string
 }
 
 /**
- * Validate withdrawal amount after fee deduction
- * Ensures net amount is still positive and meets minimum requirements
- * @param amount - Original withdrawal amount
+ * Validate withdrawal amount and fee
+ * Ensures amount is positive and meets minimum requirements
+ * @param amount - Original withdrawal amount (user will receive this full amount)
  * @param currency - Currency code
- * @param isDoubled - Whether fee is doubled
+ * @param isDoubled - Whether fee is doubled (DEPRECATED - ignored)
  * @returns Promise<{ valid: boolean, error?: string, calculation?: WithdrawalFeeCalculation }>
  */
 export async function validateWithdrawalWithFee(
@@ -124,23 +127,15 @@ export async function validateWithdrawalWithFee(
   currency: string = 'RWF',
   isDoubled: boolean = false
 ): Promise<{ valid: boolean; error?: string; calculation?: WithdrawalFeeCalculation }> {
-  const calculation = await calculateWithdrawalFee(amount, currency, isDoubled);
+  const calculation = await calculateWithdrawalFee(amount, currency, false); // Always false for isDoubled
 
-  // Check if net amount is positive
-  if (calculation.netAmount <= 0) {
+  // Minimum withdrawal amount requirements
+  const minAmount = currency.toUpperCase() === 'USD' ? 1 : 100; // 1 USD or 100 RWF
+
+  if (amount < minAmount) {
     return {
       valid: false,
-      error: `Withdrawal amount (${amount} ${currency}) is insufficient to cover withdrawal fee (${calculation.feeAmount} ${currency})`
-    };
-  }
-
-  // Minimum net amount requirements (in RWF)
-  const minNetAmount = currency.toUpperCase() === 'USD' ? 1 : 100; // 1 USD or 100 RWF
-
-  if (calculation.netAmount < minNetAmount) {
-    return {
-      valid: false,
-      error: `Net amount after fees (${calculation.netAmount} ${currency}) is below minimum withdrawal amount (${minNetAmount} ${currency})`
+      error: `Withdrawal amount (${amount} ${currency}) is below minimum withdrawal amount (${minAmount} ${currency})`
     };
   }
 

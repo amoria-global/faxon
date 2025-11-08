@@ -284,7 +284,6 @@ export interface TourReviewInfo {
 }
 
 export interface CreateTourReviewDto {
-  bookingId: string;
   tourId: string;
   rating: number;
   comment: string;
@@ -736,7 +735,7 @@ export interface TourSystemAnalytics {
 
 // --- ENUMS & UTILITY TYPES ---
 export type TourDifficulty = 'easy' | 'moderate' | 'challenging' | 'extreme';
-export type TourBookingStatus = 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'refunded' | 'no_show';
+export type TourBookingStatus = 'pending' | 'confirmed' | 'checkedin' | 'cancelled' | 'completed' | 'refunded' | 'no_show';
 export type TourPaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded' | 'partially_refunded';
 export type TourCheckInStatus = 'not_checked_in' | 'checked_in' | 'checked_out' | 'no_show';
 export type TourEarningsStatus = 'pending' | 'approved' | 'paid' | 'disputed';

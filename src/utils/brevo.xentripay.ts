@@ -44,13 +44,6 @@ interface PayoutCompletedEmailData {
   description: string;
 }
 
-interface EscrowReleasedEmailData {
-  to: string;
-  buyerName: string;
-  transactionId: string;
-  amount: number;
-  description: string;
-}
 
 interface RefundCompletedEmailData {
   to: string;
@@ -146,7 +139,7 @@ export class BrevoMailingService {
     }
   }
 
-  // ==================== ESCROW EMAIL TEMPLATES ====================
+  // ==================== TRANSACTION EMAIL TEMPLATES ====================
 
   async sendDepositInitiatedEmail(data: DepositInitiatedEmailData): Promise<void> {
     try {
@@ -166,7 +159,7 @@ export class BrevoMailingService {
     try {
       await this.sendEmail({
         to: [{ email: data.to, name: data.buyerName }],
-        subject: `Funds Secured in Escrow - ${data.transactionId}`,
+        subject: `Funds Secured - ${data.transactionId}`,
         htmlContent: this.getFundsHeldTemplate(data),
         textContent: this.getFundsHeldText(data)
       });
@@ -180,7 +173,7 @@ export class BrevoMailingService {
     try {
       await this.sendEmail({
         to: [{ email: data.to, name: data.sellerName }],
-        subject: `Payment Received in Escrow - ${data.transactionId}`,
+        subject: `Payment Received - ${data.transactionId}`,
         htmlContent: this.getFundsHeldSellerTemplate(data),
         textContent: this.getFundsHeldSellerText(data)
       });
@@ -204,19 +197,6 @@ export class BrevoMailingService {
     }
   }
 
-  async sendEscrowReleasedEmail(data: EscrowReleasedEmailData): Promise<void> {
-    try {
-      await this.sendEmail({
-        to: [{ email: data.to, name: data.buyerName }],
-        subject: `Escrow Released - ${data.transactionId}`,
-        htmlContent: this.getEscrowReleasedTemplate(data),
-        textContent: this.getEscrowReleasedText(data)
-      });
-    } catch (error: any) {
-      console.error('[BREVO] Failed to send escrow released email:', error);
-      throw error;
-    }
-  }
 
   async sendRefundCompletedEmail(data: RefundCompletedEmailData): Promise<void> {
     try {
@@ -359,7 +339,7 @@ export class BrevoMailingService {
           </div>
           <div class="content">
             <p>Hi ${data.buyerName},</p>
-            <p>Your escrow transaction has been initiated. Please complete the payment to secure the funds.</p>
+            <p>Your transaction has been initiated. Please complete the payment to secure the funds.</p>
             
             <div class="info-box">
               <div class="info-row">
@@ -381,7 +361,7 @@ export class BrevoMailingService {
               <p>${data.instructions}</p>
             </div>
 
-            <p>Once payment is received, the funds will be held securely in escrow until the transaction is completed.</p>
+            <p>Once payment is received, the funds will be held securely until the transaction is completed.</p>
           </div>
           <div class="footer">
             <p>&copy; ${new Date().getFullYear()} ${this.senderName}. All rights reserved.</p>
@@ -403,13 +383,13 @@ export class BrevoMailingService {
       <body>
         <div class="container">
           <div class="header">
-            <h1>Funds Secured in Escrow</h1>
+            <h1>Funds Secured</h1>
           </div>
           <div class="content">
             <p>Hi ${data.buyerName},</p>
             
             <div class="alert alert-success">
-              <strong>Payment Successful!</strong> Your funds are now held securely in escrow.
+              <strong>Payment Successful!</strong> Your funds are now held securely.
             </div>
 
             <div class="info-box">
@@ -427,7 +407,7 @@ export class BrevoMailingService {
               </div>
               <div class="info-row">
                 <span class="info-label">Status:</span>
-                <span class="info-value">HELD IN ESCROW</span>
+                <span class="info-value">HELD SECURELY</span>
               </div>
             </div>
 
@@ -453,13 +433,13 @@ export class BrevoMailingService {
       <body>
         <div class="container">
           <div class="header">
-            <h1>Payment Received in Escrow</h1>
+            <h1>Payment Received</h1>
           </div>
           <div class="content">
             <p>Hi ${data.sellerName},</p>
             
             <div class="alert alert-success">
-              <strong>Good News!</strong> Payment has been received and is now held in escrow.
+              <strong>Good News!</strong> Payment has been received and is now held securely.
             </div>
 
             <div class="info-box">
@@ -509,7 +489,7 @@ export class BrevoMailingService {
             <p>Hi ${data.sellerName},</p>
             
             <div class="alert alert-success">
-              <strong>Payment Complete!</strong> The escrow funds have been released to you.
+              <strong>Payment Complete!</strong> The funds have been released to you.
             </div>
 
             <div class="info-box">
@@ -542,55 +522,6 @@ export class BrevoMailingService {
     `;
   }
 
-  private getEscrowReleasedTemplate(data: EscrowReleasedEmailData): string {
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        ${this.getBaseStyles()}
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>Escrow Released</h1>
-          </div>
-          <div class="content">
-            <p>Hi ${data.buyerName},</p>
-            
-            <div class="alert alert-success">
-              <strong>Transaction Complete!</strong> You have successfully released the escrow funds to the seller.
-            </div>
-
-            <div class="info-box">
-              <div class="info-row">
-                <span class="info-label">Transaction ID:</span>
-                <span class="info-value">${data.transactionId}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Amount:</span>
-                <span class="info-value">${data.amount} RWF</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Description:</span>
-                <span class="info-value">${data.description}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Status:</span>
-                <span class="info-value">RELEASED</span>
-              </div>
-            </div>
-
-            <p>Thank you for using our escrow service. We hope you're satisfied with your transaction.</p>
-          </div>
-          <div class="footer">
-            <p>&copy; ${new Date().getFullYear()} ${this.senderName}. All rights reserved.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
-  }
 
   private getRefundCompletedTemplate(data: RefundCompletedEmailData): string {
     return `
@@ -609,7 +540,7 @@ export class BrevoMailingService {
             <p>Hi ${data.buyerName},</p>
             
             <div class="alert alert-info">
-              <strong>Refund Complete!</strong> The escrow funds have been refunded to you.
+              <strong>Refund Complete!</strong> The funds have been refunded to you.
             </div>
 
             <div class="info-box">
@@ -659,7 +590,7 @@ export class BrevoMailingService {
             <p>Hi ${data.sellerName},</p>
             
             <div class="alert alert-warning">
-              <strong>Transaction Refunded:</strong> The escrow funds have been returned to the buyer.
+              <strong>Transaction Refunded:</strong> The funds have been returned to the buyer.
             </div>
 
             <div class="info-box">
@@ -700,7 +631,7 @@ Payment Required - ${data.transactionId}
 
 Hi ${data.buyerName},
 
-Your escrow transaction has been initiated. Please complete the payment to secure the funds.
+Your transaction has been initiated. Please complete the payment to secure the funds.
 
 Transaction Details:
 - Transaction ID: ${data.transactionId}
@@ -710,7 +641,7 @@ Transaction Details:
 Payment Instructions:
 ${data.instructions}
 
-Once payment is received, the funds will be held securely in escrow until the transaction is completed.
+Once payment is received, the funds will be held securely until the transaction is completed.
 
 © ${new Date().getFullYear()} ${this.senderName}
     `.trim();
@@ -718,17 +649,17 @@ Once payment is received, the funds will be held securely in escrow until the tr
 
   private getFundsHeldText(data: FundsHeldEmailData): string {
     return `
-Funds Secured in Escrow - ${data.transactionId}
+Funds Secured - ${data.transactionId}
 
 Hi ${data.buyerName},
 
-Payment Successful! Your funds are now held securely in escrow.
+Payment Successful! Your funds are now held securely.
 
 Transaction Details:
 - Transaction ID: ${data.transactionId}
 - Amount: ${data.amount} RWF
 - Description: ${data.description}
-- Status: HELD IN ESCROW
+- Status: HELD SECURELY
 
 The funds will be released to the seller once you confirm that the service/product has been delivered as agreed.
 
@@ -738,11 +669,11 @@ The funds will be released to the seller once you confirm that the service/produ
 
   private getFundsHeldSellerText(data: FundsHeldSellerEmailData): string {
     return `
-Payment Received in Escrow - ${data.transactionId}
+Payment Received - ${data.transactionId}
 
 Hi ${data.sellerName},
 
-Good News! Payment has been received and is now held in escrow.
+Good News! Payment has been received and is now held securely.
 
 Transaction Details:
 - Transaction ID: ${data.transactionId}
@@ -762,7 +693,7 @@ Payment Released - ${data.transactionId}
 
 Hi ${data.sellerName},
 
-Payment Complete! The escrow funds have been released to you.
+Payment Complete! The funds have been released to you.
 
 Transaction Details:
 - Transaction ID: ${data.transactionId}
@@ -776,25 +707,6 @@ The funds should appear in your mobile money account shortly.
     `.trim();
   }
 
-  private getEscrowReleasedText(data: EscrowReleasedEmailData): string {
-    return `
-Escrow Released - ${data.transactionId}
-
-Hi ${data.buyerName},
-
-Transaction Complete! You have successfully released the escrow funds to the seller.
-
-Transaction Details:
-- Transaction ID: ${data.transactionId}
-- Amount: ${data.amount} RWF
-- Description: ${data.description}
-- Status: RELEASED
-
-Thank you for using our escrow service.
-
-© ${new Date().getFullYear()} ${this.senderName}
-    `.trim();
-  }
 
   private getRefundCompletedText(data: RefundCompletedEmailData): string {
     return `
@@ -802,7 +714,7 @@ Refund Processed - ${data.transactionId}
 
 Hi ${data.buyerName},
 
-Refund Complete! The escrow funds have been refunded to you.
+Refund Complete! The funds have been refunded to you.
 
 Transaction Details:
 - Transaction ID: ${data.transactionId}
@@ -822,7 +734,7 @@ Transaction Refunded - ${data.transactionId}
 
 Hi ${data.sellerName},
 
-Transaction Refunded: The escrow funds have been returned to the buyer.
+Transaction Refunded: The funds have been returned to the buyer.
 
 Transaction Details:
 - Transaction ID: ${data.transactionId}

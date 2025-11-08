@@ -213,11 +213,11 @@ export const validateBookingUpdate = (req: AuthenticatedRequest, res: Response, 
 
   // Validate status if provided
   if ('status' in data && data.status) {
-    const propertyStatuses: PropertyBookingStatus[] = ['pending', 'confirmed', 'cancelled', 'completed', 'refunded'];
-    const tourStatuses: TourBookingStatus[] = ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'refunded', 'no_show'];
-    
+    const propertyStatuses: PropertyBookingStatus[] = ['pending', 'confirmed', 'checkedin', 'checkout', 'cancelled', 'refunded'];
+    const tourStatuses: TourBookingStatus[] = ['pending', 'confirmed', 'checkedin', 'cancelled', 'completed', 'refunded', 'no_show'];
+
     // Check if it's a valid status (assuming we can't determine type here)
-    if (!propertyStatuses.includes(data.status as PropertyBookingStatus) && 
+    if (!propertyStatuses.includes(data.status as PropertyBookingStatus) &&
         !tourStatuses.includes(data.status as TourBookingStatus)) {
       errors.push('Invalid status provided');
     }

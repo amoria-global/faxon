@@ -9,6 +9,7 @@ import { logger } from '../utils/logger';
 import config from '../config/config';
 import { currencyExchangeService } from '../services/currency-exchange.service';
 import { PhoneUtils } from '../utils/phone.utils';
+import { TransactionSanitizer } from '../utils/transaction-sanitizer.utility';
 
 const prisma = new PrismaClient();
 
@@ -380,7 +381,7 @@ export class UnifiedTransactionController {
    */
   private async handleXentriPayCardDeposit(req: Request, res: Response, depositData: any): Promise<void> {
     const userId = req.user?.userId ? parseInt(req.user.userId) : undefined;
-    const { amount, phoneNumber, email, customerName, description, internalReference, metadata } = depositData;
+    const { amount, phoneNumber, email, customerName, description, internalReference, metadata, redirecturl } = depositData;
 
     // CRITICAL: Validate userId exists before creating transaction
     if (!userId) {
@@ -523,7 +524,7 @@ export class UnifiedTransactionController {
       chargesIncluded: true, // Boolean, not string
       description: description || `Card deposit for ${internalReference}`,
       internalReference: internalReference,
-      redirecturl: 'https://jambolush.com/payment/status'
+      redirecturl: redirecturl || 'https://app.jambolush.com/all/guest/bookings' // Use redirecturl from frontend, fallback to default
     });
 
     // Store in unified Transaction table
@@ -758,7 +759,9 @@ export class UnifiedTransactionController {
   /**
    * Get all transactions with optional filters
    * GET /api/transactions
-   * @query userId - Filter by user ID
+   * SECURITY: Admin-only endpoint OR filtered to authenticated user's transactions
+   * NOTE: For non-admin users, automatically uses comprehensive search across ALL transaction tables
+   * @query userId - Filter by user ID (non-admins can only query their own)
    * @query recipientId - Filter by recipient ID
    * @query provider - Filter by provider (PAWAPAY, XENTRIPAY, PROPERTY)
    * @query paymentMethod - Filter by payment method (mobile_money, card, cash_at_property)
@@ -768,15 +771,26 @@ export class UnifiedTransactionController {
    * @query toDate - Filter by date range (end)
    * @query limit - Limit results (default: 100)
    * @query offset - Offset for pagination (default: 0)
-   *
-   * Response includes:
-   * - paymentType: 'cash_at_property' | 'online'
-   * - paymentTypeLabel: Human-readable label
-   * - isCashPayment: Boolean flag
-   * - isOnlinePayment: Boolean flag
    */
   async getAllTransactions(req: Request, res: Response): Promise<void> {
     try {
+      const authenticatedUserId = req.user?.userId ? parseInt(req.user.userId) : undefined;
+
+      if (!authenticatedUserId) {
+        res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+        return;
+      }
+
+      // Get user role for admin check
+      const user = await prisma.user.findUnique({
+        where: { id: authenticatedUserId },
+        select: { userType: true }
+      });
+      const isAdmin = user?.userType === 'admin';
+
       const filters: UnifiedTransactionFilters = {
         userId: req.query.userId ? parseInt(req.query.userId as string) : undefined,
         recipientId: req.query.recipientId ? parseInt(req.query.recipientId as string) : undefined,
@@ -790,23 +804,53 @@ export class UnifiedTransactionController {
         offset: req.query.offset ? parseInt(req.query.offset as string) : 0
       };
 
-      logger.info('Fetching unified transactions', 'UnifiedTransactionController', { filters });
+      // Non-admins can only see their own transactions
+      if (!isAdmin) {
+        filters.userId = authenticatedUserId;
+      }
 
-      const transactions = await unifiedTransactionService.getAllTransactions(filters);
+      logger.info('Fetching unified transactions', 'UnifiedTransactionController', { filters, isAdmin });
 
-      // Count payment types for admin summary
-      const cashPayments = transactions.filter(tx => tx.isCashPayment).length;
-      const onlinePayments = transactions.filter(tx => tx.isOnlinePayment).length;
+      // For non-admin users, use comprehensive search across ALL tables
+      // For admin users, use standard search (transactions table only) for better performance
+      let transactions: any[];
+      if (!isAdmin && filters.userId) {
+        // User query - search ALL tables
+        transactions = await unifiedTransactionService.getAllTransactionsComprehensive(filters.userId, filters);
+      } else {
+        // Admin query - standard search (transactions table only)
+        transactions = await unifiedTransactionService.getAllTransactions(filters);
+      }
+
+      // Sanitize for non-admin users
+      const sanitizedTransactions = isAdmin
+        ? transactions
+        : transactions.map(tx => TransactionSanitizer.sanitizeMetadata(tx, false));
+
+      // Count payment types for summary
+      const cashPayments = sanitizedTransactions.filter(tx => tx.isCashPayment).length;
+      const onlinePayments = sanitizedTransactions.filter(tx => tx.isOnlinePayment).length;
+
+      // Group by source table for non-admin comprehensive search
+      const byTable: Record<string, number> = {};
+      if (!isAdmin) {
+        sanitizedTransactions.forEach(tx => {
+          const table = (tx as any).sourceTable || 'unknown';
+          byTable[table] = (byTable[table] || 0) + 1;
+        });
+      }
 
       res.status(200).json({
         success: true,
-        count: transactions.length,
+        count: sanitizedTransactions.length,
+        comprehensive: !isAdmin, // Users always get comprehensive search
         summary: {
-          total: transactions.length,
+          total: sanitizedTransactions.length,
           cashPayments,
-          onlinePayments
+          onlinePayments,
+          ...((!isAdmin && Object.keys(byTable).length > 0) && { byTable })
         },
-        data: transactions
+        data: sanitizedTransactions
       });
     } catch (error: any) {
       logger.error('Failed to fetch transactions', 'UnifiedTransactionController', error);
@@ -821,10 +865,19 @@ export class UnifiedTransactionController {
   /**
    * Get transactions by user ID
    * GET /api/transactions/user/:userId
+   * SECURITY: Authorization middleware ensures user can only see their own transactions
+   * NOTE: Automatically uses comprehensive search across ALL transaction tables (default behavior)
+   * @query status - Filter by transaction status
+   * @query type - Filter by transaction type
+   * @query fromDate - Filter by date range (start)
+   * @query toDate - Filter by date range (end)
+   * @query limit - Limit results (default: 100)
+   * @query offset - Offset for pagination (default: 0)
    */
   async getTransactionsByUserId(req: Request, res: Response): Promise<void> {
     try {
       const userId = parseInt(req.params.userId);
+      const authenticatedUserId = req.user?.userId ? parseInt(req.user.userId) : undefined;
 
       if (isNaN(userId)) {
         res.status(400).json({
@@ -833,6 +886,13 @@ export class UnifiedTransactionController {
         });
         return;
       }
+
+      // Get user role for admin check
+      const user = await prisma.user.findUnique({
+        where: { id: authenticatedUserId },
+        select: { userType: true }
+      });
+      const isAdmin = user?.userType === 'admin';
 
       const filters: Omit<UnifiedTransactionFilters, 'userId'> = {
         provider: req.query.provider as any,
@@ -844,15 +904,36 @@ export class UnifiedTransactionController {
         offset: req.query.offset ? parseInt(req.query.offset as string) : 0
       };
 
-      logger.info('Fetching transactions for user', 'UnifiedTransactionController', { userId, filters });
+      logger.info('Fetching transactions for user', 'UnifiedTransactionController', {
+        userId,
+        filters
+      });
 
-      const transactions = await unifiedTransactionService.getTransactionsByUserId(userId, filters);
+      // Always use comprehensive search - searches ALL transaction tables
+      const transactions = await unifiedTransactionService.getAllTransactionsComprehensive(userId, filters);
+
+      // Sanitize transactions for non-admin users
+      const sanitizedTransactions = isAdmin
+        ? transactions
+        : transactions.map(tx => TransactionSanitizer.sanitizeMetadata(tx, false));
+
+      // Group by source table for summary
+      const byTable: Record<string, number> = {};
+      sanitizedTransactions.forEach(tx => {
+        const table = (tx as any).sourceTable || 'unknown';
+        byTable[table] = (byTable[table] || 0) + 1;
+      });
 
       res.status(200).json({
         success: true,
         userId,
-        count: transactions.length,
-        data: transactions
+        count: sanitizedTransactions.length,
+        comprehensive: true, // Always comprehensive
+        summary: {
+          total: sanitizedTransactions.length,
+          byTable
+        },
+        data: sanitizedTransactions
       });
     } catch (error: any) {
       logger.error('Failed to fetch user transactions', 'UnifiedTransactionController', error);
@@ -867,10 +948,12 @@ export class UnifiedTransactionController {
   /**
    * Get transactions by recipient ID
    * GET /api/transactions/recipient/:recipientId
+   * SECURITY: Authorization middleware ensures user can only see their own received transactions
    */
   async getTransactionsByRecipientId(req: Request, res: Response): Promise<void> {
     try {
       const recipientId = parseInt(req.params.recipientId);
+      const authenticatedUserId = req.user?.userId ? parseInt(req.user.userId) : undefined;
 
       if (isNaN(recipientId)) {
         res.status(400).json({
@@ -879,6 +962,13 @@ export class UnifiedTransactionController {
         });
         return;
       }
+
+      // Get user role for admin check
+      const user = await prisma.user.findUnique({
+        where: { id: authenticatedUserId },
+        select: { userType: true }
+      });
+      const isAdmin = user?.userType === 'admin';
 
       const filters: Omit<UnifiedTransactionFilters, 'recipientId'> = {
         provider: req.query.provider as any,
@@ -894,11 +984,16 @@ export class UnifiedTransactionController {
 
       const transactions = await unifiedTransactionService.getTransactionsByRecipientId(recipientId, filters);
 
+      // Sanitize transactions for non-admin users - hide platform fees
+      const sanitizedTransactions = isAdmin
+        ? transactions
+        : transactions.map(tx => TransactionSanitizer.sanitizeMetadata(tx, false));
+
       res.status(200).json({
         success: true,
         recipientId,
-        count: transactions.length,
-        data: transactions
+        count: sanitizedTransactions.length,
+        data: sanitizedTransactions
       });
     } catch (error: any) {
       logger.error('Failed to fetch recipient transactions', 'UnifiedTransactionController', error);
@@ -913,10 +1008,12 @@ export class UnifiedTransactionController {
   /**
    * Get single transaction by ID
    * GET /api/transactions/:id
+   * SECURITY: Authorization middleware ensures user is involved in transaction
    */
   async getTransactionById(req: Request, res: Response): Promise<void> {
     try {
       const id = req.params.id;
+      const authenticatedUserId = req.user?.userId ? parseInt(req.user.userId) : undefined;
 
       logger.info('Fetching transaction by ID', 'UnifiedTransactionController', { id });
 
@@ -925,14 +1022,34 @@ export class UnifiedTransactionController {
       if (!transaction) {
         res.status(404).json({
           success: false,
-          message: 'Transaction not found '+transaction
+          message: 'Transaction not found'
         });
         return;
       }
 
+      // Get user role for admin check
+      const user = await prisma.user.findUnique({
+        where: { id: authenticatedUserId },
+        select: { userType: true }
+      });
+      const isAdmin = user?.userType === 'admin';
+
+      // Sanitize transaction for non-admin users
+      const sanitizedTransaction = isAdmin
+        ? transaction
+        : TransactionSanitizer.sanitizeMetadata(transaction, false);
+
+      // Log access for audit trail
+      TransactionSanitizer.logAccess(
+        id,
+        authenticatedUserId!,
+        true,
+        'Transaction details accessed'
+      );
+
       res.status(200).json({
         success: true,
-        data: transaction
+        data: sanitizedTransaction
       });
     } catch (error: any) {
       logger.error('Failed to fetch transaction', 'UnifiedTransactionController', error);
@@ -975,6 +1092,7 @@ export class UnifiedTransactionController {
   /**
    * Get user wallet balance and information
    * GET /api/transactions/wallet/:userId
+   * SECURITY: Authorization middleware ensures user can only view own wallet
    */
   async getUserWallet(req: Request, res: Response): Promise<void> {
     try {
@@ -1005,13 +1123,12 @@ export class UnifiedTransactionController {
         return;
       }
 
+      // Sanitize wallet data - only show user their own balance
+      const sanitizedWallet = TransactionSanitizer.sanitizeWalletBalance(wallet, userId);
+
       res.status(200).json({
         success: true,
-        data: {
-          ...wallet,
-          totalBalance: wallet.balance + wallet.pendingBalance,
-          availableBalance: wallet.balance
-        }
+        data: sanitizedWallet
       });
     } catch (error: any) {
       logger.error('Failed to fetch wallet', 'UnifiedTransactionController', error);

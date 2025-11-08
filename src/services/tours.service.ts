@@ -1,5 +1,8 @@
 import { PrismaClient } from '@prisma/client';
 import { BrevoTourMailingService, TourMailingContext } from '../utils/brevo.tours';
+import { applyGuestPriceMarkupToObject } from '../utils/guest-price-markup.utility';
+import { findDuplicateTours } from '../utils/duplicate-detection.utility';
+import { duplicateNotificationService } from './duplicate-notification.service';
 import {
   CreateTourDto,
   UpdateTourDto,
@@ -218,8 +221,9 @@ export class TourService {
       nextAvailableDate: tour.schedules[0]?.startDate.toISOString()
     }));
 
+    // Apply 14% markup for guest view
     return {
-      tours: tourSummaries,
+      tours: tourSummaries.map(summary => this.formatTourSummaryForGuest(summary)),
       total,
       page,
       limit,
@@ -264,7 +268,8 @@ export class TourService {
       data: { views: { increment: 1 } }
     });
 
-    return this.formatTourInfo(tour);
+    // Apply 14% markup for guest view
+    return this.formatTourInfoForGuest(tour);
   }
 
   async getFeaturedTours(limit: number = 8): Promise<TourSummary[]> {
@@ -305,7 +310,8 @@ export class TourService {
       take: limit
     });
 
-    return tours.map(tour => ({
+    // Apply 14% markup for guest view
+    return tours.map(tour => this.formatTourSummaryForGuest({
       id: tour.id,
       title: tour.title,
       shortDescription: tour.shortDescription,
@@ -860,46 +866,51 @@ export class TourService {
   }
 
   async createTourReview(userId: number, reviewData: CreateTourReviewDto): Promise<TourReviewInfo> {
-    // Verify the booking exists and belongs to the user
-    const booking = await prisma.tourBooking.findFirst({
-      where: {
-        id: reviewData.bookingId,
-        userId,
-        status: 'completed'
-      },
-      include: {
-        tour: {
-          select: {
-            title: true,
-            tourGuideId: true
-          }
-        }
+    // Verify the tour exists
+    const tour = await prisma.tour.findUnique({
+      where: { id: reviewData.tourId },
+      select: {
+        title: true,
+        tourGuideId: true
       }
     });
 
-    if (!booking) {
-      throw new Error('Booking not found or tour not completed');
+    if (!tour) {
+      throw new Error('Tour not found');
     }
 
-    // Check if review already exists
+    // Verify the user has a completed booking for this tour
+    const completedBooking = await prisma.tourBooking.findFirst({
+      where: {
+        tourId: reviewData.tourId,
+        userId,
+        status: 'completed'
+      }
+    });
+
+    if (!completedBooking) {
+      throw new Error('You can only review tours you have completed');
+    }
+
+    // Check if review already exists for this tour and user
     const existingReview = await prisma.tourReview.findFirst({
       where: {
-        bookingId: reviewData.bookingId,
+        tourId: reviewData.tourId,
         userId
       }
     });
 
     if (existingReview) {
-      throw new Error('Review already exists for this booking');
+      throw new Error('You have already reviewed this tour');
     }
 
     // Create the review
     const review = await prisma.tourReview.create({
       data: {
-        bookingId: reviewData.bookingId,
+        bookingId: completedBooking.id,
         userId,
         tourId: reviewData.tourId,
-        tourGuideId: booking.tour.tourGuideId,
+        tourGuideId: tour.tourGuideId,
         rating: reviewData.rating,
         comment: reviewData.comment,
         images: reviewData.images || [],
@@ -925,7 +936,7 @@ export class TourService {
     await this.updateTourRating(reviewData.tourId);
 
     // Update tour guide rating
-    await this.updateTourGuideRating(booking.tour.tourGuideId);
+    await this.updateTourGuideRating(tour.tourGuideId);
 
     return {
       id: review.id,
@@ -934,10 +945,10 @@ export class TourService {
       userName: `${review.user.firstName} ${review.user.lastName}`,
       userProfileImage: review.user.profileImage ?? undefined,
       tourId: review.tourId,
-      tourTitle: booking.tour.title,
+      tourTitle: tour.title,
       tourGuideId: review.tourGuideId,
       rating: review.rating,
-      comment: review.comment,
+      comment: reviewData.comment,
       images: review.images as string[],
       pros: review.pros as string[],
       cons: review.cons as string[],
@@ -1039,6 +1050,82 @@ export class TourService {
   }
 
   async createTour(tourGuideId: number, tourData: CreateTourDto): Promise<TourInfo> {
+    // DUPLICATE DETECTION - Check against active tours only (not deleted/rejected)
+    const existingTours = await prisma.tour.findMany({
+      where: {
+        isActive: true // Only check against active tours
+      },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        tourGuideId: true
+      }
+    });
+
+    const duplicates = findDuplicateTours(
+      {
+        title: tourData.title,
+        description: tourData.description,
+        tourGuideId: tourGuideId
+      },
+      existingTours,
+      95 // 95% similarity threshold
+    );
+
+    if (duplicates.length > 0) {
+      // Log duplicates for admin review and notify
+      for (const duplicate of duplicates) {
+        const originalTour = await prisma.tour.findUnique({
+          where: { id: duplicate.tourId },
+          select: { tourGuideId: true, title: true }
+        });
+
+        // Create duplicate detection log
+        const logEntry = await prisma.duplicateDetectionLog.create({
+          data: {
+            entityType: 'tour',
+            entityId: 'pending', // Will be updated after tour is created if allowed
+            duplicateOfId: String(duplicate.tourId),
+            similarityScore: duplicate.similarity.overallScore,
+            similarityDetails: JSON.parse(JSON.stringify(duplicate.similarity)),
+            uploaderId: tourGuideId,
+            originalOwnerId: originalTour?.tourGuideId || null,
+            status: 'pending',
+            adminNotified: false,
+            uploaderNotified: false,
+            ownerNotified: false
+          }
+        });
+
+        // Send notifications asynchronously (don't block the response)
+        duplicateNotificationService.notifyDuplicateDetection({
+          entityType: 'tour',
+          entityId: String(logEntry.id),
+          duplicateOfId: String(duplicate.tourId),
+          uploaderId: tourGuideId,
+          originalOwnerId: originalTour?.tourGuideId,
+          entityName: tourData.title,
+          duplicateEntityName: originalTour?.title || 'Unknown',
+          similarityScore: duplicate.similarity.overallScore,
+          similarityReasons: duplicate.similarity.reasons
+        }).catch(err => {
+          console.error('Failed to send duplicate notifications:', err);
+        });
+      }
+
+      // Block tour creation
+      const duplicateDetails = duplicates.map(d => ({
+        tourId: d.tourId,
+        score: d.similarity.overallScore,
+        reasons: d.similarity.reasons
+      }));
+
+      throw new Error(
+        `This tour appears to be a duplicate. Similarity detected with existing ${duplicates.length} tour${duplicates.length > 1 ? 's' : ''}. Reasons: ${duplicateDetails[0].reasons.join(', ')}. Please contact support if you believe this is an error.`
+      );
+    }
+
     const tour = await prisma.tour.create({
       data: {
         title: tourData.title,
@@ -2411,6 +2498,25 @@ export class TourService {
       createdAt: tour.createdAt?.toISOString() || '',
       updatedAt: tour.updatedAt?.toISOString() || ''
     };
+  }
+
+  // Apply 14% markup for guest-facing tour details
+  private formatTourInfoForGuest(tour: any): TourInfo {
+    const info = this.formatTourInfo(tour);
+    // Apply markup to both tour price and schedule prices
+    const markedUpInfo = applyGuestPriceMarkupToObject(info, ['price']);
+    // Also apply markup to each schedule's price if present
+    if (markedUpInfo.schedules) {
+      markedUpInfo.schedules = markedUpInfo.schedules.map(schedule =>
+        applyGuestPriceMarkupToObject(schedule, ['price'])
+      );
+    }
+    return markedUpInfo;
+  }
+
+  // Apply 14% markup for guest-facing tour summary
+  private formatTourSummaryForGuest(summary: TourSummary): TourSummary {
+    return applyGuestPriceMarkupToObject(summary, ['price']);
   }
 
   private formatTourBookingInfo(booking: any): TourBookingInfo {

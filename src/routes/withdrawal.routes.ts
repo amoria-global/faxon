@@ -61,22 +61,23 @@ router.post('/calculate-fee',
         });
       }
 
-      // Determine if fee should be doubled based on method
-      const isDoubleFee = shouldDoubleFee(method);
-
       // Calculate fee (wallet is in USD) - now using live exchange rate
-      const feeCalculation = await calculateWithdrawalFee(amount, 'USD', isDoubleFee);
+      // No fee doubling - all methods use same base fee
+      const feeCalculation = await calculateWithdrawalFee(amount, 'USD', false);
 
       res.status(200).json({
         success: true,
         data: {
           originalAmount: feeCalculation.originalAmount,
           feeAmount: feeCalculation.feeAmount,
-          netAmount: feeCalculation.netAmount,
+          amountToReceive: amount, // User receives full requested amount
+          netAmount: amount, // Same as amountToReceive
           feeTier: feeCalculation.feeTier,
           currency: feeCalculation.currency,
+          totalDeducted: amount + feeCalculation.feeAmount,
           feePercentage: ((feeCalculation.feeAmount / feeCalculation.originalAmount) * 100).toFixed(2),
-          exchangeRate: feeCalculation.exchangeRate
+          exchangeRate: feeCalculation.exchangeRate,
+          note: 'You will receive the full requested amount. Fee is deducted from your remaining balance.'
         }
       });
 
@@ -184,14 +185,14 @@ router.post('/request-otp',
       });
 
       // Calculate fee early to validate total required balance
-      // Need to assume default method for OTP stage (MOBILE)
+      // User will receive the full requested amount, fee is deducted from remaining balance
       const tempFeeCalc = await calculateWithdrawalFee(amount, 'USD', false);
       const totalRequired = amount + tempFeeCalc.feeAmount;
 
       if (!wallet || wallet.balance < totalRequired) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient wallet balance. You need ${totalRequired.toFixed(2)} USD (${amount.toFixed(2)} USD withdrawal + ${tempFeeCalc.feeAmount.toFixed(2)} USD fee) but only have ${wallet?.balance || 0} USD available.`,
+          message: `Insufficient wallet balance. You need ${totalRequired.toFixed(2)} USD total (${amount.toFixed(2)} USD to receive + ${tempFeeCalc.feeAmount.toFixed(2)} USD fee from remaining balance) but only have ${wallet?.balance || 0} USD available.`,
           availableBalance: wallet?.balance || 0,
           currency: 'USD',
           requestedAmount: amount,
@@ -331,9 +332,8 @@ router.post('/verify-and-withdraw',
       }
 
       // ⚠️ CRITICAL: Calculate withdrawal fee BEFORE balance validation
-      // This ensures we check if user has enough to cover BOTH withdrawal + fee
-      const isDoubleFee = shouldDoubleFee(method);
-      const feeCalculation = await calculateWithdrawalFee(amount, 'USD', isDoubleFee);
+      // User receives full requested amount, fee is deducted from remaining balance
+      const feeCalculation = await calculateWithdrawalFee(amount, 'USD', false); // No doubling
       const totalRequired = amount + feeCalculation.feeAmount;
 
       // Check wallet balance again (wallet is in USD)
@@ -344,7 +344,7 @@ router.post('/verify-and-withdraw',
       if (!wallet || wallet.balance < totalRequired) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient wallet balance. You need ${totalRequired.toFixed(2)} USD (${amount.toFixed(2)} USD withdrawal + ${feeCalculation.feeAmount.toFixed(2)} USD fee) but only have ${wallet?.balance || 0} USD available.`,
+          message: `Insufficient wallet balance. You need ${totalRequired.toFixed(2)} USD total (${amount.toFixed(2)} USD to receive + ${feeCalculation.feeAmount.toFixed(2)} USD fee from remaining balance) but only have ${wallet?.balance || 0} USD available.`,
           availableBalance: wallet?.balance || 0,
           currency: 'USD',
           requestedAmount: amount,
@@ -417,24 +417,10 @@ router.post('/verify-and-withdraw',
         feeAmount: feeCalculation.feeAmount,
         netAmount: feeCalculation.netAmount,
         feeTier: feeCalculation.feeTier,
-        isDoubled: isDoubleFee,
         totalRequired: totalRequired,
-        exchangeRate: feeCalculation.exchangeRate
+        exchangeRate: feeCalculation.exchangeRate,
+        note: 'User receives full requested amount, fee deducted from remaining balance'
       });
-
-      // ⚠️ CRITICAL: Validate that the withdrawal amount covers the fee
-      if (feeCalculation.netAmount <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: `Withdrawal amount (${amount} USD) is insufficient to cover the withdrawal fee (${feeCalculation.feeAmount} USD). Please request a higher amount.`,
-          feeCalculation: {
-            originalAmount: feeCalculation.originalAmount,
-            feeAmount: feeCalculation.feeAmount,
-            netAmount: feeCalculation.netAmount,
-            feeTier: feeCalculation.feeTier
-          }
-        });
-      }
 
       // Create withdrawal request with link to saved withdrawal method
       const reference = `WD-${Date.now()}-${userId}`;
@@ -444,7 +430,7 @@ router.post('/verify-and-withdraw',
           userId,
           amount: amount,
           feeAmount: feeCalculation.feeAmount,
-          netAmount: feeCalculation.netAmount,
+          netAmount: amount, // User receives full requested amount
           feeTier: feeCalculation.feeTier,
           currency: 'USD',
           method: method as 'MOBILE' | 'BANK',
@@ -455,15 +441,15 @@ router.post('/verify-and-withdraw',
         }
       });
 
-      // ⚠️ CRITICAL FIX: Proper handling of withdrawal amount and fee
-      // - Fee is deducted from balance immediately (non-refundable, removed from system)
-      // - Withdrawal amount moves to pendingBalance (locked until completion/failure)
+      // ⚠️ NEW LOGIC: User receives full requested amount, fee deducted from remaining balance
+      // - Withdrawal amount moves to pendingBalance (locked until completion)
+      // - Fee is deducted from available balance (non-refundable, removed from system)
       // - Total deducted from available balance: withdrawal amount + fee
       await prisma.wallet.update({
         where: { id: wallet.id },
         data: {
-          balance: wallet.balance - totalRequired,  // Deduct total from available balance
-          pendingBalance: wallet.pendingBalance + amount  // Only withdrawal amount goes to pending (NOT fee)
+          balance: wallet.balance - totalRequired,  // Deduct total (withdrawal + fee) from available balance
+          pendingBalance: wallet.pendingBalance + amount  // Full withdrawal amount goes to pending
         }
       });
 
@@ -476,7 +462,7 @@ router.post('/verify-and-withdraw',
           balanceBefore: wallet.balance,
           balanceAfter: wallet.balance - totalRequired,
           reference,
-          description: `Withdrawal request - ${method} (${amount} USD to pending + ${feeCalculation.feeAmount} USD fee deducted = ${totalRequired} USD total removed from balance)`,
+          description: `Withdrawal request - ${method} (${amount} USD to receive in full + ${feeCalculation.feeAmount} USD fee from remaining balance = ${totalRequired} USD total deducted)`,
           transactionId: withdrawal.id
         }
       });
@@ -527,7 +513,7 @@ router.post('/verify-and-withdraw',
         withdrawalId: withdrawal.id,
         amount: withdrawal.amount,
         feeAmount: withdrawal.feeAmount,
-        netAmount: withdrawal.netAmount,
+        netAmount: withdrawal.amount, // User receives full requested amount
         feeTier: withdrawal.feeTier,
         totalDeducted: totalRequired,
         currency: withdrawal.currency,
@@ -536,12 +522,12 @@ router.post('/verify-and-withdraw',
         reference: withdrawal.reference,
         estimatedDelivery: '1-3 business days',
         newBalance: wallet.balance - totalRequired,
-        feeNote: `Total deducted from wallet: ${totalRequired.toFixed(2)} ${withdrawal.currency} (${withdrawal.amount} ${withdrawal.currency} withdrawal + ${withdrawal.feeAmount} ${withdrawal.currency} fee). You will receive ${withdrawal.netAmount} ${withdrawal.currency}.`
+        feeNote: `Total deducted from wallet: ${totalRequired.toFixed(2)} ${withdrawal.currency} (${withdrawal.amount} ${withdrawal.currency} to receive + ${withdrawal.feeAmount} ${withdrawal.currency} fee from remaining balance). You will receive the full ${withdrawal.amount} ${withdrawal.currency}.`
       };
 
       res.status(200).json({
         success: true,
-        message: `Withdrawal request created. You will receive ${withdrawal.netAmount} ${withdrawal.currency} after deducting the ${withdrawal.feeAmount} ${withdrawal.currency} withdrawal fee.`,
+        message: `Withdrawal request created. You will receive the full ${withdrawal.amount} ${withdrawal.currency}. The ${withdrawal.feeAmount} ${withdrawal.currency} fee has been deducted from your remaining balance.`,
         data: responseData
       });
 
@@ -826,20 +812,17 @@ router.get('/info',
           fees: {
             tier1: {
               range: 'Up to 1,000,000 RWF (~$769 USD)',
-              fee: '600 RWF (~$0.46 USD)',
-              feeDoubled: '1,200 RWF (~$0.92 USD)'
+              fee: '600 RWF (~$0.46 USD)'
             },
             tier2: {
               range: '1,000,001 - 5,000,000 RWF (~$769-$3,846 USD)',
-              fee: '1,200 RWF (~$0.92 USD)',
-              feeDoubled: '2,400 RWF (~$1.85 USD)'
+              fee: '1,200 RWF (~$0.92 USD)'
             },
             tier3: {
               range: 'Above 5,000,000 RWF (~$3,846 USD)',
-              fee: '3,000 RWF (~$2.31 USD)',
-              feeDoubled: '6,000 RWF (~$4.62 USD)'
+              fee: '3,000 RWF (~$2.31 USD)'
             },
-            note: 'Fees are automatically deducted from withdrawal amount. Fees are doubled for card/bank withdrawals.'
+            note: 'You receive the full requested withdrawal amount. Fees are deducted from your remaining wallet balance. Same fee applies to all withdrawal methods (no fee doubling).'
           },
           kyc: {
             completed: user.kycCompleted,

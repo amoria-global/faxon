@@ -66,8 +66,8 @@ export class AgentCommissionService {
         features: JSON.stringify(propertyData.features),
         images: JSON.stringify(propertyData.images),
         video3D: propertyData.video3D,
-        availableFrom: new Date(propertyData.availabilityDates.start),
-        availableTo: new Date(propertyData.availabilityDates.end),
+        availableFrom: new Date(propertyData.availabilityDates?.start || propertyData.availableFrom || new Date()),
+        availableTo: new Date(propertyData.availabilityDates?.end || propertyData.availableTo || new Date()),
         // Critical: Set relationships
         hostId: ownerResult.id, // Owner is the host
         agentId: agentId, // Agent who uploaded
@@ -97,7 +97,7 @@ export class AgentCommissionService {
           host: true,
           agent: true,
           bookings: {
-            where: { status: { in: ['confirmed', 'completed'] } }
+            where: { status: { in: ['confirmed', 'checkedin', 'checkout'] } }
           },
           agentCommissions: {
             where: { agentId }
@@ -155,7 +155,6 @@ export class AgentCommissionService {
 
     // Only create commission if property has an agent
     if (!booking.property.agentId) {
-      console.log('No agent for this property, skipping commission creation');
       return;
     }
 
@@ -165,7 +164,6 @@ export class AgentCommissionService {
     });
 
     if (existingCommission) {
-      console.log('Commission already exists for this booking');
       return;
     }
 
@@ -214,7 +212,6 @@ export class AgentCommissionService {
     });
 
     if (existingPayment) {
-      console.log('Host payment already exists for this booking');
       return;
     }
 
@@ -335,7 +332,7 @@ export class AgentCommissionService {
         checkOutValidated: true,
         checkOutValidatedAt: new Date(),
         checkOutValidatedBy: hostId,
-        status: 'completed'
+        status: 'checkout'
       }
     });
 
@@ -488,7 +485,9 @@ export class AgentCommissionService {
       propertyAddress: property.propertyAddress,
       type: property.type,
       category: property.category,
+      pricingType: property.pricingType || 'night',
       pricePerNight: property.pricePerNight,
+      pricePerMonth: property.pricePerMonth,
       pricePerTwoNights: property.pricePerTwoNights,
       beds: property.beds,
       baths: property.baths,

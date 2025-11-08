@@ -753,21 +753,6 @@ export class BrevoMailingService {
     }
   }
 
-  async sendUserEscrowReleased(context: UserNotificationContext): Promise<void> {
-    try {
-      const emailData = {
-        sender: this.defaultSender,
-        to: [{ email: context.user.email, name: `${context.user.firstName} ${context.user.lastName}` }],
-        subject: `Payment Released - ${context.company.name}`,
-        htmlContent: this.getUserEscrowReleasedTemplate(context),
-        textContent: this.getUserEscrowReleasedTextTemplate(context)
-      };
-
-      await this.sendTransactionalEmail(emailData);
-    } catch (error: any) {
-      throw error;
-    }
-  }
 
   async sendUserContactResponse(context: UserNotificationContext): Promise<void> {
     try {
@@ -2836,94 +2821,6 @@ Weekly Admin Report - Jambolush Platform
     `;
   }
 
-  private getUserEscrowReleasedTemplate(context: UserNotificationContext): string {
-    const amount = context.action.details?.amount || 0;
-    
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Payment Released</title>
-        ${this.getBaseTemplate()}
-      </head>
-      <body>
-        <div class="email-wrapper">
-          <div class="email-container">
-            <div class="header">
-              <div class="logo">${context.company.name}</div>
-              <div class="header-subtitle">Payment Update</div>
-            </div>
-            
-            <div class="content">
-              <div class="greeting">Great News, ${context.user.firstName}!</div>
-              
-              <div class="message">
-                Funds held in escrow have been released to your wallet.
-              </div>
-              
-              <div class="alert-box alert-success">
-                <div class="alert-title">✓ Payment Released</div>
-                <div class="alert-text">
-                  The escrowed funds are now available in your wallet and ready for withdrawal or use.
-                </div>
-              </div>
-              
-              <div class="info-card">
-                <div class="info-card-header">
-                  <span class="info-card-icon">💰</span>
-                  Release Details
-                </div>
-                <div class="info-row">
-                  <span class="info-label">Amount Released</span>
-                  <span class="info-value" style="color: #10b981; font-weight: 600;">
-                    RWF ${amount.toLocaleString()}
-                  </span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">Transaction</span>
-                  <span class="info-value">${context.action.details?.transactionId || 'N/A'}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">Released On</span>
-                  <span class="info-value">${new Date(context.action.timestamp).toLocaleString()}</span>
-                </div>
-                ${context.action.reason ? `
-                  <div class="info-row">
-                    <span class="info-label">Note</span>
-                    <span class="info-value">${context.action.reason}</span>
-                  </div>
-                ` : ''}
-              </div>
-              
-              <div class="message">
-                You can now withdraw these funds to your bank account or use them for transactions on the platform.
-              </div>
-              
-              <div class="button-center">
-                <a href="https://app.jambolush.com" class="button">
-                  View Your Wallet
-                </a>
-              </div>
-            </div>
-            
-            <div class="footer">
-              <div class="footer-links">
-                <a href="${context.company.website}">Home</a>
-                <a href="https://app.jambolush.com">Wallet</a>
-                <a href="mailto:${context.company.supportEmail}">Support</a>
-              </div>
-              <div class="footer-text">
-                © ${new Date().getFullYear()} ${context.company.name}. All rights reserved.
-              </div>
-            </div>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
-  }
 
   // --- USER NOTIFICATION TEXT TEMPLATES ---
 
@@ -3293,29 +3190,6 @@ Support: ${context.company.supportEmail}
     `.trim();
   }
 
-  private getUserEscrowReleasedTextTemplate(context: UserNotificationContext): string {
-    const amount = context.action.details?.amount || 0;
-
-    return `
-PAYMENT RELEASED - ${context.company.name}
-
-Great News, ${context.user.firstName}!
-
-Escrowed funds have been released to your wallet.
-
-DETAILS:
-- Amount: RWF ${amount.toLocaleString()}
-- Transaction: ${context.action.details?.transactionId || 'N/A'}
-- Released: ${new Date(context.action.timestamp).toLocaleString()}
-${context.action.reason ? `- Note: ${context.action.reason}` : ''}
-
-You can now withdraw these funds or use them on the platform.
-
-View wallet: https://app.jambolush.com
-
-© ${new Date().getFullYear()} ${context.company.name}
-    `.trim();
-  }
 
   private getUserContactResponseTemplate(context: UserNotificationContext): string {
     return `
@@ -3885,6 +3759,152 @@ Contact support: ${context.company.supportEmail}
         lastHealthCheck: new Date().toISOString(),
         apiKeyValid: false
       };
+    }
+  }
+
+  /**
+   * Send pending refund notification to admin
+   */
+  async sendPendingRefundNotification(data: any): Promise<boolean> {
+    try {
+      const adminEmail = config.supportEmail || 'admin@jambolush.com';
+
+      const emailData = {
+        sender: this.adminSender,
+        to: [{ email: adminEmail, name: 'Admin' }],
+        subject: `🔔 Pending Refund Request - ${data.bookingType === 'property' ? 'Property' : 'Tour'} Booking`,
+        htmlContent: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <style>
+              body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+              .container { max-width: 700px; margin: 0 auto; padding: 20px; }
+              .header { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+              .content { background: #f9f9f9; padding: 30px; border: 1px solid #ddd; }
+              .info-box { background: white; padding: 20px; margin: 15px 0; border-left: 4px solid #3b82f6; }
+              .refund-box { background: ${data.refundAmount > 0 ? '#dcfce7' : '#fee2e2'}; padding: 20px; margin: 20px 0; border-radius: 8px; border: 2px solid ${data.refundAmount > 0 ? '#22c55e' : '#ef4444'}; }
+              .amount { font-size: 28px; font-weight: bold; color: ${data.refundAmount > 0 ? '#16a34a' : '#dc2626'}; }
+              .action-buttons { text-align: center; padding: 20px 0; }
+              .btn { display: inline-block; padding: 12px 30px; margin: 0 10px; text-decoration: none; border-radius: 5px; font-weight: bold; }
+              .btn-approve { background: #22c55e; color: white; }
+              .btn-review { background: #3b82f6; color: white; }
+              .footer { text-align: center; padding: 20px; color: #777; font-size: 12px; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <h1>⚠️ Pending Refund Request</h1>
+                <p>Action required for ${data.bookingType} booking cancellation</p>
+              </div>
+              <div class="content">
+                <h2>Booking Cancellation Details</h2>
+
+                <div class="info-box">
+                  <strong>Guest Information:</strong><br>
+                  Name: ${data.guestName}<br>
+                  Email: ${data.guestEmail}
+                </div>
+
+                <div class="info-box">
+                  <strong>${data.bookingType === 'property' ? 'Property' : 'Tour'} Details:</strong><br>
+                  ${data.bookingType === 'property' ? `
+                    Property: ${data.propertyName}<br>
+                    Check-in: ${data.checkInDate}<br>
+                    Check-out: ${data.checkOutDate}
+                  ` : `
+                    Tour: ${data.tourTitle}<br>
+                    Date: ${data.tourDate}<br>
+                    Participants: ${data.numberOfParticipants}
+                  `}
+                </div>
+
+                <div class="info-box">
+                  <strong>Cancellation Reason:</strong><br>
+                  ${data.reason}
+                </div>
+
+                <div class="refund-box">
+                  <h3>${data.isFreeCancel ? '✅ Free Cancellation' : '❌ Late Cancellation'}</h3>
+                  <table width="100%" cellpadding="5">
+                    <tr>
+                      <td><strong>Original Amount:</strong></td>
+                      <td align="right">${data.totalAmount.toFixed(2)} ${data.currency || 'USD'}</td>
+                    </tr>
+                    ${!data.isFreeCancel ? `
+                    <tr>
+                      <td><strong>Cancellation Fee (100%):</strong></td>
+                      <td align="right">${data.platformFee.toFixed(2)} ${data.currency || 'USD'}</td>
+                    </tr>
+                    ` : ''}
+                    <tr style="border-top: 2px solid #ccc;">
+                      <td><strong>Refund Amount:</strong></td>
+                      <td align="right"><div class="amount">${data.refundAmount.toFixed(2)} ${data.currency || 'USD'}</div></td>
+                    </tr>
+                  </table>
+                </div>
+
+                ${data.refundAmount > 0 ? `
+                  <div class="info-box" style="border-left-color: #22c55e;">
+                    <strong>✓ Pending Balance Credited</strong><br>
+                    The refund amount has been credited to the guest's pending wallet balance.<br>
+                    <strong>Next Step:</strong> Process refund via Xentripay
+                  </div>
+
+                  <div class="action-buttons">
+                    <a href="${config.clientUrl || 'https://jambolush.com'}/admin/refunds/pending" class="btn btn-approve">
+                      Process Refund
+                    </a>
+                    <a href="${config.clientUrl || 'https://jambolush.com'}/admin/bookings/${data.bookingId}" class="btn btn-review">
+                      Review Booking
+                    </a>
+                  </div>
+                ` : `
+                  <div class="info-box" style="border-left-color: #ef4444;">
+                    <strong>ℹ No Action Required</strong><br>
+                    No refund due to late cancellation (within 24 hours)
+                  </div>
+                `}
+
+                <p><small><strong>Booking ID:</strong> ${data.bookingId}</small></p>
+                <p><small><strong>Requested At:</strong> ${new Date().toLocaleString()}</small></p>
+              </div>
+              <div class="footer">
+                <p>This is an automated notification from Jambolush Admin System</p>
+                <p>&copy; ${new Date().getFullYear()} Jambolush. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+        textContent: `
+PENDING REFUND REQUEST
+
+Booking Type: ${data.bookingType}
+Booking ID: ${data.bookingId}
+
+Guest: ${data.guestName} (${data.guestEmail})
+${data.bookingType === 'property' ? `Property: ${data.propertyName}` : `Tour: ${data.tourTitle}`}
+
+Original Amount: ${data.totalAmount.toFixed(2)} ${data.currency || 'USD'}
+Refund Amount: ${data.refundAmount.toFixed(2)} ${data.currency || 'USD'}
+${data.isFreeCancel ? 'Free Cancellation' : 'Late Cancellation - No Refund'}
+
+Reason: ${data.reason}
+
+${data.refundAmount > 0 ? 'ACTION REQUIRED: Process refund via Xentripay' : 'No action required'}
+
+View details: ${config.clientUrl || 'https://jambolush.com'}/admin/refunds/pending
+        `.trim()
+      };
+
+      await this.sendTransactionalEmail(emailData);
+      console.log(`[BREVO_ADMIN] Pending refund notification sent to ${adminEmail}`);
+      return true;
+    } catch (error: any) {
+      console.error('[BREVO_ADMIN] Failed to send pending refund notification:', error);
+      return false;
     }
   }
 

@@ -358,7 +358,7 @@ export const validateTourBookingUpdate = (req: AuthenticatedRequest, res: Respon
 
   // Validate status if provided
   if (data.status) {
-    const validStatuses: TourBookingStatus[] = ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'refunded', 'no_show'];
+    const validStatuses: TourBookingStatus[] = ['pending', 'confirmed', 'checkedin', 'completed', 'cancelled', 'refunded', 'no_show'];
     if (!validStatuses.includes(data.status)) {
       errors.push(`Invalid booking status. Valid options: ${validStatuses.join(', ')}`);
     }
@@ -790,27 +790,40 @@ export const validateReviewPermissions = async (req: AuthenticatedRequest, res: 
       return;
     }
 
-    const { bookingId } = req.body;
+    const { tourId } = req.body;
     const userId = parseInt(req.user.userId);
 
-    if (!bookingId) {
+    if (!tourId) {
       res.status(400).json({
         success: false,
-        message: 'Booking ID is required for review'
+        message: 'Tour ID is required for review'
       });
       return;
     }
 
-    // Check if user made this booking and tour is completed
-    const booking = await prisma.tourBooking.findFirst({
+    // Check if tour exists
+    const tour = await prisma.tour.findUnique({
+      where: { id: tourId }
+    });
+
+    if (!tour) {
+      res.status(404).json({
+        success: false,
+        message: 'Tour not found'
+      });
+      return;
+    }
+
+    // Check if user has a completed booking for this tour
+    const completedBooking = await prisma.tourBooking.findFirst({
       where: {
-        id: bookingId,
+        tourId: tourId,
         userId: userId,
         status: 'completed'
       }
     });
 
-    if (!booking) {
+    if (!completedBooking) {
       res.status(403).json({
         success: false,
         message: 'You can only review tours you have completed'
@@ -818,10 +831,10 @@ export const validateReviewPermissions = async (req: AuthenticatedRequest, res: 
       return;
     }
 
-    // Check if review already exists
+    // Check if review already exists for this tour and user
     const existingReview = await prisma.tourReview.findFirst({
       where: {
-        bookingId: bookingId,
+        tourId: tourId,
         userId: userId
       }
     });

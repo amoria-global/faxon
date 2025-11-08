@@ -308,17 +308,6 @@ export const validatePaymentAction = [
 ];
 
 /**
- * Validate escrow transaction requests
- */
-export const validateEscrowAction = [
-  param('id').isString().trim(),
-  body('action').isIn(['release', 'dispute', 'cancel', 'resolve']),
-  body('reason').optional().isString().trim(),
-  body('amount').optional().isFloat({ min: 0 }),
-  handleValidation
-];
-
-/**
  * Validate bulk operation requests
  */
 export const validateBulkOperation = [

@@ -18,7 +18,6 @@ export class EnhancedPropertyService {
       walletData,
       recentActivity,
       monthlyCommissions,
-      escrowTransactions,
       paymentTransactions
     ] = await Promise.all([
       this.getAgentClients(agentId),
@@ -30,7 +29,6 @@ export class EnhancedPropertyService {
       this.getAgentWalletOverview(agentId), // Get wallet overview
       this.getAgentRecentActivity(agentId), // Get recent activity
       this.getAgentMonthlyCommissionsWithTransactions(agentId),
-      this.getAgentEscrowTransactions(agentId),
       this.getAgentPaymentTransactions(agentId)
     ]);
 
@@ -71,7 +69,6 @@ export class EnhancedPropertyService {
         pending: transactionSummary.pendingCommissions,
         paid: transactionSummary.paidCommissions,
         failed: transactionSummary.failedCommissions,
-        escrowHeld: transactionSummary.escrowHeldAmount,
         avgPerBooking: transactionSummary.avgCommissionPerBooking
       },
 
@@ -80,7 +77,6 @@ export class EnhancedPropertyService {
 
       // Transaction Details
       transactionBreakdown: {
-        escrowTransactions: escrowTransactions.slice(0, 10),
         paymentTransactions: paymentTransactions.slice(0, 10),
         summary: transactionSummary
       }
@@ -89,27 +85,14 @@ export class EnhancedPropertyService {
 
   // === TRANSACTION SUMMARY CALCULATION ===
   async getAgentTransactionSummary(agentId: number) {
-    const [escrowSummary, paymentSummary, agentBookings] = await Promise.all([
-      // Transaction summary for agent (DEPOSIT/PAYOUT types)
-      prisma.transaction.aggregate({
-        where: {
-          OR: [
-            { userId: agentId },
-            { recipientId: agentId }
-          ],
-          transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] }
-        },
-        _sum: { amount: true },
-        _count: true
-      }),
-      
+    const [paymentSummary, agentBookings] = await Promise.all([
       // Payment transactions for agent
       prisma.paymentTransaction.aggregate({
         where: { userId: agentId },
         _sum: { amount: true },
         _count: true
       }),
-      
+
       // Agent commission bookings
       prisma.agentBooking.findMany({
         where: { agentId },
@@ -119,84 +102,21 @@ export class EnhancedPropertyService {
       })
     ]);
 
-    // Calculate commission states from escrow and payment data
-    const escrowStates = await this.getEscrowCommissionStates(agentId);
+    // Calculate commission states from payment data
     const paymentStates = await this.getPaymentCommissionStates(agentId);
-    
+
     const totalCommissions = agentBookings.reduce((sum, booking) => sum + booking.commission, 0);
     const avgCommissionPerBooking = agentBookings.length > 0 ? totalCommissions / agentBookings.length : 0;
 
     return {
       totalCommissions,
-      pendingCommissions: escrowStates.pending + paymentStates.pending,
-      failedCommissions: escrowStates.failed + paymentStates.failed,
-      paidCommissions: escrowStates.paid + paymentStates.completed,
-      escrowHeldAmount: escrowStates.held,
+      pendingCommissions: paymentStates.pending,
+      failedCommissions: paymentStates.failed,
+      paidCommissions: paymentStates.completed,
       avgCommissionPerBooking,
-      escrowTransactionCount: escrowSummary._count,
       paymentTransactionCount: paymentSummary._count,
-      totalTransactionAmount: (escrowSummary._sum.amount || 0) + (paymentSummary._sum.amount || 0)
+      totalTransactionAmount: paymentSummary._sum.amount || 0
     };
-  }
-
-  // === ESCROW COMMISSION STATES ===
-  async getEscrowCommissionStates(agentId: number) {
-    const escrowTransactions = await prisma.transaction.findMany({
-      where: {
-        OR: [
-          { userId: agentId },
-          { recipientId: agentId }
-        ],
-        transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] }
-      },
-      select: {
-        id: true,
-        amount: true,
-        status: true,
-        transactionType: true,
-        metadata: true
-      }
-    });
-
-    const states = {
-      pending: 0,
-      held: 0,
-      ready: 0,
-      paid: 0,
-      failed: 0,
-      refunded: 0
-    };
-
-    escrowTransactions.forEach((transaction: any) => {
-      const amount = transaction.amount;
-      
-      switch (transaction.status) {
-        case 'PENDING':
-          states.pending += amount;
-          break;
-        case 'HELD':
-          states.held += amount;
-          break;
-        case 'READY':
-          states.ready += amount;
-          break;
-        case 'RELEASED':
-          states.paid += amount;
-          break;
-        case 'FAILED':
-        case 'CANCELLED':
-          states.failed += amount;
-          break;
-        case 'REFUNDED':
-          states.refunded += amount;
-          break;
-        case 'COMPLETED':
-          states.paid += amount;
-          break;
-      }
-    });
-
-    return states;
   }
 
   // === PAYMENT COMMISSION STATES ===
@@ -418,11 +338,10 @@ export class EnhancedPropertyService {
 
   // === GET AGENT WALLET OVERVIEW ===
   async getAgentWalletOverview(agentId: number) {
-    const [walletData, escrowStates, paymentStates, withdrawalRequests] = await Promise.all([
+    const [walletData, paymentStates, withdrawalRequests] = await Promise.all([
       prisma.wallet.findUnique({
         where: { userId: agentId }
       }),
-      this.getEscrowCommissionStates(agentId),
       this.getPaymentCommissionStates(agentId),
       prisma.withdrawalRequest.findMany({
         where: {
@@ -437,9 +356,9 @@ export class EnhancedPropertyService {
 
     return {
       availableBalance,
-      pendingBalance: escrowStates.pending + paymentStates.pending,
-      heldBalance: escrowStates.held,
-      totalEarned: escrowStates.paid + paymentStates.completed,
+      pendingBalance: paymentStates.pending,
+      heldBalance: 0,
+      totalEarned: paymentStates.completed,
       pendingWithdrawals,
       currency: walletData?.currency || 'KES',
       lastUpdated: walletData?.updatedAt || new Date()
@@ -589,31 +508,19 @@ export class EnhancedPropertyService {
 
   // === GET BOOKING TRANSACTION DATA ===
   async getBookingTransactionData(agentBookingId: string) {
-    const [escrowTransaction, paymentTransaction] = await Promise.all([
-      prisma.transaction.findFirst({
-        where: {
-          transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] },
-          metadata: {
-            path: ['agentBookingId'],
-            equals: agentBookingId
-          }
+    const paymentTransaction = await prisma.paymentTransaction.findFirst({
+      where: {
+        metadata: {
+          path: ['agentBookingId'],
+          equals: agentBookingId
         }
-      }),
-      prisma.paymentTransaction.findFirst({
-        where: {
-          metadata: {
-            path: ['agentBookingId'],
-            equals: agentBookingId
-          }
-        }
-      })
-    ]);
+      }
+    });
 
     return {
-      escrowTransaction,
       paymentTransaction,
-      hasActiveTransaction: !!(escrowTransaction || paymentTransaction),
-      transactionStatus: escrowTransaction?.status || paymentTransaction?.status || 'none'
+      hasActiveTransaction: !!paymentTransaction,
+      transactionStatus: paymentTransaction?.status || 'none'
     };
   }
 
@@ -632,24 +539,6 @@ export class EnhancedPropertyService {
         id: true,
         commission: true,
         createdAt: true
-      }
-    });
-
-    // Get related transactions (escrow-type)
-    const escrowTransactions = await prisma.transaction.findMany({
-      where: {
-        OR: [
-          { userId: agentId },
-          { recipientId: agentId }
-        ],
-        transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] },
-        createdAt: { gte: twelveMonthsAgo }
-      },
-      select: {
-        amount: true,
-        status: true,
-        createdAt: true,
-        metadata: true
       }
     });
 
@@ -677,7 +566,6 @@ export class EnhancedPropertyService {
           month,
           commission: 0,
           bookings: 0,
-          escrowAmount: 0,
           paymentAmount: 0,
           pendingAmount: 0,
           paidAmount: 0,
@@ -688,33 +576,6 @@ export class EnhancedPropertyService {
       monthlyData[month].bookings += 1;
     });
 
-    // Process escrow transactions
-    escrowTransactions.forEach((transaction: any) => {
-      const month = transaction.createdAt.toISOString().slice(0, 7);
-      if (!monthlyData[month]) {
-        monthlyData[month] = {
-          month,
-          commission: 0,
-          bookings: 0,
-          escrowAmount: 0,
-          paymentAmount: 0,
-          pendingAmount: 0,
-          paidAmount: 0,
-          failedAmount: 0
-        };
-      }
-      
-      monthlyData[month].escrowAmount += transaction.amount;
-      
-      if (['PENDING', 'HELD'].includes(transaction.status)) {
-        monthlyData[month].pendingAmount += transaction.amount;
-      } else if (transaction.status === 'RELEASED') {
-        monthlyData[month].paidAmount += transaction.amount;
-      } else if (['FAILED', 'CANCELLED'].includes(transaction.status)) {
-        monthlyData[month].failedAmount += transaction.amount;
-      }
-    });
-
     // Process payment transactions
     paymentTransactions.forEach((transaction: any) => {
       const month = transaction.createdAt.toISOString().slice(0, 7);
@@ -723,16 +584,15 @@ export class EnhancedPropertyService {
           month,
           commission: 0,
           bookings: 0,
-          escrowAmount: 0,
           paymentAmount: 0,
           pendingAmount: 0,
           paidAmount: 0,
           failedAmount: 0
         };
       }
-      
+
       monthlyData[month].paymentAmount += transaction.amount;
-      
+
       if (['pending', 'processing'].includes(transaction.status)) {
         monthlyData[month].pendingAmount += transaction.amount;
       } else if (['completed', 'success'].includes(transaction.status)) {
@@ -743,25 +603,6 @@ export class EnhancedPropertyService {
     });
 
     return Object.values(monthlyData).sort((a: any, b: any) => a.month.localeCompare(b.month));
-  }
-
-  // === GET AGENT ESCROW TRANSACTIONS ===
-  async getAgentEscrowTransactions(agentId: number) {
-    return await prisma.transaction.findMany({
-      where: {
-        OR: [
-          { userId: agentId },
-          { recipientId: agentId }
-        ],
-        transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] }
-      },
-      include: {
-        user: { select: { firstName: true, lastName: true } },
-        recipient: { select: { firstName: true, lastName: true } }
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 20
-    });
   }
 
   // === GET AGENT PAYMENT TRANSACTIONS ===
@@ -780,7 +621,7 @@ export class EnhancedPropertyService {
   async getAgentEarningsWithTransactions(agentId: number, timeRange: 'week' | 'month' | 'quarter' | 'year'): Promise<EnhancedAgentEarnings | any> {
     const now = new Date();
     let startDate: Date;
-    
+
     switch (timeRange) {
       case 'week':
         startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -797,12 +638,10 @@ export class EnhancedPropertyService {
 
     const [
       transactionSummary,
-      escrowBreakdown,
       paymentBreakdown,
       withdrawalRequests
     ] = await Promise.all([
       this.getAgentTransactionSummary(agentId),
-      this.getAgentEscrowBreakdown(agentId, startDate),
       this.getAgentPaymentBreakdown(agentId, startDate),
       this.getAgentWithdrawalRequests(agentId, startDate)
     ]);
@@ -813,13 +652,12 @@ export class EnhancedPropertyService {
       periodEarnings: await this.getPeriodEarnings(agentId, startDate),
       periodBookings: await this.getPeriodBookingCount(agentId, startDate),
       transactionBreakdown: {
-        escrow: escrowBreakdown,
         payments: paymentBreakdown,
         withdrawals: withdrawalRequests
       },
       status: {
         pending: transactionSummary.pendingCommissions,
-        held: transactionSummary.escrowHeldAmount,
+        held: 0,
         paid: transactionSummary.paidCommissions,
         failed: transactionSummary.failedCommissions
       },
@@ -836,33 +674,6 @@ export class EnhancedPropertyService {
       },
       orderBy: { createdAt: 'desc' }
     });
-  }
-
-  // === ESCROW BREAKDOWN ===
-  async getAgentEscrowBreakdown(agentId: number, startDate: Date) {
-    const escrowTransactions = await prisma.transaction.findMany({
-      where: {
-        OR: [
-          { userId: agentId },
-          { recipientId: agentId }
-        ],
-        transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] },
-        createdAt: { gte: startDate }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    const breakdown = {
-      total: escrowTransactions.length,
-      pending: escrowTransactions.filter((t: any) => t.status === 'PENDING').length,
-      held: escrowTransactions.filter((t: any) => t.status === 'HELD').length,
-      released: escrowTransactions.filter((t: any) => t.status === 'RELEASED').length,
-      failed: escrowTransactions.filter((t: any) => ['FAILED', 'CANCELLED'].includes(t.status)).length,
-      totalAmount: escrowTransactions.reduce((sum: any, t: any) => sum + t.amount, 0),
-      transactions: escrowTransactions
-    };
-
-    return breakdown;
   }
 
   // === PAYMENT BREAKDOWN ===
@@ -949,13 +760,11 @@ export class EnhancedPropertyService {
   // === TRANSACTION MONITORING DASHBOARD ===
   async getTransactionMonitoringDashboard(agentId: number) {
     const [
-      escrowOverview,
       paymentOverview,
       recentTransactions,
       pendingWithdrawals,
       failedTransactions
     ] = await Promise.all([
-      this.getEscrowOverview(agentId),
       this.getPaymentOverview(agentId),
       this.getRecentTransactionActivity(agentId),
       this.getPendingWithdrawals(agentId),
@@ -964,7 +773,6 @@ export class EnhancedPropertyService {
 
     return {
       overview: {
-        escrow: escrowOverview,
         payments: paymentOverview
       },
       recentActivity: recentTransactions,
@@ -972,31 +780,8 @@ export class EnhancedPropertyService {
         withdrawals: pendingWithdrawals,
         failedTransactions: failedTransactions
       },
-      alerts: this.generateTransactionAlerts(escrowOverview, paymentOverview, failedTransactions)
+      alerts: this.generateTransactionAlerts(paymentOverview, failedTransactions)
     };
-  }
-
-  private async getEscrowOverview(agentId: number) {
-    const summary = await prisma.transaction.groupBy({
-      by: ['status'],
-      where: {
-        OR: [
-          { userId: agentId },
-          { recipientId: agentId }
-        ],
-        transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] }
-      },
-      _sum: { amount: true },
-      _count: true
-    });
-
-    return summary.reduce((acc: any, item: any) => {
-      acc[item.status.toLowerCase()] = {
-        count: item._count,
-        amount: item._sum.amount || 0
-      };
-      return acc;
-    }, {} as any);
   }
 
   private async getPaymentOverview(agentId: number) {
@@ -1017,39 +802,16 @@ export class EnhancedPropertyService {
   }
 
   private async getRecentTransactionActivity(agentId: number) {
-    const [escrowTransactions, paymentTransactions] = await Promise.all([
-      prisma.transaction.findMany({
-        where: {
-          OR: [
-            { userId: agentId },
-            { recipientId: agentId }
-          ],
-          transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] }
-        },
-        include: {
-          user: { select: { firstName: true, lastName: true } },
-          recipient: { select: { firstName: true, lastName: true } }
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 10
-      }),
-      prisma.paymentTransaction.findMany({
-        where: { userId: agentId },
-        include: {
-          user: { select: { firstName: true, lastName: true } }
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 10
-      })
-    ]);
+    const paymentTransactions = await prisma.paymentTransaction.findMany({
+      where: { userId: agentId },
+      include: {
+        user: { select: { firstName: true, lastName: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 15
+    });
 
-    // Combine and sort by date
-    const allTransactions = [
-      ...escrowTransactions.map((t: any) => ({ ...t, source: 'escrow' })),
-      ...paymentTransactions.map((t: any) => ({ ...t, source: 'payment' }))
-    ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    return allTransactions.slice(0, 15);
+    return paymentTransactions.map((t: any) => ({ ...t, source: 'payment' }));
   }
 
   private async getPendingWithdrawals(agentId: number) {
@@ -1063,54 +825,40 @@ export class EnhancedPropertyService {
   }
 
   private async getFailedTransactions(agentId: number) {
-    const [failedEscrow, failedPayments] = await Promise.all([
-      prisma.transaction.findMany({
-        where: {
-          OR: [
-            { userId: agentId },
-            { recipientId: agentId }
-          ],
-          transactionType: { in: ['DEPOSIT', 'PAYOUT', 'COMMISSION'] },
-          status: { in: ['FAILED', 'CANCELLED'] }
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 5
-      }),
-      prisma.paymentTransaction.findMany({
-        where: {
-          userId: agentId,
-          status: { in: ['failed', 'cancelled'] }
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 5
-      })
-    ]);
+    const failedPayments = await prisma.paymentTransaction.findMany({
+      where: {
+        userId: agentId,
+        status: { in: ['failed', 'cancelled'] }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10
+    });
 
-    return [...failedEscrow, ...failedPayments];
+    return failedPayments;
   }
 
-  private generateTransactionAlerts(escrowOverview: any, paymentOverview: any, failedTransactions: any[]) {
+  private generateTransactionAlerts(paymentOverview: any, failedTransactions: any[]) {
     const alerts = [];
 
-    // Check for high failure rates
-    const totalEscrow = Object.values(escrowOverview).reduce((sum: number, item: any) => sum + item.count, 0);
-    const failedEscrow = (escrowOverview.failed?.count || 0) + (escrowOverview.cancelled?.count || 0);
-    
-    if (totalEscrow > 0 && (failedEscrow / totalEscrow) > 0.1) {
+    // Check for high failure rates in payments
+    const totalPayments = Object.values(paymentOverview).reduce((sum: number, item: any) => sum + item.count, 0);
+    const failedPayments = (paymentOverview.failed?.count || 0) + (paymentOverview.cancelled?.count || 0);
+
+    if (totalPayments > 0 && (failedPayments / totalPayments) > 0.1) {
       alerts.push({
         type: 'warning',
-        title: 'High Escrow Failure Rate',
-        message: `${Math.round((failedEscrow / totalEscrow) * 100)}% of your escrow transactions have failed recently`,
+        title: 'High Payment Failure Rate',
+        message: `${Math.round((failedPayments / totalPayments) * 100)}% of your payment transactions have failed recently`,
         action: 'Review failed transactions'
       });
     }
 
-    // Check for pending withdrawals
-    if (escrowOverview.pending?.count > 0) {
+    // Check for pending payments
+    if (paymentOverview.pending?.count > 0) {
       alerts.push({
         type: 'info',
-        title: 'Pending Escrow Transactions',
-        message: `You have ${escrowOverview.pending.count} pending escrow transactions`,
+        title: 'Pending Payment Transactions',
+        message: `You have ${paymentOverview.pending.count} pending payment transactions`,
         action: 'Check transaction status'
       });
     }

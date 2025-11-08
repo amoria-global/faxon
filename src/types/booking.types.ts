@@ -6,6 +6,9 @@ export interface CreatePropertyBookingDto {
   checkOut: string;
   guests: number;
   totalPrice: number; // Amount calculated on frontend (includes fees, taxes, etc.)
+  pricingType?: 'night' | 'month';
+  nightsCount?: number;
+  monthsCount?: number;
   message?: string;
   specialRequests?: string;
   clientId?: number; // For agent bookings
@@ -31,7 +34,9 @@ export interface PropertyBookingInfo {
     name: string;
     location: string;
     images: any;
-    pricePerNight: number;
+    pricingType: 'night' | 'month';
+    pricePerNight?: number;
+    pricePerMonth?: number;
     hostName: string;
     hostEmail: string;
     hostPhone?: string;
@@ -48,6 +53,9 @@ export interface PropertyBookingInfo {
   checkOut: string;
   guests: number;
   nights: number;
+  pricingType?: 'night' | 'month';
+  nightsCount?: number;
+  monthsCount?: number;
   totalPrice: number;
   status: PropertyBookingStatus;
   paymentStatus: string;
@@ -299,8 +307,8 @@ export interface BookingNotification {
 }
 
 // --- ENUMS ---
-export type PropertyBookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'refunded';
-export type TourBookingStatus = 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'refunded' | 'no_show';
+export type PropertyBookingStatus = 'pending' | 'confirmed' | 'checkedin' | 'checkout' | 'cancelled' | 'refunded';
+export type TourBookingStatus = 'pending' | 'confirmed' | 'checkedin' | 'cancelled' | 'completed' | 'refunded' | 'no_show';
 export type TourCheckInStatus = 'not_checked_in' | 'checked_in' | 'checked_out' | 'no_show';
 export type BookingNotificationType = 
   | 'booking_confirmed' 

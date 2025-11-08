@@ -20,7 +20,6 @@ export class ReminderSchedulerService {
    */
   start(): void {
     if (this.isRunning) {
-      console.log('⏸️  Reminder scheduler already running');
       return;
     }
 

@@ -56,15 +56,30 @@ export const validateProperty = (req: AuthenticatedRequest, res: Response, next:
     errors.push('Property category is required');
   }
 
-  // Validate pricing
-  if (!data.pricePerNight || data.pricePerNight <= 0) {
-    errors.push('Price per night must be greater than 0');
-  } else if (data.pricePerNight > 10000) {
-    errors.push('Price per night seems too high (max: $10,000)');
+  // Validate pricing type
+  if (!data.pricingType) {
+    errors.push('Pricing type is required (night or month)');
+  } else if (!['night', 'month'].includes(data.pricingType)) {
+    errors.push('Pricing type must be either "night" or "month"');
   }
 
-  if (data.pricePerTwoNights && data.pricePerTwoNights <= 0) {
-    errors.push('Price per two nights must be greater than 0 if provided');
+  // Validate pricing based on pricing type
+  if (data.pricingType === 'night') {
+    if (!data.pricePerNight || data.pricePerNight <= 0) {
+      errors.push('Price per night must be greater than 0 when pricing type is "night"');
+    } else if (data.pricePerNight > 10000) {
+      errors.push('Price per night seems too high (max: $10,000)');
+    }
+
+    if (data.pricePerTwoNights && data.pricePerTwoNights <= 0) {
+      errors.push('Price per two nights must be greater than 0 if provided');
+    }
+  } else if (data.pricingType === 'month') {
+    if (!data.pricePerMonth || data.pricePerMonth <= 0) {
+      errors.push('Price per month must be greater than 0 when pricing type is "month"');
+    } else if (data.pricePerMonth > 100000) {
+      errors.push('Price per month seems too high (max: $100,000)');
+    }
   }
 
   // Validate capacity
@@ -85,13 +100,16 @@ export const validateProperty = (req: AuthenticatedRequest, res: Response, next:
     errors.push('Features must be an array');
   }
 
-  // Validate availability dates
-  if (!data.availabilityDates || !data.availabilityDates.start || !data.availabilityDates.end) {
-    errors.push('Availability dates (start and end) are required');
+  // Validate availability dates (support both old and new formats)
+  const availStart = data.availabilityDates?.start || data.availableFrom;
+  const availEnd = data.availabilityDates?.end || data.availableTo;
+
+  if (!availStart || !availEnd) {
+    errors.push('Availability dates are required (availableFrom and availableTo, or availabilityDates.start and availabilityDates.end)');
   } else {
-    const startDate = new Date(data.availabilityDates.start);
-    const endDate = new Date(data.availabilityDates.end);
-    
+    const startDate = new Date(availStart);
+    const endDate = new Date(availEnd);
+
     if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
       errors.push('Invalid availability dates provided');
     } else if (startDate >= endDate) {
@@ -157,7 +175,7 @@ export const validateBookingUpdate = (req: AuthenticatedRequest, res: Response, 
 
   // Validate status if provided
   if (data.status) {
-    const validStatuses: BookingStatus[] = ['pending', 'confirmed', 'cancelled', 'completed', 'refunded'];
+    const validStatuses: BookingStatus[] = ['pending', 'confirmed', 'checkedin', 'checkout', 'cancelled', 'refunded'];
     if (!validStatuses.includes(data.status)) {
       errors.push(`Invalid booking status. Valid options: ${validStatuses.join(', ')}`);
     }

@@ -19,6 +19,8 @@ import kycReminderRoutes from './routes/kyc-reminder.routes'; // NEW
 import bookingCleanupRoutes from './routes/booking-cleanup.routes'; // NEW
 import agentCommissionRoutes from './routes/agent-commission.routes'; // NEW
 import bookingLeadsRoutes from './routes/booking-leads.routes'; // NEW - Booking leads/archive management
+import refundRoutes from './routes/refund.routes'; // NEW - Refund management
+import propertyAddressUnlockRoutes from './routes/property-address-unlock.routes'; // NEW - Property address unlock
 import { ReminderSchedulerService } from './services/reminder-scheduler.service'; // NEW
 import { BookingCleanupSchedulerService } from './services/booking-cleanup-scheduler.service'; // NEW
 import { StatusPollerService } from './services/status-poller.service';
@@ -117,6 +119,8 @@ app.use('/api', agentCommissionRoutes); // NEW: Agent commission and owner manag
 app.use('/api/admin/booking-leads', bookingLeadsRoutes); // NEW: Booking leads/archive management (admin only)
 app.use('/api/transactions', unifiedTransactionRoutes); // NEW: Unified transaction routes (all providers)
 app.use('/api/checkin', checkinRoutes); // NEW: Check-in/check-out routes
+app.use('/api/refunds', refundRoutes); // NEW: Refund management (cancellation & admin approval)
+app.use('/api/property-unlock', propertyAddressUnlockRoutes); // NEW: Property address unlock
 
 // Health check
 app.get('/health', (req, res) => {
@@ -163,6 +167,7 @@ process.on('SIGINT', gracefulShutdown);
 app.listen(config.port, () => {
   console.log(`Server running on port ${config.port} [${process.env.NODE_ENV || 'development'}]`);
   console.log(`XentriPay Base URL: ${config.xentripay.baseUrl}`);
+    console.log(`Pawapay Base URL: ${config.pawapay.baseUrl}`);
 });
 
 export default app;

@@ -31,8 +31,16 @@ router.put('/properties/:bookingId', validateBookingUpdate, bookingController.up
 // Search user's property bookings
 router.get('/properties', bookingController.searchPropertyBookings);
 
-// Cancel property booking
-router.patch('/properties/:bookingId/cancel', bookingController.cancelBooking);
+// Cancel property booking (guest only)
+router.patch('/properties/:bookingId/cancel', (req, res, next) => {
+  if (req.user?.userType && req.user.userType !== 'guest') {
+    return res.status(403).json({
+      success: false,
+      message: 'Only guests can cancel bookings'
+    });
+  }
+  next();
+}, bookingController.cancelBooking);
 
 // Check-in property booking (host only)
 router.patch('/properties/:bookingId/checkin', (req, res, next) => {
@@ -69,8 +77,16 @@ router.put('/tours/:bookingId', validateBookingUpdate, bookingController.updateT
 // Search user's tour bookings
 router.get('/tours', bookingController.searchTourBookings);
 
-// Cancel tour booking
-router.patch('/tours/:bookingId/cancel', bookingController.cancelBooking);
+// Cancel tour booking (guest only)
+router.patch('/tours/:bookingId/cancel', (req, res, next) => {
+  if (req.user?.userType && req.user.userType !== 'guest') {
+    return res.status(403).json({
+      success: false,
+      message: 'Only guests can cancel bookings'
+    });
+  }
+  next();
+}, bookingController.cancelBooking);
 
 // --- AGENT BOOKING ROUTES ---
 // Create booking on behalf of client (agent only)

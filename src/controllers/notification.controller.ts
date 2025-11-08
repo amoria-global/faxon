@@ -44,7 +44,7 @@ export const notificationController = {
         sortOrder = 'desc',
         page = 1,
         limit = 10,
-        source // 'escrow' | 'tour' | 'all'
+        source // 'tour' | 'all'
       } = req.query;
 
       const pageNum = parseInt(page as string, 10);

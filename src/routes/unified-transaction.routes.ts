@@ -3,6 +3,13 @@
 import { Router } from 'express';
 import { unifiedTransactionController } from '../controllers/unified-transaction.controller';
 import { authenticate } from '../middleware/auth.middleware';
+import {
+  authorizeOwnTransactions,
+  authorizeOwnWallet,
+  authorizeOwnWithdrawalMethods,
+  authorizeAdmin,
+  authorizeTransactionById
+} from '../middleware/transaction-auth.middleware';
 
 const router = Router();
 
@@ -82,16 +89,16 @@ router.post('/deposit', authenticate, (req, res) => unifiedTransactionController
 /**
  * @route GET /api/transactions/wallet/:userId
  * @desc Get user wallet balance and information
- * @access Public (add auth middleware as needed)
+ * @access Protected - User can only access their own wallet
  */
-router.get('/wallet/:userId', (req, res) => unifiedTransactionController.getUserWallet(req, res));
+router.get('/wallet/:userId', authenticate, authorizeOwnWallet, (req, res) => unifiedTransactionController.getUserWallet(req, res));
 
 /**
  * @route GET /api/transactions/wallet/:userId/history
  * @desc Get wallet transaction history
- * @access Public (add auth middleware as needed)
+ * @access Protected - User can only access their own wallet history
  */
-router.get('/wallet/:userId/history', (req, res) => unifiedTransactionController.getWalletHistory(req, res));
+router.get('/wallet/:userId/history', authenticate, authorizeOwnWallet, (req, res) => unifiedTransactionController.getWalletHistory(req, res));
 
 // ==================== WITHDRAWAL METHODS ====================
 
@@ -113,109 +120,109 @@ router.get('/withdrawal-methods/rwanda', (req, res) => unifiedTransactionControl
 /**
  * @route GET /api/transactions/withdrawal-methods/:userId
  * @desc Get user's saved withdrawal methods
- * @access Public (add auth middleware as needed)
+ * @access Protected - User can only access their own withdrawal methods
  */
-router.get('/withdrawal-methods/:userId', (req, res) => unifiedTransactionController.getWithdrawalMethods(req, res));
+router.get('/withdrawal-methods/:userId', authenticate, authorizeOwnWithdrawalMethods, (req, res) => unifiedTransactionController.getWithdrawalMethods(req, res));
 
 /**
  * @route POST /api/transactions/withdrawal-methods
  * @desc Add a new withdrawal method
- * @access Public (add auth middleware as needed)
+ * @access Protected - User can only add methods for themselves
  */
-router.post('/withdrawal-methods', (req, res) => unifiedTransactionController.addWithdrawalMethod(req, res));
+router.post('/withdrawal-methods', authenticate, authorizeOwnWithdrawalMethods, (req, res) => unifiedTransactionController.addWithdrawalMethod(req, res));
 
 /**
  * @route PUT /api/transactions/withdrawal-methods/:id
  * @desc Update withdrawal method
- * @access Public (add auth middleware as needed)
+ * @access Protected - User can only update their own methods
  */
-router.put('/withdrawal-methods/:id', (req, res) => unifiedTransactionController.updateWithdrawalMethod(req, res));
+router.put('/withdrawal-methods/:id', authenticate, authorizeOwnWithdrawalMethods, (req, res) => unifiedTransactionController.updateWithdrawalMethod(req, res));
 
 /**
  * @route DELETE /api/transactions/withdrawal-methods/:id
  * @desc Delete withdrawal method
- * @access Public (add auth middleware as needed)
+ * @access Protected - User can only delete their own methods
  */
-router.delete('/withdrawal-methods/:id', (req, res) => unifiedTransactionController.deleteWithdrawalMethod(req, res));
+router.delete('/withdrawal-methods/:id', authenticate, authorizeOwnWithdrawalMethods, (req, res) => unifiedTransactionController.deleteWithdrawalMethod(req, res));
 
 /**
  * @route PUT /api/transactions/withdrawal-methods/:id/set-default
  * @desc Set default withdrawal method
- * @access Public (add auth middleware as needed)
+ * @access Protected - User can only set default for their own methods
  */
-router.put('/withdrawal-methods/:id/set-default', (req, res) => unifiedTransactionController.setDefaultWithdrawalMethod(req, res));
+router.put('/withdrawal-methods/:id/set-default', authenticate, authorizeOwnWithdrawalMethods, (req, res) => unifiedTransactionController.setDefaultWithdrawalMethod(req, res));
 
 // ==================== ADMIN: WITHDRAWAL METHOD APPROVAL ====================
 
 /**
  * @route GET /api/transactions/withdrawal-methods/pending/all
  * @desc Get all pending withdrawal methods (admin only)
- * @access Admin
+ * @access Admin only
  */
-router.get('/withdrawal-methods/pending/all', (req, res) => unifiedTransactionController.getPendingWithdrawalMethods(req, res));
+router.get('/withdrawal-methods/pending/all', authenticate, authorizeAdmin, (req, res) => unifiedTransactionController.getPendingWithdrawalMethods(req, res));
 
 /**
  * @route POST /api/transactions/withdrawal-methods/:id/approve
  * @desc Approve a withdrawal method (admin only)
  * @body adminId - ID of admin approving the method
- * @access Admin
+ * @access Admin only
  */
-router.post('/withdrawal-methods/:id/approve', (req, res) => unifiedTransactionController.approveWithdrawalMethod(req, res));
+router.post('/withdrawal-methods/:id/approve', authenticate, authorizeAdmin, (req, res) => unifiedTransactionController.approveWithdrawalMethod(req, res));
 
 /**
  * @route POST /api/transactions/withdrawal-methods/:id/reject
  * @desc Reject a withdrawal method (admin only)
  * @body adminId - ID of admin rejecting the method
  * @body reason - Reason for rejection
- * @access Admin
+ * @access Admin only
  */
-router.post('/withdrawal-methods/:id/reject', (req, res) => unifiedTransactionController.rejectWithdrawalMethod(req, res));
+router.post('/withdrawal-methods/:id/reject', authenticate, authorizeAdmin, (req, res) => unifiedTransactionController.rejectWithdrawalMethod(req, res));
 
 // ==================== ACCOUNT INFORMATION ====================
 
 /**
  * @route GET /api/transactions/account/:userId
  * @desc Get user account information (wallet + withdrawal methods + basic info)
- * @access Public (add auth middleware as needed)
+ * @access Protected - User can only access their own account
  */
-router.get('/account/:userId', (req, res) => unifiedTransactionController.getAccountInfo(req, res));
+router.get('/account/:userId', authenticate, authorizeOwnWallet, (req, res) => unifiedTransactionController.getAccountInfo(req, res));
 
 // ==================== TRANSACTIONS ====================
 
 /**
  * @route GET /api/transactions/stats
  * @desc Get transaction statistics
- * @access Public (add auth middleware as needed)
+ * @access Protected - Shows stats for authenticated user only (or all if admin)
  */
-router.get('/stats', (req, res) => unifiedTransactionController.getTransactionStats(req, res));
+router.get('/stats', authenticate, authorizeOwnTransactions, (req, res) => unifiedTransactionController.getTransactionStats(req, res));
 
 /**
  * @route GET /api/transactions/user/:userId
  * @desc Get all transactions for a specific user
- * @access Public (add auth middleware as needed)
+ * @access Protected - User can only access their own transactions
  */
-router.get('/user/:userId', (req, res) => unifiedTransactionController.getTransactionsByUserId(req, res));
+router.get('/user/:userId', authenticate, authorizeOwnTransactions, (req, res) => unifiedTransactionController.getTransactionsByUserId(req, res));
 
 /**
  * @route GET /api/transactions/recipient/:recipientId
  * @desc Get all transactions for a specific recipient
- * @access Public (add auth middleware as needed)
+ * @access Protected - User can only access their own received transactions
  */
-router.get('/recipient/:recipientId', (req, res) => unifiedTransactionController.getTransactionsByRecipientId(req, res));
+router.get('/recipient/:recipientId', authenticate, authorizeOwnTransactions, (req, res) => unifiedTransactionController.getTransactionsByRecipientId(req, res));
 
 /**
  * @route GET /api/transactions/:id
  * @desc Get single transaction by ID
- * @access Public (add auth middleware as needed)
+ * @access Protected - User must be involved in the transaction
  */
-router.get('/:id', (req, res) => unifiedTransactionController.getTransactionById(req, res));
+router.get('/:id', authenticate, authorizeTransactionById, (req, res) => unifiedTransactionController.getTransactionById(req, res));
 
 /**
  * @route GET /api/transactions
  * @desc Get all transactions with optional filters
- * @access Public (add auth middleware as needed)
+ * @access Protected - Shows authenticated user's transactions only (or all if admin)
  */
-router.get('/', (req, res) => unifiedTransactionController.getAllTransactions(req, res));
+router.get('/', authenticate, (req, res) => unifiedTransactionController.getAllTransactions(req, res));
 
 // ==================== PROPERTY PAYMENT COLLECTION ====================
 

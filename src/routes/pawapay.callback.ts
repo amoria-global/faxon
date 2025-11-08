@@ -10,6 +10,7 @@ import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status'
 import { generateUniqueBookingCode } from '../utils/booking-code.utility';
 import smsService from '../services/sms.service';
 import { BookingCleanupService } from '../services/booking-cleanup.service';
+import config from '../config/config';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -110,13 +111,8 @@ router.post('/', logPawaPayRequest, validatePawaPayWebhook, async (req: Request,
       where: { reference: transactionId }
     });
 
-    // If transaction doesn't exist and we don't have userId, log warning and skip creation
+    // If transaction doesn't exist and we don't have userId, skip creation
     if (!existingTransaction && !extractedUserId) {
-      console.warn('[PAWAPAY_CALLBACK] ⚠️ Transaction not found and no userId in metadata - skipping creation', {
-        transactionId,
-        transactionType,
-        status: webhookData.status
-      });
       // Return success to PawaPay but don't create the transaction
       // The deposit initiation will create it with proper userId
       res.status(200).json({
@@ -224,7 +220,6 @@ async function handleFailedTransaction(
   const internalRef = transaction.bookingId || (transaction.metadata as any)?.internalReference;
 
   if (!internalRef) {
-    console.log('[PAWAPAY_CALLBACK] No internal reference found for failed transaction');
     return;
   }
 
@@ -642,8 +637,6 @@ async function handleDepositCompletion(
             );
 
             console.log(`[PAWAPAY_CALLBACK] ✅ Booking code generated and sent: ${bookingCode}`);
-          } else {
-            console.log(`[PAWAPAY_CALLBACK] Booking code already exists: ${booking.bookingCode}`);
           }
         } catch (codeError) {
           console.error('[PAWAPAY_CALLBACK] Failed to generate/send booking code:', codeError);
@@ -937,17 +930,18 @@ async function handleDepositCompletion(
           );
 
           console.log(`[PAWAPAY_CALLBACK] ✅ Tour booking code generated and sent: ${bookingCode}`);
-        } else {
-          console.log(`[PAWAPAY_CALLBACK] Tour booking code already exists: ${tourBooking.bookingCode}`);
         }
       } catch (codeError) {
         console.error('[PAWAPAY_CALLBACK] Failed to generate/send tour booking code:', codeError);
         // Don't fail the payment completion if booking code generation fails
       }
 
-      // Calculate platform fee (14%)
-      const platformFee = tourBooking.totalAmount * 0.14;
-      const guideEarning = tourBooking.totalAmount - platformFee;
+      // Calculate platform fee (16%) and guide earning (84%)
+      const platformFeePercentage = config.tourSplitRules.platform / 100; // 16%
+      const guideEarningPercentage = config.tourSplitRules.guide / 100;   // 84%
+
+      const platformFee = Math.round((tourBooking.totalAmount * platformFeePercentage) * 100) / 100;
+      const guideEarning = Math.round((tourBooking.totalAmount * guideEarningPercentage) * 100) / 100;
 
       // Create tour earnings record
       await prisma.tourEarnings.create({
@@ -976,6 +970,31 @@ async function handleDepositCompletion(
         platformFee,
         provider: 'PawaPay'
       });
+
+      // Send admin notification for tour payment completion
+      try {
+        const { adminNotifications } = await import('../utils/admin-notifications.js');
+        await adminNotifications.sendCompletedPaymentNotification({
+          transactionId: transaction.id,
+          bookingId: tourBooking.id,
+          user: {
+            id: tourBooking.userId,
+            email: tourBooking.user.email,
+            firstName: tourBooking.user.firstName || 'User',
+            lastName: tourBooking.user.lastName || ''
+          },
+          amount: tourBooking.totalAmount,
+          currency: tourBooking.currency,
+          paymentMethod: 'Mobile Money',
+          propertyOrTour: {
+            name: tourBooking.tour.title,
+            type: 'tour'
+          }
+        });
+      } catch (adminNotifError) {
+        console.error('[PAWAPAY_CALLBACK] Failed to send admin notification for tour payment:', adminNotifError);
+        // Don't fail the payment completion if admin notification fails
+      }
 
       // Send payment confirmation emails using EmailService
       console.log(`[PAWAPAY_CALLBACK] Sending tour booking payment confirmation emails for booking ${tourBooking.id}`);

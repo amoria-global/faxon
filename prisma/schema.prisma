@@ -117,6 +117,12 @@ model User {
   wishlists              Wishlist[]
   withdrawalMethods      WithdrawalMethod[]
   withdrawalRequests     WithdrawalRequest[]
+  propertyAddressUnlocks       PropertyAddressUnlock[]
+  dealCodes                    DealCode[]
+  dealCodeUsage                DealCodeUsage[]
+  addressUnlockRefunds         AddressUnlockRefund[]
+  duplicateUploads             DuplicateDetectionLog[]    @relation("DuplicateUploader")
+  duplicatesAsOriginalOwner    DuplicateDetectionLog[]    @relation("DuplicateOriginalOwner")
 
   @@map("users")
 }
@@ -232,50 +238,60 @@ model SmsLog {
 }
 
 model Property {
-  id                 Int               @id @default(autoincrement())
-  name               String
-  location           String
-  type               String
-  category           String
-  description        String?
-  pricePerNight      Float
-  pricePerTwoNights  Float?
-  beds               Int
-  baths              Int
-  maxGuests          Int
-  features           Json
-  images             Json
-  video3D            String?
-  availableFrom      DateTime?
-  availableTo        DateTime?
-  minStay            Int               @default(1)
-  maxStay            Int?
-  status             String            @default("pending")
-  isVerified         Boolean           @default(false)
-  isInstantBook      Boolean           @default(false)
-  views              Int               @default(0)
-  totalBookings      Int               @default(0)
-  averageRating      Float             @default(0)
-  reviewsCount       Int               @default(0)
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-  propertyAddress    String?
-  upiNumber          String?
-  agentId            Int?
-  commissionRate     Float?            @default(0.10)
-  hostId             Int?
-  agentCommissions   AgentCommission[]
-  blockedDates       BlockedDate[]
-  bookings           Booking[]
-  legacyHostEarnings HostEarning[]     @relation("LegacyPropertyEarnings")
-  ownerEarnings      OwnerEarning[]    @relation("PropertyEarnings")
-  ownerPayments      OwnerPayment[]
-  pricingRules       PricingRule[]
-  agent              User?             @relation("AgentProperties", fields: [agentId], references: [id])
-  host               User?             @relation("OwnedProperties", fields: [hostId], references: [id], onDelete: Cascade)
-  propertyViews      PropertyView[]    @relation("PropertyViews")
-  reviews            Review[]
-  wishlistedBy       Wishlist[]
+  id                     Int                     @id @default(autoincrement())
+  name                   String
+  location               String
+  type                   String
+  category               String
+  description            String?
+  pricingType            String                  @default("night")
+  pricePerNight          Float?
+  pricePerMonth          Float?
+  pricePerTwoNights      Float?
+  beds                   Int
+  baths                  Int
+  maxGuests              Int
+  features               Json
+  images                 Json
+  video3D                String?
+  availableFrom          DateTime?
+  availableTo            DateTime?
+  minStay                Int                     @default(1)
+  maxStay                Int?
+  status                 String                  @default("pending")
+  isVerified             Boolean                 @default(false)
+  isInstantBook          Boolean                 @default(false)
+  views                  Int                     @default(0)
+  totalBookings          Int                     @default(0)
+  averageRating          Float                   @default(0)
+  reviewsCount           Int                     @default(0)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  propertyAddress        String?
+  upiNumber              String?
+  coordinates            Json?
+  agentId                Int?
+  commissionRate         Float?                  @default(0.10)
+  hostId                 Int?
+  fullAddress            String?
+  hostPhone              String?
+  hostEmail              String?
+  preferredContactMethod String?
+  agentCommissions       AgentCommission[]
+  blockedDates           BlockedDate[]
+  bookings               Booking[]
+  legacyHostEarnings     HostEarning[]           @relation("LegacyPropertyEarnings")
+  ownerEarnings          OwnerEarning[]          @relation("PropertyEarnings")
+  ownerPayments          OwnerPayment[]
+  pricingRules           PricingRule[]
+  agent                  User?                   @relation("AgentProperties", fields: [agentId], references: [id])
+  host                   User?                   @relation("OwnedProperties", fields: [hostId], references: [id], onDelete: Cascade)
+  propertyViews          PropertyView[]          @relation("PropertyViews")
+  reviews                Review[]
+  wishlistedBy           Wishlist[]
+  addressUnlocks         PropertyAddressUnlock[]
+  dealCodes              DealCode[]
+  dealCodeUsage          DealCodeUsage[]
 
   @@index([hostId])
   @@index([agentId])
@@ -291,6 +307,9 @@ model Booking {
   checkOut                   DateTime
   guests                     Int
   totalPrice                 Float
+  pricingType                String?
+  nightsCount                Int?
+  monthsCount                Int?
   message                    String?
   status                     String            @default("pending")
   paymentStatus              String            @default("pending")
@@ -324,6 +343,24 @@ model Booking {
   propertyPaymentCollected   Boolean           @default(false)
   propertyPaymentCollectedAt DateTime?
   propertyPaymentCollectedBy Int?
+  refundRequested            Boolean           @default(false)
+  refundRequestedAt          DateTime?
+  refundRequestedBy          Int?
+  refundApproved             Boolean?
+  refundApprovedAt           DateTime?
+  refundApprovedBy           Int?
+  refundRejected             Boolean?
+  refundRejectedAt           DateTime?
+  refundRejectedBy           Int?
+  refundRejectionReason      String?
+  refundAmount               Float?
+  refundPlatformFee          Float?
+  refundChannel              String?
+  refundTransactionId        String?
+  refundCompletedAt          DateTime?
+  refundToWallet             Boolean           @default(true)
+  refundWalletCredited       Boolean           @default(false)
+  refundWalletCreditedAt     DateTime?
   agentCommissions           AgentCommission[]
   guest                      User              @relation("GuestBookings", fields: [guestId], references: [id], onDelete: Cascade)
   property                   Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
@@ -337,6 +374,8 @@ model Booking {
   @@index([guestId])
   @@index([status])
   @@index([paymentStatus])
+  @@index([refundRequested])
+  @@index([refundApproved])
   @@map("bookings")
 }
 
@@ -505,46 +544,65 @@ model TourSchedule {
 }
 
 model TourBooking {
-  id                   String         @id @default(cuid())
-  userId               Int
-  tourId               String
-  scheduleId           String
-  tourGuideId          Int
-  numberOfParticipants Int
-  participants         Json
-  specialRequests      String?
-  totalAmount          Float
-  currency             String         @default("USD")
-  status               String         @default("pending")
-  paymentStatus        String         @default("pending")
-  paymentId            String?
-  bookingCode          String?        @unique
-  checkInCode          String?
-  checkInValidated     Boolean        @default(false)
-  checkInValidatedAt   DateTime?
-  checkInStatus        String         @default("not_checked_in")
-  checkInTime          DateTime?
-  checkOutTime         DateTime?
-  refundAmount         Float?
-  refundReason         String?
-  guestNotes           String?
-  bookingDate          DateTime       @default(now())
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
-  distributionAttempts Int            @default(0)
-  distributionError    String?
-  walletDistributed    Boolean        @default(false)
-  walletDistributedAt  DateTime?
-  schedule             TourSchedule   @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-  tour                 Tour           @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  user                 User           @relation("GuestTourBookings", fields: [userId], references: [id], onDelete: Cascade)
-  earnings             TourEarnings[]
-  messages             TourMessage[]
-  reviews              TourReview[]
+  id                     String         @id @default(cuid())
+  userId                 Int
+  tourId                 String
+  scheduleId             String
+  tourGuideId            Int
+  numberOfParticipants   Int
+  participants           Json
+  specialRequests        String?
+  totalAmount            Float
+  currency               String         @default("USD")
+  status                 String         @default("pending")
+  paymentStatus          String         @default("pending")
+  paymentId              String?
+  bookingCode            String?        @unique
+  checkInCode            String?
+  checkInValidated       Boolean        @default(false)
+  checkInValidatedAt     DateTime?
+  checkInStatus          String         @default("not_checked_in")
+  checkInTime            DateTime?
+  checkOutTime           DateTime?
+  refundAmount           Float?
+  refundReason           String?
+  refundRequested        Boolean        @default(false)
+  refundRequestedAt      DateTime?
+  refundRequestedBy      Int?
+  refundApproved         Boolean?
+  refundApprovedAt       DateTime?
+  refundApprovedBy       Int?
+  refundRejected         Boolean?
+  refundRejectedAt       DateTime?
+  refundRejectedBy       Int?
+  refundRejectionReason  String?
+  refundPlatformFee      Float?
+  refundChannel          String?
+  refundTransactionId    String?
+  refundCompletedAt      DateTime?
+  refundToWallet         Boolean        @default(true)
+  refundWalletCredited   Boolean        @default(false)
+  refundWalletCreditedAt DateTime?
+  guestNotes             String?
+  bookingDate            DateTime       @default(now())
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  distributionAttempts   Int            @default(0)
+  distributionError      String?
+  walletDistributed      Boolean        @default(false)
+  walletDistributedAt    DateTime?
+  schedule               TourSchedule   @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  tour                   Tour           @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  user                   User           @relation("GuestTourBookings", fields: [userId], references: [id], onDelete: Cascade)
+  earnings               TourEarnings[]
+  messages               TourMessage[]
+  reviews                TourReview[]
 
   @@index([userId])
   @@index([tourId])
   @@index([scheduleId])
+  @@index([refundRequested])
+  @@index([refundApproved])
   @@index([tourGuideId])
   @@index([status])
   @@map("tour_bookings")
@@ -1485,4 +1543,124 @@ model TourBookingArchive {
   @@index([leadStatus])
   @@index([originalBookingId])
   @@map("tour_booking_archive")
+}
+
+model PropertyAddressUnlock {
+  id                      Int                   @id @default(autoincrement())
+  unlockId                String                @unique
+  propertyId              Int
+  userId                  Int
+  paymentMethod           String
+  paymentAmountRwf        Decimal               @db.Decimal(10, 2)
+  paymentAmountUsd        Decimal?              @db.Decimal(10, 2)
+  exchangeRate            Decimal               @db.Decimal(10, 4)
+  dealCodeId              Int?
+  transactionReference    String?               @unique
+  paymentStatus           String                @default("pending")
+  paymentProvider         String?
+  paymentUrl              String?               // XentriPay payment URL for card payments
+  unlockedAt              DateTime?
+  appreciationSubmitted   Boolean               @default(false)
+  appreciationLevel       String?
+  appreciationFeedback    String?
+  appreciationSubmittedAt DateTime?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @default(now()) @updatedAt
+  dealCode                DealCode?             @relation(fields: [dealCodeId], references: [id], onDelete: SetNull)
+  property                Property              @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  user                    User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dealCodeUsage           DealCodeUsage[]
+  refunds                 AddressUnlockRefund[]
+
+  @@unique([userId, propertyId])
+  @@index([unlockId])
+  @@index([propertyId])
+  @@index([userId, propertyId])
+  @@index([transactionReference])
+  @@index([paymentStatus])
+  @@map("property_address_unlocks")
+}
+
+model DealCode {
+  id               Int                     @id @default(autoincrement())
+  code             String                  @unique
+  userId           Int
+  sourcePropertyId Int
+  generatedAt      DateTime                @default(now())
+  expiresAt        DateTime
+  remainingUnlocks Int                     @default(5)
+  isActive         Boolean                 @default(true)
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @default(now()) @updatedAt
+  sourceProperty   Property                @relation(fields: [sourcePropertyId], references: [id], onDelete: Cascade)
+  user             User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  addressUnlocks   PropertyAddressUnlock[]
+  usage            DealCodeUsage[]
+
+  @@index([code])
+  @@index([userId, isActive])
+  @@index([expiresAt])
+  @@map("deal_codes")
+}
+
+model DealCodeUsage {
+  id         Int                   @id @default(autoincrement())
+  dealCodeId Int
+  unlockId   String
+  propertyId Int
+  userId     Int
+  usedAt     DateTime              @default(now())
+  dealCode   DealCode              @relation(fields: [dealCodeId], references: [id], onDelete: Cascade)
+  property   Property              @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  unlock     PropertyAddressUnlock @relation(fields: [unlockId], references: [unlockId], onDelete: Cascade)
+  user       User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([dealCodeId])
+  @@index([userId])
+  @@map("deal_code_usage")
+}
+
+model AddressUnlockRefund {
+  id              Int                   @id @default(autoincrement())
+  unlockId        String
+  userId          Int
+  refundAmountRwf Decimal               @db.Decimal(10, 2)
+  refundStatus    String                @default("pending")
+  refundMethod    String?
+  refundReference String?
+  requestedAt     DateTime              @default(now())
+  processedAt     DateTime?
+  createdAt       DateTime              @default(now())
+  unlock          PropertyAddressUnlock @relation(fields: [unlockId], references: [unlockId], onDelete: Cascade)
+  user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, refundStatus])
+  @@map("address_unlock_refunds")
+}
+
+model DuplicateDetectionLog {
+  id                 Int      @id @default(autoincrement())
+  entityType         String   // 'property' or 'tour'
+  entityId           String   // ID of the new entity being created
+  duplicateOfId      String   // ID of the existing duplicate entity
+  similarityScore    Decimal  @db.Decimal(5, 2) // Overall similarity score (0-100)
+  similarityDetails  Json     // JSON containing detailed similarity breakdown
+  uploaderId         Int      // User who uploaded the duplicate
+  originalOwnerId    Int?     // Owner of the original entity
+  status             String   @default("pending") // 'pending', 'reviewed', 'dismissed'
+  adminNotified      Boolean  @default(false)
+  uploaderNotified   Boolean  @default(false)
+  ownerNotified      Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  uploader      User  @relation("DuplicateUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+  originalOwner User? @relation("DuplicateOriginalOwner", fields: [originalOwnerId], references: [id], onDelete: Cascade)
+
+  @@index([entityType])
+  @@index([status])
+  @@index([createdAt])
+  @@index([uploaderId])
+  @@index([originalOwnerId])
+  @@map("duplicate_detection_logs")
 }

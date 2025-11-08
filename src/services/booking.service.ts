@@ -155,6 +155,21 @@ export class BookingService {
       throw new Error('Property is blocked for the selected dates');
     }
 
+    // Calculate nights/months count based on property pricing type
+    const pricingType = data.pricingType || property.pricingType || 'night';
+    let nightsCount: number | undefined;
+    let monthsCount: number | undefined;
+
+    if (pricingType === 'night') {
+      const timeDiff = checkOutDate.getTime() - checkInDate.getTime();
+      nightsCount = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    } else if (pricingType === 'month') {
+      // Calculate months between dates
+      const monthsDiff = (checkOutDate.getFullYear() - checkInDate.getFullYear()) * 12
+        + (checkOutDate.getMonth() - checkInDate.getMonth());
+      monthsCount = Math.max(1, monthsDiff);
+    }
+
     // Create booking
     const booking = await prisma.booking.create({
       data: {
@@ -164,6 +179,9 @@ export class BookingService {
         checkOut: checkOutDate,
         guests: data.guests,
         totalPrice,
+        pricingType,
+        nightsCount: data.nightsCount || nightsCount,
+        monthsCount: data.monthsCount || monthsCount,
         message: data.message,
         specialRequests: data.specialRequests,
         status: 'pending',
@@ -348,8 +366,10 @@ export class BookingService {
           // Remove blocked dates when booking is cancelled
           await this.removeBlockedDatesForBooking(bookingId);
 
-          // Send cancellation email if guest data is available
-          if (updatedBooking.guest) {
+          // NOTE: Cancellation emails are now handled by the refund service
+          // This ensures proper refund amount is communicated
+          // Legacy cancellation without refund request will still send basic email
+          if (updatedBooking.guest && !(updatedBooking as any).refundRequested) {
             await this.emailService.sendBookingCancellationEmail({
               user: {
                 firstName: updatedBooking.guest.firstName,
@@ -1143,12 +1163,12 @@ export class BookingService {
     ]);
 
     const totalBookings = propertyBookings.length + tourBookings.length;
-    const completedBookings = propertyBookings.filter(b => b.status === 'completed').length +
+    const completedBookings = propertyBookings.filter(b => b.status === 'checkout').length +
       tourBookings.filter(b => b.status === 'completed').length;
     const cancelledBookings = propertyBookings.filter(b => b.status === 'cancelled').length +
       tourBookings.filter(b => b.status === 'cancelled').length;
 
-    const totalSpent = propertyBookings.reduce((sum, b) => sum + (b.status === 'completed' ? b.totalPrice : 0), 0) +
+    const totalSpent = propertyBookings.reduce((sum, b) => sum + (b.status === 'checkout' ? b.totalPrice : 0), 0) +
       tourBookings.reduce((sum, b) => sum + (b.status === 'completed' ? b.totalAmount : 0), 0);
 
     const averageBookingValue = completedBookings > 0 ? totalSpent / completedBookings : 0;
@@ -1156,7 +1176,7 @@ export class BookingService {
     // Get favorite destinations
     const destinations: { [key: string]: number } = {};
     propertyBookings.forEach(b => {
-      if (b.status === 'completed') {
+      if (b.status === 'checkout') {
         destinations[b.property.location] = (destinations[b.property.location] || 0) + 1;
       }
     });
@@ -1208,6 +1228,7 @@ export class BookingService {
         name: true,
         location: true,
         pricePerNight: true,
+        pricePerMonth: true,
         averageRating: true,
         images: true,
         status: true
@@ -1253,7 +1274,7 @@ export class BookingService {
       itemDetails: {
         name: property.name,
         location: property.location,
-        price: property.pricePerNight,
+        price: property.pricePerNight ?? property.pricePerMonth ?? 0,
         rating: property.averageRating || 0,
         image: images?.exterior?.[0] || ''
       },
@@ -1324,6 +1345,7 @@ export class BookingService {
               name: true,
               location: true,
               pricePerNight: true,
+              pricePerMonth: true,
               averageRating: true,
               images: true,
               status: true
@@ -1350,7 +1372,7 @@ export class BookingService {
         itemDetails: {
           name: item.property.name,
           location: item.property.location,
-          price: item.property.pricePerNight,
+          price: item.property.pricePerNight ?? item.property.pricePerMonth ?? 0,
           rating: item.property.averageRating || 0,
           image: images?.exterior?.[0] || ''
         },
@@ -1410,6 +1432,7 @@ export class BookingService {
         property: {
           select: {
             pricePerNight: true,
+            pricePerMonth: true,
             status: true
           }
         }
@@ -1417,7 +1440,7 @@ export class BookingService {
     });
 
     const activeItems = wishlistItems.filter(item => item.property.status === 'active');
-    const totalValue = activeItems.reduce((sum, item) => sum + item.property.pricePerNight, 0);
+    const totalValue = activeItems.reduce((sum, item) => sum + (item.property.pricePerNight ?? item.property.pricePerMonth ?? 0), 0);
 
     return {
       totalItems: wishlistItems.length,
@@ -1455,7 +1478,9 @@ export class BookingService {
         name: booking.property.name,
         location: booking.property.location,
         images: JSON.parse(booking.property.images || '{}'),
+        pricingType: booking.property.pricingType || 'night',
         pricePerNight: booking.property.pricePerNight,
+        pricePerMonth: booking.property.pricePerMonth,
         hostName: `${booking.property.host.firstName} ${booking.property.host.lastName}`,
         hostEmail: booking.property.host.email,
         hostPhone: booking.property.host.phone
@@ -1472,6 +1497,9 @@ export class BookingService {
       checkOut: booking.checkOut.toISOString(),
       guests: booking.guests,
       nights,
+      pricingType: booking.pricingType,
+      nightsCount: booking.nightsCount,
+      monthsCount: booking.monthsCount,
       totalPrice: booking.totalPrice,
       status: booking.status as PropertyBookingStatus,
       paymentStatus: booking.paymentStatus,
