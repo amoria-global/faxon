@@ -293,15 +293,20 @@ export class PaymentDistributionService {
         };
       }
 
-      // Calculate platform fee (14%)
-      const platformFee = booking.totalAmount * 0.14;
-      const guideEarning = booking.totalAmount - platformFee;
+      // Calculate platform fee (16%) and guide earning (84%)
+      const platformFeePercentage = config.tourSplitRules.platform / 100; // 16%
+      const guideEarningPercentage = config.tourSplitRules.guide / 100;   // 84%
+
+      const platformFee = Math.round((booking.totalAmount * platformFeePercentage) * 100) / 100;
+      const guideEarning = Math.round((booking.totalAmount * guideEarningPercentage) * 100) / 100;
 
       logger.info('Calculated tour split amounts', 'PaymentDistributionService', {
         bookingId,
         totalAmount: booking.totalAmount,
         platformFee,
-        guideEarning
+        platformFeePercentage: `${config.tourSplitRules.platform}%`,
+        guideEarning,
+        guideEarningPercentage: `${config.tourSplitRules.guide}%`
       });
 
       const updates: any[] = [];
@@ -460,9 +465,9 @@ export class PaymentDistributionService {
   /**
    * Calculate split rules based on whether property has an agent
    * Uses configuration from config.defaultSplitRules
-   * - Platform: 16.67%
-   * - Agent: 4.38% (if exists, otherwise goes to host)
-   * - Host: 78.95% (or 83.33% if no agent)
+   * - Host: Always 78.95%
+   * - Agent: 4.39% (if exists)
+   * - Platform: 16.67% (or 21.06% if no agent - gets the agent's share)
    */
   private calculateSplitRules(hasAgent: boolean): { platform: number; agent: number; host: number } {
     const configRules = config.defaultSplitRules;
@@ -470,16 +475,16 @@ export class PaymentDistributionService {
     if (hasAgent) {
       // With agent: Use configured splits
       return {
-        platform: configRules.platform, // 16.67%
-        agent: configRules.agent,       // 4.38%
-        host: configRules.host          // 78.95%
+        host: configRules.host,          // 78.95%
+        agent: configRules.agent,        // 4.39%
+        platform: configRules.platform   // 16.67%
       };
     } else {
-      // Without agent: Platform stays same, agent portion goes to host
+      // Without agent: Host stays at 78.95%, agent portion goes to platform
       return {
-        platform: configRules.platform,              // 16.67%
-        agent: 0,                                    // 0%
-        host: configRules.host + configRules.agent  // 78.95% + 4.38% = 83.33%
+        host: configRules.host,                       // 78.95% (always)
+        agent: 0,                                     // 0%
+        platform: configRules.platform + configRules.agent  // 16.67% + 4.39% = 21.06%
       };
     }
   }

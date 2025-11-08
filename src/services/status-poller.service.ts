@@ -4,6 +4,7 @@ import { PawaPayService } from './pawapay.service';
 import { XentriPayService } from './xentripay.service';
 import { BrevoPaymentStatusMailingService } from '../utils/brevo.payment-status';
 import withdrawalNotificationService from './withdrawal-notification.service';
+import config from '../config/config';
 
 const prisma = new PrismaClient();
 const paymentEmailService = new BrevoPaymentStatusMailingService();
@@ -36,7 +37,6 @@ export class StatusPollerService {
    */
   startPolling() {
     if (this.isPolling) {
-      console.log('[STATUS_POLLER] Already polling');
       return;
     }
 
@@ -71,90 +71,23 @@ export class StatusPollerService {
    */
   private async pollAllTransactions() {
     try {
-      console.log('[STATUS_POLLER] Starting instant polling cycle...');
-
       const now = new Date();
       const minDate = new Date(now.getTime() - this.MAX_AGE_DAYS * 24 * 60 * 60 * 1000); // 30 days ago
       const recheckDate = new Date(now.getTime() - this.RECHECK_INTERVAL_MS); // 10 minutes ago
       const completedRecheckDate = new Date(now.getTime() - this.COMPLETED_RECHECK_MS); // 2 minutes ago
 
-      console.log(`[STATUS_POLLER] Checking all PENDING transactions (last ${this.MAX_AGE_DAYS} days)`);
-      console.log(`[STATUS_POLLER] Rechecking FAILED/PROCESSING transactions (last 10 minutes)`);
-      console.log(`[STATUS_POLLER] Rechecking COMPLETED transactions (last 2 minutes) for notifications/wallet updates`);
-
-      // Run all checks in parallel
+      // Run all checks in parallel (silently in background)
       await Promise.allSettled([
         this.pollPawaPayTransactions(minDate, recheckDate, completedRecheckDate),
         this.pollXentriPayTransactions(minDate, recheckDate, completedRecheckDate),
-        this.pollWithdrawalRequests()
+        this.pollWithdrawalRequests(),
+        this.pollUnlockPayments(minDate, recheckDate, completedRecheckDate)
       ]);
-
-      console.log('[STATUS_POLLER] ✅ Instant polling cycle complete');
 
     } catch (error: any) {
       console.error('[STATUS_POLLER] ❌ Polling error:', error);
     }
   }
-
-  /**
-   * DEPRECATED: Escrow system has been removed
-   * Poll Pesapal/Escrow transactions that are COMPLETED or FAILED (2 hours to 10 days old)
-   */
-  // private async pollCompletedAndFailedEscrowTransactions(minDate: Date, maxDate: Date) {
-  //   try {
-  //     console.log('[STATUS_POLLER] Checking completed/failed Pesapal transactions...');
-  //
-  //     const transactions = await prisma.escrowTransaction.findMany({
-  //       where: {
-  //         status: { in: ['HELD', 'FAILED'] }, // HELD = payment successful, FAILED = payment failed
-  //         externalId: { not: null },
-  //         createdAt: {
-  //           gte: minDate,
-  //           lte: maxDate
-  //         }
-  //       },
-  //       select: {
-  //         id: true,
-  //         reference: true,
-  //         externalId: true,
-  //         status: true,
-  //         createdAt: true,
-  //         statusCheckCount: true,
-  //         lastStatusCheck: true,
-  //         notificationCount: true,
-  //         notificationSentAt: true
-  //       },
-  //       take: 100
-  //     });
-  //
-  //     if (transactions.length === 0) {
-  //       console.log('[STATUS_POLLER] No completed/failed escrow transactions to check');
-  //       return;
-  //     }
-  //
-  //     console.log(`[STATUS_POLLER] Found ${transactions.length} completed/failed escrow transactions to process`);
-  //
-  //     let processed = 0;
-  //     let errors = 0;
-  //
-  //     for (const transaction of transactions) {
-  //       try {
-  //         await this.processEscrowTransactionForBooking(transaction);
-  //         processed++;
-  //       } catch (error: any) {
-  //         console.error(`[STATUS_POLLER] Failed to process escrow transaction ${transaction.reference}:`, error.message);
-  //         errors++;
-  //       }
-  //
-  //       await this.delay(500); // Rate limiting
-  //     }
-  //
-  //     console.log(`[STATUS_POLLER] ✅ Escrow: ${processed} processed, ${errors} errors`);
-  //
-  //   } catch (error: any) {
-  //     console.error('[STATUS_POLLER] ❌ Escrow polling error:', error);
-  //   }
-  // }
 
   /**
    * Poll PawaPay transactions - instant check for PENDING, recheck FAILED/PROCESSING every 10 mins, COMPLETED every 2 mins
@@ -164,7 +97,6 @@ export class StatusPollerService {
    */
   private async pollPawaPayTransactions(minDate: Date, recheckDate: Date, completedRecheckDate: Date) {
     try {
-      console.log('[STATUS_POLLER] Checking PawaPay transactions...');
 
       // 1. Check ALL PENDING transactions (instant, no age limit except minDate)
       const pendingTransactions = await prisma.transaction.findMany({
@@ -262,11 +194,8 @@ export class StatusPollerService {
 
       const totalCount = pendingTransactions.length + recheckTransactions.length + completedTransactions.length;
       if (totalCount === 0) {
-        console.log('[STATUS_POLLER] No PawaPay transactions to check');
         return;
       }
-
-      console.log(`[STATUS_POLLER] Found ${pendingTransactions.length} pending + ${recheckTransactions.length} recheck + ${completedTransactions.length} completed PawaPay transactions`);
 
       let polled = 0;
       let processed = 0;
@@ -389,7 +318,10 @@ export class StatusPollerService {
         await this.delay(300); // Rate limiting
       }
 
-      console.log(`[STATUS_POLLER] ✅ PawaPay: ${polled} polled/rechecked, ${processed} processed, ${errors} errors`);
+      // Silent polling - only log if there were errors
+      if (errors > 0) {
+        console.log(`[STATUS_POLLER] ❌ PawaPay: ${errors} errors`);
+      }
 
     } catch (error: any) {
       console.error('[STATUS_POLLER] ❌ PawaPay polling error:', error);
@@ -405,7 +337,6 @@ export class StatusPollerService {
    */
   private async pollXentriPayTransactions(minDate: Date, recheckDate: Date, completedRecheckDate: Date) {
     try {
-      console.log('[STATUS_POLLER] Checking XentriPay transactions...');
 
       // 1. Check ALL PENDING transactions (instant, no age limit except minDate)
       const pendingTransactions = await prisma.transaction.findMany({
@@ -503,11 +434,8 @@ export class StatusPollerService {
 
       const totalCount = pendingTransactions.length + recheckTransactions.length + completedTransactions.length;
       if (totalCount === 0) {
-        console.log('[STATUS_POLLER] No XentriPay transactions to check');
         return;
       }
-
-      console.log(`[STATUS_POLLER] Found ${pendingTransactions.length} pending + ${recheckTransactions.length} recheck + ${completedTransactions.length} completed XentriPay transactions`);
 
       let polled = 0;
       let processed = 0;
@@ -557,7 +485,10 @@ export class StatusPollerService {
         await this.delay(300); // Rate limiting
       }
 
-      console.log(`[STATUS_POLLER] ✅ XentriPay: ${polled} polled/rechecked, ${processed} processed, ${errors} errors`);
+      // Silent polling - only log if there were errors
+      if (errors > 0) {
+        console.log(`[STATUS_POLLER] ❌ XentriPay: ${errors} errors`);
+      }
 
     } catch (error: any) {
       console.error('[STATUS_POLLER] ❌ XentriPay polling error:', error);
@@ -569,7 +500,6 @@ export class StatusPollerService {
    */
   private async pollXentriPayTransactionStatus(transaction: any): Promise<void> {
     try {
-      console.log(`[STATUS_POLLER] Polling XentriPay status for ${transaction.reference} (${transaction.transactionType})`);
 
       // Update status check tracking
       await prisma.transaction.update({
@@ -681,63 +611,10 @@ export class StatusPollerService {
   }
 
   /**
-   * DEPRECATED: Escrow system has been removed
-   * Process escrow transaction (Pesapal) and update booking status
-   */
-  // private async processEscrowTransactionForBooking(transaction: any): Promise<void> {
-  //   try {
-  //     console.log(`[STATUS_POLLER] Processing escrow transaction ${transaction.reference} (status: ${transaction.status})`);
-  //
-  //     // Update status check tracking
-  //     await prisma.escrowTransaction.update({
-  //       where: { id: transaction.id },
-  //       data: {
-  //         statusCheckCount: { increment: 1 },
-  //         lastStatusCheck: new Date()
-  //       }
-  //     });
-  //
-  //     // Find related booking
-  //     const booking = await prisma.booking.findFirst({
-  //       where: { transactionId: transaction.reference },
-  //       include: {
-  //         property: {
-  //           include: {
-  //             host: true,
-  //             agent: true
-  //           }
-  //         },
-  //         guest: true
-  //       }
-  //     });
-  //
-  //     if (!booking) {
-  //       console.log(`[STATUS_POLLER] No booking found for transaction ${transaction.reference}`);
-  //       return;
-  //     }
-  //
-  //     console.log(`[STATUS_POLLER] Found booking ${booking.id} for transaction ${transaction.reference}`);
-  //
-  //     if (transaction.status === 'HELD') {
-  //       // Payment successful
-  //       await this.handleSuccessfulPayment('ESCROW', transaction.id, booking);
-  //     } else if (transaction.status === 'FAILED') {
-  //       // Payment failed
-  //       await this.handleFailedPayment('ESCROW', transaction.id, booking);
-  //     }
-  //
-  //   } catch (error: any) {
-  //     console.error(`[STATUS_POLLER] Error processing escrow transaction:`, error);
-  //     throw error;
-  //   }
-  // }
-
-  /**
    * Process PawaPay transaction and update booking status
    */
   private async processPawaPayTransactionForBooking(transaction: any): Promise<void> {
-    try {
-      console.log(`[STATUS_POLLER] Processing PawaPay transaction ${transaction.reference} (status: ${transaction.status})`);
+    try{
 
       // Update status check tracking
       await prisma.transaction.update({
@@ -751,7 +628,6 @@ export class StatusPollerService {
       const internalRef = transaction.bookingId || (transaction.metadata as any)?.internalReference;
 
       if (!internalRef) {
-        console.log(`[STATUS_POLLER] No internal reference found for PawaPay transaction ${transaction.reference}`);
         return;
       }
 
@@ -770,8 +646,6 @@ export class StatusPollerService {
       });
 
       if (booking) {
-        console.log(`[STATUS_POLLER] Found property booking ${booking.id}`);
-
         if (transaction.status === 'COMPLETED') {
           await this.handleSuccessfulPayment('PAWAPAY', transaction.id, booking);
         } else if (transaction.status === 'FAILED') {
@@ -791,8 +665,6 @@ export class StatusPollerService {
       });
 
       if (tourBooking) {
-        console.log(`[STATUS_POLLER] Found tour booking ${tourBooking.id}`);
-
         if (transaction.status === 'COMPLETED') {
           await this.handleSuccessfulTourPayment('PAWAPAY', transaction.id, tourBooking);
         } else if (transaction.status === 'FAILED') {
@@ -801,7 +673,7 @@ export class StatusPollerService {
         return;
       }
 
-      console.log(`[STATUS_POLLER] No booking found for internal reference ${internalRef}`);
+      // Silent - no booking found
 
     } catch (error: any) {
       console.error(`[STATUS_POLLER] Error processing PawaPay transaction:`, error);
@@ -814,7 +686,6 @@ export class StatusPollerService {
    */
   private async processXentriPayDepositForBooking(transaction: any): Promise<void> {
     try {
-      console.log(`[STATUS_POLLER] Processing XentriPay deposit ${transaction.reference} (status: ${transaction.status})`);
 
       // Update status check tracking
       await prisma.transaction.update({
@@ -828,7 +699,6 @@ export class StatusPollerService {
       const internalRef = transaction.bookingId || (transaction.metadata as any)?.internalReference;
 
       if (!internalRef) {
-        console.log(`[STATUS_POLLER] No internal reference found for XentriPay transaction ${transaction.reference}`);
         return;
       }
 
@@ -847,8 +717,6 @@ export class StatusPollerService {
       });
 
       if (booking) {
-        console.log(`[STATUS_POLLER] Found property booking ${booking.id}`);
-
         if (transaction.status === 'COMPLETED') {
           await this.handleSuccessfulPayment('XENTRIPAY', transaction.id, booking);
         } else if (transaction.status === 'FAILED') {
@@ -868,8 +736,6 @@ export class StatusPollerService {
       });
 
       if (tourBooking) {
-        console.log(`[STATUS_POLLER] Found tour booking ${tourBooking.id}`);
-
         if (transaction.status === 'COMPLETED') {
           await this.handleSuccessfulTourPayment('XENTRIPAY', transaction.id, tourBooking);
         } else if (transaction.status === 'FAILED') {
@@ -878,7 +744,7 @@ export class StatusPollerService {
         return;
       }
 
-      console.log(`[STATUS_POLLER] No booking found for internal reference ${internalRef}`);
+      // Silent - no booking found
 
     } catch (error: any) {
       console.error(`[STATUS_POLLER] Error processing XentriPay deposit:`, error);
@@ -892,7 +758,6 @@ export class StatusPollerService {
    */
   private async processXentriPayPayout(transaction: any): Promise<void> {
     try {
-      console.log(`[STATUS_POLLER] Processing XentriPay payout ${transaction.reference} (status: ${transaction.status})`);
 
       // Update status check tracking
       await prisma.transaction.update({
@@ -944,7 +809,6 @@ export class StatusPollerService {
    */
   async pollWithdrawalRequests(): Promise<void> {
     try {
-      console.log('[STATUS_POLLER] Checking withdrawal requests (instant for PENDING/APPROVED)...');
 
       const now = new Date();
       const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -978,7 +842,9 @@ export class StatusPollerService {
         take: 100
       });
 
-      console.log(`[STATUS_POLLER] Found ${activeWithdrawals.length} withdrawal requests to process (PENDING/APPROVED/FAILED)`);
+      if (activeWithdrawals.length === 0) {
+        return;
+      }
 
       let pendingCount = 0;
       let approvedCount = 0;
@@ -991,8 +857,7 @@ export class StatusPollerService {
         try {
           if (withdrawal.status === 'PENDING') {
             pendingCount++;
-            // PENDING withdrawals await admin approval - just log them
-            console.log(`[STATUS_POLLER] Withdrawal ${withdrawal.reference} is PENDING admin approval`);
+            // PENDING withdrawals await admin approval - silent
 
           } else if (withdrawal.status === 'APPROVED') {
             approvedCount++;
@@ -1059,8 +924,6 @@ export class StatusPollerService {
               });
 
               refundedCount++;
-            } else {
-              console.log(`[STATUS_POLLER] Withdrawal ${withdrawal.reference} already refunded - skipping`);
             }
           }
 
@@ -1070,15 +933,14 @@ export class StatusPollerService {
         }
       }
 
-      console.log('[STATUS_POLLER] ✅ Withdrawal polling complete:', {
-        total: activeWithdrawals.length,
-        pending: pendingCount,
-        approved: approvedCount,
-        failed: failedCount,
-        expired: expiredCount,
-        processed: processedCount,
-        refunded: refundedCount
-      });
+      // Silent polling - only log if there were actions taken
+      if (processedCount > 0 || refundedCount > 0 || expiredCount > 0) {
+        console.log('[STATUS_POLLER] ✅ Withdrawal polling:', {
+          processed: processedCount,
+          refunded: refundedCount,
+          expired: expiredCount
+        });
+      }
 
     } catch (error: any) {
       console.error('[STATUS_POLLER] ❌ Withdrawal polling error:', error);
@@ -1160,7 +1022,6 @@ export class StatusPollerService {
    */
   private async checkWithdrawalStatusFromProvider(withdrawal: any): Promise<void> {
     try {
-      console.log(`[STATUS_POLLER] Checking withdrawal ${withdrawal.reference} status from provider`);
 
       // Check status from XentriPay using withdrawal reference
       // Note: If duplicate references exist, XentriPay may return multiple results
@@ -1311,7 +1172,6 @@ export class StatusPollerService {
    */
   private async checkWithdrawalPaymentStatus(payment: any): Promise<void> {
     try {
-      console.log(`[STATUS_POLLER] Checking withdrawal payment status: ${payment.reference}`);
 
       const metadata = payment.metadata as any;
       const withdrawalReference = metadata?.withdrawalReference;
@@ -1667,19 +1527,17 @@ export class StatusPollerService {
    * Works for ALL providers: PAWAPAY, XENTRIPAY, etc.
    */
   private async handleSuccessfulPayment(
-    provider: 'ESCROW' | 'PAWAPAY' | 'XENTRIPAY',
+    provider: 'PAWAPAY' | 'XENTRIPAY',
     transactionId: string,
     booking: any
   ): Promise<void> {
     try {
-      console.log(`[STATUS_POLLER] Handling successful payment for booking ${booking.id} (provider: ${provider})`);
 
       const isAlreadyConfirmed = booking.status === 'confirmed' && booking.paymentStatus === 'completed';
       const shouldSendNotification = await this.shouldSendNotification(provider, transactionId);
 
       // Skip if already confirmed AND notifications already sent
       if (isAlreadyConfirmed && !shouldSendNotification) {
-        console.log(`[STATUS_POLLER] Booking ${booking.id} already confirmed and notifications sent - skipping`);
         return;
       }
 
@@ -1693,8 +1551,6 @@ export class StatusPollerService {
           }
         });
         console.log(`[STATUS_POLLER] ✅ Booking ${booking.id} marked as confirmed`);
-      } else {
-        console.log(`[STATUS_POLLER] Booking ${booking.id} already confirmed, skipping status update`);
       }
 
       // Fund wallets for host, agent (if exists), and platform
@@ -1711,8 +1567,6 @@ export class StatusPollerService {
       // Send notifications (if not already sent)
       if (shouldSendNotification) {
         await this.sendSuccessfulPaymentNotifications(provider, transactionId, booking);
-      } else {
-        console.log(`[STATUS_POLLER] Notifications already sent for transaction ${transactionId}`);
       }
 
     } catch (error: any) {
@@ -1725,18 +1579,16 @@ export class StatusPollerService {
    * Handle failed payment - mark booking as failed and send notifications
    */
   private async handleFailedPayment(
-    provider: 'ESCROW' | 'PAWAPAY' | 'XENTRIPAY',
+    provider: 'PAWAPAY' | 'XENTRIPAY',
     transactionId: string,
     booking: any,
     failureReason?: string
   ): Promise<void> {
     try {
-      console.log(`[STATUS_POLLER] Handling failed payment for booking ${booking.id} (provider: ${provider})`);
 
       // Check if booking is already failed
       if (booking.status === 'failed' && booking.paymentStatus === 'failed') {
         // Only skip if both payment and booking are failed
-        console.log(`[STATUS_POLLER] Booking ${booking.id} already marked as failed - skipping notification`);
         return; // Don't send notification if already failed
       }
 
@@ -1755,8 +1607,6 @@ export class StatusPollerService {
       const shouldNotify = await this.shouldSendNotification(provider, transactionId);
       if (shouldNotify) {
         await this.sendFailedPaymentNotifications(provider, transactionId, booking, failureReason);
-      } else {
-        console.log(`[STATUS_POLLER] Notifications already sent for failed transaction ${transactionId}`);
       }
 
     } catch (error: any) {
@@ -1775,14 +1625,12 @@ export class StatusPollerService {
     tourBooking: any
   ): Promise<void> {
     try {
-      console.log(`[STATUS_POLLER] Handling successful tour payment for booking ${tourBooking.id}`);
 
       const isAlreadyConfirmed = tourBooking.status === 'confirmed' && tourBooking.paymentStatus === 'completed';
       const shouldSendNotification = await this.shouldSendNotification(provider, transactionId);
 
       // Skip if already confirmed AND notifications already sent
       if (isAlreadyConfirmed && !shouldSendNotification) {
-        console.log(`[STATUS_POLLER] Tour booking ${tourBooking.id} already confirmed and notifications sent - skipping`);
         return;
       }
 
@@ -1796,8 +1644,6 @@ export class StatusPollerService {
           }
         });
         console.log(`[STATUS_POLLER] ✅ Tour booking ${tourBooking.id} marked as confirmed`);
-      } else {
-        console.log(`[STATUS_POLLER] Tour booking ${tourBooking.id} already confirmed, skipping status update`);
       }
 
       // Fund wallets for tour guide and platform
@@ -1814,8 +1660,6 @@ export class StatusPollerService {
       // Send notifications (if not already sent)
       if (shouldSendNotification) {
         await this.sendSuccessfulTourPaymentNotifications(provider, transactionId, tourBooking);
-      } else {
-        console.log(`[STATUS_POLLER] Notifications already sent for transaction ${transactionId}`);
       }
 
     } catch (error: any) {
@@ -1834,10 +1678,8 @@ export class StatusPollerService {
     failureReason?: string
   ): Promise<void> {
     try {
-      console.log(`[STATUS_POLLER] Handling failed tour payment for booking ${tourBooking.id}`);
 
       if (tourBooking.status === 'failed' && tourBooking.paymentStatus === 'failed') {
-        console.log(`[STATUS_POLLER] Tour booking ${tourBooking.id} already marked as failed - skipping`);
         return;
       }
 
@@ -1863,7 +1705,7 @@ export class StatusPollerService {
   /**
    * Check if we should send notification (prevent duplicates)
    */
-  private async shouldSendNotification(provider: 'ESCROW' | 'PAWAPAY' | 'XENTRIPAY', transactionId: string): Promise<boolean> {
+  private async shouldSendNotification(provider: 'PAWAPAY' | 'XENTRIPAY', transactionId: string): Promise<boolean> {
     try {
       let transaction: any;
 
@@ -1903,7 +1745,7 @@ export class StatusPollerService {
   /**
    * Mark notification as sent
    */
-  private async markNotificationSent(provider: 'ESCROW' | 'PAWAPAY' | 'XENTRIPAY', transactionId: string): Promise<void> {
+  private async markNotificationSent(provider: 'PAWAPAY' | 'XENTRIPAY', transactionId: string): Promise<void> {
     try {
       if (provider === 'PAWAPAY' || provider === 'XENTRIPAY') {
         await prisma.transaction.update({
@@ -1926,7 +1768,7 @@ export class StatusPollerService {
    * Send successful payment notifications to all parties
    */
   private async sendSuccessfulPaymentNotifications(
-    provider: 'ESCROW' | 'PAWAPAY' | 'XENTRIPAY',
+    provider: 'PAWAPAY' | 'XENTRIPAY',
     transactionId: string,
     booking: any
   ): Promise<void> {
@@ -2057,7 +1899,7 @@ export class StatusPollerService {
    * Send failed payment notifications
    */
   private async sendFailedPaymentNotifications(
-    provider: 'ESCROW' | 'PAWAPAY' | 'XENTRIPAY',
+    provider: 'PAWAPAY' | 'XENTRIPAY',
     transactionId: string,
     booking: any,
     failureReason?: string
@@ -2357,20 +2199,25 @@ export class StatusPollerService {
 
   /**
    * Calculate split rules based on whether agent exists
+   * - Host: Always 78.95%
+   * - Agent: 4.39% (if exists)
+   * - Platform: 16.67% (or 21.06% if no agent - gets the agent's share)
    */
   private calculateSplitRules(hasAgent: boolean): { platform: number; agent: number; host: number } {
-    // Default split: Platform 14%, Agent 6%, Host 80%
+    const configRules = config.defaultSplitRules;
+
     if (hasAgent) {
       return {
-        platform: 14,
-        agent: 6,
-        host: 80
+        host: configRules.host,          // 78.95%
+        agent: configRules.agent,        // 4.39%
+        platform: configRules.platform   // 16.67%
       };
     } else {
+      // Without agent: Host stays at 78.95%, agent portion goes to platform
       return {
-        platform: 14,
-        agent: 0,
-        host: 86 // Host gets agent's share too
+        host: configRules.host,                       // 78.95% (always)
+        agent: 0,                                     // 0%
+        platform: configRules.platform + configRules.agent  // 16.67% + 4.39% = 21.06%
       };
     }
   }
@@ -2475,7 +2322,6 @@ export class StatusPollerService {
     try {
       // Check if already funded
       if (booking.walletDistributed) {
-        console.log(`[STATUS_POLLER] Wallets already funded for booking ${booking.id}`);
         return;
       }
 
@@ -2574,15 +2420,17 @@ export class StatusPollerService {
     try {
       // Check if already funded
       if (tourBooking.walletDistributed) {
-        console.log(`[STATUS_POLLER] Wallets already funded for tour booking ${tourBooking.id}`);
         return;
       }
 
       console.log(`[STATUS_POLLER] Funding wallets for tour booking ${tourBooking.id}`);
 
-      // For tours, simple split: Platform 14%, Guide 86%
-      const platformFee = Math.round((tourBooking.totalAmount * 14 / 100) * 100) / 100;
-      const guideAmount = tourBooking.totalAmount - platformFee;
+      // For tours, simple split: Platform 16%, Guide 84%
+      const platformFeePercentage = config.tourSplitRules.platform; // 16%
+      const guidePercentage = config.tourSplitRules.guide;          // 84%
+
+      const platformFee = Math.round((tourBooking.totalAmount * platformFeePercentage / 100) * 100) / 100;
+      const guideAmount = Math.round((tourBooking.totalAmount * guidePercentage / 100) * 100) / 100;
 
       // Create tour earnings record (pending until check-in)
       if (tourBooking.tour?.tourGuide) {
@@ -2632,6 +2480,149 @@ export class StatusPollerService {
     } catch (error: any) {
       console.error(`[STATUS_POLLER] Error funding wallets for tour:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Poll unlock payments - check PawaPay deposit status for property address unlocks
+   */
+  private async pollUnlockPayments(minDate: Date, recheckDate: Date, completedRecheckDate: Date) {
+    try {
+      // Find all unlock payments that need status check
+      const pendingUnlocks = await prisma.propertyAddressUnlock.findMany({
+        where: {
+          paymentStatus: {
+            in: ['PENDING', 'SUBMITTED', 'ACCEPTED']
+          },
+          transactionReference: {
+            not: null
+          },
+          createdAt: {
+            gte: minDate
+          }
+        },
+        include: {
+          property: true,
+          user: true
+        },
+        orderBy: {
+          createdAt: 'desc'
+        }
+      });
+
+      if (pendingUnlocks.length === 0) {
+        return;
+      }
+
+      console.log(`[STATUS_POLLER] 🔍 Checking ${pendingUnlocks.length} pending unlock payments`);
+
+      // Check each unlock payment status
+      for (const unlock of pendingUnlocks) {
+        try {
+          if (!unlock.transactionReference || unlock.transactionReference === 'DEAL_CODE') {
+            continue;
+          }
+
+          // Determine payment provider type and check status accordingly
+          let paymentStatus: string;
+          const isXentriPay = unlock.paymentProvider?.includes('XENTRIPAY');
+
+          if (isXentriPay) {
+            // Check payment status with XentriPay for card payments
+            const xentripayStatus = await this.xentriPayService.getCollectionStatus(unlock.transactionReference);
+            // Map XentriPay status to standard status: SUCCESS -> COMPLETED, PENDING -> PENDING, FAILED -> FAILED
+            paymentStatus = xentripayStatus.status === 'SUCCESS' ? 'COMPLETED' : xentripayStatus.status;
+          } else {
+            // Check payment status with PawaPay for mobile money payments
+            const depositStatus = await this.pawaPayService.getDepositStatus(unlock.transactionReference);
+            paymentStatus = depositStatus.status || 'PENDING';
+          }
+
+          // Update unlock payment status
+          if (paymentStatus !== unlock.paymentStatus) {
+            await prisma.propertyAddressUnlock.update({
+              where: { unlockId: unlock.unlockId },
+              data: {
+                paymentStatus: paymentStatus,
+                unlockedAt: paymentStatus === 'COMPLETED' ? new Date() : unlock.unlockedAt
+              }
+            });
+
+            console.log(`[STATUS_POLLER] ✅ Unlock payment ${unlock.unlockId} (${isXentriPay ? 'XentriPay' : 'PawaPay'}) status updated: ${unlock.paymentStatus} → ${paymentStatus}`);
+
+            // Send notification if completed
+            if (paymentStatus === 'COMPLETED') {
+              console.log(`[STATUS_POLLER] 🎉 Property ${unlock.propertyId} unlocked for user ${unlock.userId}`);
+              // TODO: Send email notification to user
+            } else if (paymentStatus === 'FAILED') {
+              console.log(`[STATUS_POLLER] ❌ Unlock payment ${unlock.unlockId} failed`);
+              // TODO: Send failure notification to user
+            }
+          }
+        } catch (error: any) {
+          // Silently handle errors - payment might not exist yet or provider is unavailable
+        }
+      }
+
+      // Check for failed/processing unlocks that need rechecking
+      const recheckUnlocks = await prisma.propertyAddressUnlock.findMany({
+        where: {
+          paymentStatus: {
+            in: ['FAILED', 'PROCESSING']
+          },
+          transactionReference: {
+            not: null
+          },
+          updatedAt: {
+            lte: recheckDate
+          },
+          createdAt: {
+            gte: minDate
+          }
+        }
+      });
+
+      if (recheckUnlocks.length > 0) {
+        console.log(`[STATUS_POLLER] 🔄 Rechecking ${recheckUnlocks.length} failed/processing unlock payments`);
+
+        for (const unlock of recheckUnlocks) {
+          try {
+            if (!unlock.transactionReference || unlock.transactionReference === 'DEAL_CODE') {
+              continue;
+            }
+
+            // Determine payment provider and check status
+            let paymentStatus: string;
+            const isXentriPay = unlock.paymentProvider?.includes('XENTRIPAY');
+
+            if (isXentriPay) {
+              const xentripayStatus = await this.xentriPayService.getCollectionStatus(unlock.transactionReference);
+              paymentStatus = xentripayStatus.status === 'SUCCESS' ? 'COMPLETED' : xentripayStatus.status;
+            } else {
+              const depositStatus = await this.pawaPayService.getDepositStatus(unlock.transactionReference);
+              paymentStatus = depositStatus.status;
+            }
+
+            await prisma.propertyAddressUnlock.update({
+              where: { unlockId: unlock.unlockId },
+              data: {
+                paymentStatus: paymentStatus,
+                unlockedAt: paymentStatus === 'COMPLETED' ? new Date() : unlock.unlockedAt,
+                updatedAt: new Date()
+              }
+            });
+
+            if (paymentStatus === 'COMPLETED') {
+              console.log(`[STATUS_POLLER] ✅ Previously failed unlock payment ${unlock.unlockId} (${isXentriPay ? 'XentriPay' : 'PawaPay'}) now completed!`);
+            }
+          } catch (error: any) {
+            // Silently handle errors - payment might not exist yet or provider is unavailable
+          }
+        }
+      }
+
+    } catch (error: any) {
+      console.error('[STATUS_POLLER] Error polling unlock payments:', error);
     }
   }
 }

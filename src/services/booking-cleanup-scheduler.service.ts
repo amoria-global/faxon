@@ -21,7 +21,6 @@ export class BookingCleanupSchedulerService {
    */
   start(): void {
     if (this.isRunning) {
-      console.log('⏸️  Booking cleanup scheduler already running');
       return;
     }
 

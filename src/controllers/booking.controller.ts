@@ -1,6 +1,7 @@
 //src/controllers/booking.controller.ts
 import { Request, Response } from 'express';
 import { BookingService } from '../services/booking.service';
+import { refundService } from '../services/refund.service';
 import {
   CreatePropertyBookingDto,
   UpdatePropertyBookingDto,
@@ -871,8 +872,9 @@ export class BookingController {
         return;
       }
 
-      // Update check-in validation
+      // Update check-in validation and change status to 'checkedin'
       const updatedBooking = await this.bookingService.updatePropertyBooking(bookingId, userId, {
+        status: 'checkedin',
         checkInValidated: true,
         checkInValidatedAt: new Date(),
         checkInValidatedBy: userId
@@ -934,12 +936,12 @@ export class BookingController {
         return;
       }
 
-      // Update check-out validation
+      // Update check-out validation and change status to 'checkout'
       const updatedBooking = await this.bookingService.updatePropertyBooking(bookingId, userId, {
         checkOutValidated: true,
         checkOutValidatedAt: new Date(),
         checkOutValidatedBy: userId,
-        status: 'completed'
+        status: 'checkout'
       } as any);
 
       res.json({
@@ -989,8 +991,9 @@ export class BookingController {
         return;
       }
 
-      // Update check-in status
+      // Update check-in status and change status to 'checkedin'
       const updatedBooking = await this.bookingService.updateTourBooking(bookingId, userId, {
+        status: 'checkedin',
         checkInStatus: 'checked_in'
       });
 
@@ -1101,22 +1104,20 @@ export class BookingController {
         return;
       }
 
-      let booking;
-      if (type === 'property') {
-        booking = await this.bookingService.updatePropertyBooking(bookingId, userId, { 
-          status: 'cancelled',
-          message: reason 
-        });
-      } else {
-        booking = await this.bookingService.updateTourBooking(bookingId, userId, { 
-          status: 'cancelled' 
-        });
-      }
-      
+      // Request refund directly (this handles cancellation, refund calculation, and admin notification)
+      const refundResult = await refundService.requestRefund({
+        bookingId,
+        bookingType: type as 'property' | 'tour',
+        requestedBy: userId,
+        reason
+      });
+
       res.json({
         success: true,
-        message: 'Booking cancelled successfully',
-        data: booking
+        message: refundResult.message,
+        data: {
+          cancellationCalculation: refundResult.cancellationCalc
+        }
       });
     } catch (error: any) {
       console.error('Error cancelling booking:', error);

@@ -184,7 +184,7 @@ export class BrevoSMSService {
         // Log OTP attempt in database with registered phone confirmation
         try {
           await prisma.$executeRaw`
-            INSERT INTO sms_logs (user_id, phone_number, message_type, status, metadata, created_at)
+            INSERT INTO sms_logs ("userId", "phoneNumber", "messageType", status, metadata, "createdAt")
             VALUES (${userId}, ${formattedPhone}, 'withdrawal_otp', 'sent', ${JSON.stringify({
               amount,
               currency,
@@ -228,7 +228,7 @@ export class BrevoSMSService {
         // Log failed SMS attempt
         try {
           await prisma.$executeRaw`
-            INSERT INTO sms_logs (user_id, phone_number, message_type, status, metadata, created_at)
+            INSERT INTO sms_logs ("userId", "phoneNumber", "messageType", status, metadata, "createdAt")
             VALUES (${userId}, ${formattedPhone}, 'withdrawal_otp', 'failed', ${JSON.stringify({
               amount,
               currency,

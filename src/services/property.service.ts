@@ -3,6 +3,9 @@ import { PrismaClient } from '@prisma/client';
 import { BrevoPropertyMailingService } from '../utils/brevo.property';
 import { EnhancedPropertyService } from './enhanced-property.service';
 import { config } from '../config/config';
+import { applyGuestPriceMarkupToObject } from '../utils/guest-price-markup.utility';
+import { findDuplicateProperties } from '../utils/duplicate-detection.utility';
+import { duplicateNotificationService } from './duplicate-notification.service';
 import {
   CreatePropertyDto,
   UpdatePropertyDto,
@@ -98,8 +101,23 @@ export class PropertyService {
   
   // --- PROPERTY CRUD OPERATIONS ---
   async createProperty(hostId: number, data: CreatePropertyDto): Promise<PropertyInfo> {
-    // Validate availability dates
-    if (new Date(data.availabilityDates.start) >= new Date(data.availabilityDates.end)) {
+    // Validate pricing type and ensure correct price field is provided
+    if (data.pricingType === 'night' && !data.pricePerNight) {
+      throw new Error('pricePerNight is required when pricingType is "night"');
+    }
+    if (data.pricingType === 'month' && !data.pricePerMonth) {
+      throw new Error('pricePerMonth is required when pricingType is "month"');
+    }
+
+    // Validate availability dates (support both old and new format)
+    const availStart = data.availabilityDates?.start || data.availableFrom;
+    const availEnd = data.availabilityDates?.end || data.availableTo;
+
+    if (!availStart || !availEnd) {
+      throw new Error('Availability dates are required');
+    }
+
+    if (new Date(availStart) >= new Date(availEnd)) {
       throw new Error('End date must be after start date');
     }
 
@@ -122,6 +140,87 @@ export class PropertyService {
       locationString = typeof data.location === 'string' ? data.location : '';
     }
 
+    // DUPLICATE DETECTION - Check against approved and pending properties only
+    const existingProperties = await prisma.property.findMany({
+      where: {
+        status: {
+          in: ['approved', 'pending'] // Only check against approved and pending, NOT rejected
+        }
+      },
+      select: {
+        id: true,
+        name: true,
+        propertyAddress: true,
+        location: true,
+        hostId: true,
+        status: true
+      }
+    });
+
+    const duplicates = findDuplicateProperties(
+      {
+        name: data.name,
+        propertyAddress: propertyAddress,
+        location: locationString,
+        hostId: hostId
+      },
+      existingProperties,
+      95 // 95% similarity threshold
+    );
+
+    if (duplicates.length > 0) {
+      // Log duplicates for admin review and notify
+      for (const duplicate of duplicates) {
+        const originalProperty = await prisma.property.findUnique({
+          where: { id: duplicate.propertyId },
+          select: { hostId: true, name: true }
+        });
+
+        // Create duplicate detection log
+        const logEntry = await prisma.duplicateDetectionLog.create({
+          data: {
+            entityType: 'property',
+            entityId: 'pending', // Will be updated after property is created if allowed
+            duplicateOfId: String(duplicate.propertyId),
+            similarityScore: duplicate.similarity.overallScore,
+            similarityDetails: JSON.parse(JSON.stringify(duplicate.similarity)),
+            uploaderId: hostId,
+            originalOwnerId: originalProperty?.hostId || null,
+            status: 'pending',
+            adminNotified: false,
+            uploaderNotified: false,
+            ownerNotified: false
+          }
+        });
+
+        // Send notifications asynchronously (don't block the response)
+        duplicateNotificationService.notifyDuplicateDetection({
+          entityType: 'property',
+          entityId: String(logEntry.id),
+          duplicateOfId: String(duplicate.propertyId),
+          uploaderId: hostId,
+          originalOwnerId: originalProperty?.hostId,
+          entityName: data.name,
+          duplicateEntityName: originalProperty?.name || 'Unknown',
+          similarityScore: duplicate.similarity.overallScore,
+          similarityReasons: duplicate.similarity.reasons
+        }).catch(err => {
+          console.error('Failed to send duplicate notifications:', err);
+        });
+      }
+
+      // Block property creation
+      const duplicateDetails = duplicates.map(d => ({
+        propertyId: d.propertyId,
+        score: d.similarity.overallScore,
+        reasons: d.similarity.reasons
+      }));
+
+      throw new Error(
+        `This property appears to be a duplicate. Similarity detected with existing ${duplicates.length} propert${duplicates.length > 1 ? 'ies' : 'y'}. Reasons: ${duplicateDetails[0].reasons.join(', ')}. Please contact support if you believe this is an error.`
+      );
+    }
+
     const property = await prisma.property.create({
       data: {
         hostId,
@@ -129,10 +228,14 @@ export class PropertyService {
         location: locationString,
         propertyAddress: propertyAddress,
         upiNumber: upiNumber,
+        coordinates: data.coordinates ? JSON.stringify(data.coordinates) : undefined,
         type: data.type,
         category: data.category,
-        pricePerNight: data.pricePerNight,
-        pricePerTwoNights: data.pricePerTwoNights,
+        pricingType: data.pricingType,
+        pricePerNight: data.pricePerNight ?? null,
+        pricePerMonth: data.pricePerMonth ?? null,
+        pricePerTwoNights: data.pricePerTwoNights ?? null,
+        minStay: data.minimumStay || 1,
         beds: data.beds,
         baths: data.baths,
         maxGuests: data.maxGuests,
@@ -140,8 +243,8 @@ export class PropertyService {
         description: data.description,
         images: JSON.stringify(data.images),
         video3D: data.video3D,
-        availableFrom: new Date(data.availabilityDates.start),
-        availableTo: new Date(data.availabilityDates.end),
+        availableFrom: new Date(availStart),
+        availableTo: new Date(availEnd),
         status: 'pending' // Default status for new properties
       },
       include: {
@@ -171,6 +274,29 @@ export class PropertyService {
     } catch (emailError) {
       console.error('Failed to send property submission email:', emailError);
       // Don't fail property creation if email fails
+    }
+
+    // Send admin notification for new property submission
+    try {
+      const { adminNotifications } = await import('../utils/admin-notifications.js');
+      await adminNotifications.sendPropertySubmissionNotification({
+        propertyId: property.id,
+        user: {
+          id: property.hostId,
+          email: property.host.email,
+          firstName: property.host.firstName || 'User',
+          lastName: property.host.lastName || ''
+        },
+        property: {
+          name: property.name,
+          location: property.location,
+          type: property.type
+        },
+        checkInDate: property.createdAt
+      });
+    } catch (adminNotifError) {
+      console.error('Failed to send admin notification for property submission:', adminNotifError);
+      // Don't fail property creation if admin notification fails
     }
 
     return this.transformToPropertyInfo(property);
@@ -217,25 +343,43 @@ export class PropertyService {
       updatedImages = JSON.stringify({ ...currentImages, ...data.images });
     }
 
+    // Validate pricing type changes
+    if (data.pricingType) {
+      if (data.pricingType === 'night' && !data.pricePerNight && !(existingProperty as any).pricePerNight) {
+        throw new Error('pricePerNight is required when pricingType is "night"');
+      }
+      if (data.pricingType === 'month' && !data.pricePerMonth && !(existingProperty as any).pricePerMonth) {
+        throw new Error('pricePerMonth is required when pricingType is "month"');
+      }
+    }
+
     const property = await prisma.property.update({
       where: { id: propertyId },
       data: {
         ...(data.name && { name: data.name }),
         ...locationUpdates,
+        ...(data.coordinates && { coordinates: JSON.stringify(data.coordinates) }),
         ...(data.type && { type: data.type }),
         ...(data.category && { category: data.category }),
-        ...(data.pricePerNight && { pricePerNight: data.pricePerNight }),
-        ...(data.pricePerTwoNights && { pricePerTwoNights: data.pricePerTwoNights }),
+        ...(data.pricingType && { pricingType: data.pricingType }),
+        ...(data.pricePerNight !== undefined && { pricePerNight: data.pricePerNight }),
+        ...(data.pricePerMonth !== undefined && { pricePerMonth: data.pricePerMonth }),
+        ...(data.pricePerTwoNights !== undefined && { pricePerTwoNights: data.pricePerTwoNights }),
+        ...(data.minimumStay !== undefined && { minStay: data.minimumStay }),
         ...(data.beds && { beds: data.beds }),
         ...(data.baths && { baths: data.baths }),
         ...(data.maxGuests && { maxGuests: data.maxGuests }),
         ...(data.features && { features: JSON.stringify(data.features) }),
-        ...(data.description && { description: data.description }),
-        ...(data.video3D && { video3D: data.video3D }),
+        ...(data.description !== undefined && { description: data.description }),
+        ...(data.video3D !== undefined && { video3D: data.video3D }),
         ...(data.status && { status: data.status }),
         ...(data.availabilityDates && {
           availableFrom: new Date(data.availabilityDates.start),
           availableTo: new Date(data.availabilityDates.end)
+        }),
+        ...((data.availableFrom || data.availableTo) && {
+          ...(data.availableFrom && { availableFrom: new Date(data.availableFrom) }),
+          ...(data.availableTo && { availableTo: new Date(data.availableTo) })
         }),
         ...(updatedImages !== undefined && { images: updatedImages })
       },
@@ -300,7 +444,8 @@ export class PropertyService {
       data: { views: { increment: 1 } }
     });
 
-    return this.transformToPropertyInfo(property);
+    // Apply 14% markup for guest view
+    return this.transformToPropertyInfoForGuest(property);
   }
 
   async searchProperties(filters: PropertySearchFilters, page: number = 1, limit: number = 20) {
@@ -348,7 +493,10 @@ export class PropertyService {
     if (filters.hostId) {
       whereClause.hostId = filters.hostId;
     }
-    
+    if (filters.pricingType) {
+      whereClause.pricingType = filters.pricingType;
+    }
+
     // Keyword search block
     const orConditions = [];
     if (filters.search) {
@@ -397,8 +545,9 @@ export class PropertyService {
       prisma.property.count({ where: whereClause })
     ]);
 
+    // Apply 14% markup for guest view
     return {
-      properties: properties.map((p: any) => this.transformToPropertySummary(p)),
+      properties: properties.map((p: any) => this.transformToPropertySummaryForGuest(p)),
       total,
       page,
       limit,
@@ -523,18 +672,18 @@ export class PropertyService {
     // Ensure data.propertyId is treated as a number
     const propertyIdAsNumber = Number(data.propertyId);
 
-    // Check if user has completed booking for this property
-    const completedBooking = await prisma.booking.findFirst({
+    // Check if user has checked out from this property
+    const checkedOutBooking = await prisma.booking.findFirst({
       where: {
         propertyId: propertyIdAsNumber, // Use the converted number
         guestId: userId,
-        status: 'completed',
+        checkOutValidated: true,
         checkOut: { lt: new Date() }
       }
     });
 
-    if (!completedBooking) {
-      throw new Error('You can only review properties you have stayed at');
+    if (!checkedOutBooking) {
+      throw new Error('You can only review properties you have checked out from');
     }
 
     // Check if user already reviewed this property
@@ -631,7 +780,7 @@ export class PropertyService {
       prisma.booking.findMany({
         where: {
           property: { hostId },
-          status: { in: ['pending', 'confirmed', 'completed'] }
+          status: { in: ['pending', 'confirmed', 'checkedin', 'checkout'] }
         },
         include: { property: true, guest: true },
         orderBy: { createdAt: 'desc' },
@@ -644,7 +793,7 @@ export class PropertyService {
 
     const totalBookings = bookings.length;
     const totalRevenue = bookings
-      .filter((b: { status: string; }) => b.status === 'completed')
+      .filter((b: { status: string; }) => b.status === 'checkout')
       .reduce((sum: any, b: { totalPrice: any; }) => sum + b.totalPrice, 0);
 
     const avgRating = await prisma.property.aggregate({
@@ -771,7 +920,7 @@ export class PropertyService {
 
     const bookings = guest.bookingsAsGuest.map((b: any) => this.transformToBookingInfo(b));
     const totalRevenue = bookings
-      .filter(b => b.status === 'completed')
+      .filter(b => b.status === 'checkout')
       .reduce((sum, b) => sum + b.totalPrice, 0);
 
     const avgStayDuration = bookings.length > 0 
@@ -917,7 +1066,7 @@ export class PropertyService {
     const bookings = await prisma.booking.findMany({
       where: {
         property: { hostId },
-        status: { in: ['confirmed', 'completed'] },
+        status: { in: ['confirmed', 'checkedin', 'checkout'] },
         OR: [
           {
             checkIn: { gte: startDate, lte: endDate }
@@ -1012,14 +1161,14 @@ export class PropertyService {
       prisma.booking.aggregate({
         where: {
           property: { hostId },
-          status: 'completed'
+          status: 'checkout'
         },
         _sum: { totalPrice: true }
       }),
       prisma.booking.aggregate({
         where: {
           property: { hostId },
-          status: 'completed',
+          status: 'checkout',
           checkOut: { gte: startOfMonth }
         },
         _sum: { totalPrice: true }
@@ -1027,7 +1176,7 @@ export class PropertyService {
       prisma.booking.aggregate({
         where: {
           property: { hostId },
-          status: 'completed',
+          status: 'checkout',
           checkOut: { gte: startOfYear }
         },
         _sum: { totalPrice: true }
@@ -1035,7 +1184,7 @@ export class PropertyService {
       prisma.booking.aggregate({
         where: {
           property: { hostId },
-          status: 'completed',
+          status: 'checkout',
           checkOut: { gte: lastMonthStart, lte: lastMonthEnd }
         },
         _sum: { totalPrice: true }
@@ -1043,20 +1192,20 @@ export class PropertyService {
       prisma.booking.count({
         where: {
           property: { hostId },
-          status: 'completed'
+          status: 'checkout'
         }
       }),
       prisma.booking.count({
         where: {
           property: { hostId },
-          status: 'completed',
+          status: 'checkout',
           checkOut: { gte: startOfMonth }
         }
       }),
       prisma.booking.findMany({
         where: {
           property: { hostId },
-          status: 'completed'
+          status: 'checkout'
         },
         select: { checkIn: true, checkOut: true }
       }),
@@ -1098,7 +1247,7 @@ export class PropertyService {
       where: { hostId },
       include: {
         bookings: {
-          where: { status: 'completed' },
+          where: { status: { in: ['checkout'] } },
           select: {
             totalPrice: true,
             checkIn: true,
@@ -1408,7 +1557,7 @@ export class PropertyService {
       where: {
         agentId,
         createdAt: { gte: startDate },
-        status: { in: ['confirmed', 'completed'] }
+        status: { in: ['confirmed', 'checkedin', 'checkout'] }
       }
     });
 
@@ -1475,7 +1624,7 @@ export class PropertyService {
       where: {
         agentId,
         createdAt: { gte: startDate },
-        status: 'completed'
+        status: 'checkout'
       },
       _sum: {
         commission: true
@@ -1500,7 +1649,7 @@ export class PropertyService {
       where: {
         agentId,
         createdAt: { gte: startDate },
-        status: { in: ['confirmed', 'completed'] }
+        status: { in: ['confirmed', 'checkedin', 'checkout'] }
       }
     });
 
@@ -1548,7 +1697,7 @@ export class PropertyService {
         where: {
           agentId,
           createdAt: { gte: lastMonth, lte: today },
-          status: 'completed'
+          status: 'checkout'
         },
         _sum: { commission: true }
       }),
@@ -1556,7 +1705,7 @@ export class PropertyService {
         where: {
           agentId,
           createdAt: { gte: twoMonthsAgo, lte: lastMonth },
-          status: 'completed'
+          status: 'checkout'
         },
         _sum: { commission: true }
       })
@@ -1621,7 +1770,7 @@ export class PropertyService {
         where: {
           propertyId: { in: propertyIds },
           createdAt: { gte: startDate },
-          status: { in: ['confirmed', 'completed'] }
+          status: { in: ['confirmed', 'checkedin', 'checkout'] }
         }
       })
     ]);
@@ -1662,7 +1811,7 @@ export class PropertyService {
     const totalCommission = await prisma.agentBooking.aggregate({
       where: {
         agentId,
-        status: 'completed'
+        status: 'checkout'
       },
       _sum: { commission: true }
     });
@@ -1679,7 +1828,7 @@ export class PropertyService {
         id: { in: propertyIds },
         bookings: {
           some: {
-            status: { in: ['confirmed', 'completed'] },
+            status: { in: ['confirmed', 'checkedin', 'checkout'] },
             createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
           }
         }
@@ -1868,11 +2017,14 @@ export class PropertyService {
       id: property.id,
       name: property.name,
       location: property.location,
+      coordinates: property.coordinates ? JSON.parse(property.coordinates as string) : undefined,
       upiNumber: property.upiNumber,
       propertyAddress: property.propertyAddress,
       type: property.type,
       category: property.category,
+      pricingType: property.pricingType || 'night',
       pricePerNight: property.pricePerNight,
+      pricePerMonth: property.pricePerMonth,
       pricePerTwoNights: property.pricePerTwoNights,
       beds: property.beds,
       baths: property.baths,
@@ -1903,9 +2055,20 @@ export class PropertyService {
     };
   }
 
+  // Apply 14% markup for guest-facing property details
+  private async transformToPropertyInfoForGuest(property: any): Promise<PropertyInfo> {
+    const info = await this.transformToPropertyInfo(property);
+    // Apply markup to the appropriate price field based on pricing type
+    const priceFields = info.pricingType === 'night'
+      ? (['pricePerNight', 'pricePerTwoNights'] as (keyof PropertyInfo)[])
+      : (['pricePerMonth'] as (keyof PropertyInfo)[]);
+    return applyGuestPriceMarkupToObject(info, priceFields);
+  }
+
   private transformToPropertySummary(property: any): PropertySummary {
     const images = property.images ? JSON.parse(property.images as string) : {};
     const mainImage = this.getMainImage(images);
+    const pricingType = property.pricingType || 'night';
 
     return {
       id: property.id,
@@ -1913,7 +2076,12 @@ export class PropertyService {
       location: property.location,
       category: property.category,
       type: property.type,
-      pricePerNight: property.pricePerNight,
+      pricingType: pricingType,
+      // Only include the relevant price field based on pricing type
+      ...(pricingType === 'night'
+        ? { pricePerNight: property.pricePerNight }
+        : { pricePerMonth: property.pricePerMonth }
+      ),
       image: mainImage,
       rating: property.averageRating || 0,
       reviewsCount: property.reviewsCount || 0,
@@ -1922,6 +2090,16 @@ export class PropertyService {
       hostName: property.host ? `${property.host.firstName} ${property.host.lastName}`.trim() : 'Unknown Host',
       availability: property.status === 'active' ? 'Available' : 'Unavailable'
     };
+  }
+
+  // Apply 14% markup for guest-facing property summary
+  private transformToPropertySummaryForGuest(property: any): PropertySummary {
+    const summary = this.transformToPropertySummary(property);
+    // Apply markup to the appropriate price field based on pricing type
+    const priceFields = summary.pricingType === 'night'
+      ? (['pricePerNight'] as (keyof PropertySummary)[])
+      : (['pricePerMonth'] as (keyof PropertySummary)[]);
+    return applyGuestPriceMarkupToObject(summary, priceFields);
   }
 
   private transformToBookingInfo(booking: any): BookingInfo {
@@ -1979,7 +2157,7 @@ export class PropertyService {
 
   private transformToGuestProfile(guest: any): GuestProfile {
     const bookings = guest.bookingsAsGuest || [];
-    const completedBookings = bookings.filter((b: any) => b.status === 'completed');
+    const completedBookings = bookings.filter((b: any) => b.status === 'checkout');
     
     return {
       id: guest.id,
@@ -2171,7 +2349,7 @@ export class PropertyService {
       where: {
         agentId,
         createdAt: { gte: startDate, lte: endDate },
-        status: 'completed'
+        status: 'checkout'
       },
       _sum: { commission: true }
     });
@@ -2196,7 +2374,7 @@ export class PropertyService {
   private async getAgentStats(agentId: number) {
     const [commissionData, propertiesCount] = await Promise.all([
       prisma.agentBooking.aggregate({
-        where: { agentId, status: 'completed' },
+        where: { agentId, status: { in: ['checkout'] } },
         _sum: { commission: true }
       }),
       this.getAgentPropertiesBasic(agentId)
@@ -2212,7 +2390,7 @@ export class PropertyService {
     const [totalAgents, allCommissions, allProperties] = await Promise.all([
       prisma.user.count({ where: { userType: 'agent' } }),
       prisma.agentBooking.aggregate({
-        where: { status: 'completed' },
+        where: { status: { in: ['checkout'] } },
         _sum: { commission: true }
       }),
       prisma.property.count({ where: { status: 'active' } })
@@ -2229,7 +2407,7 @@ export class PropertyService {
 
   private async getVIPClients(agentId: number): Promise<number> {
     const averageCommission = await prisma.agentBooking.aggregate({
-      where: { agentId, status: 'completed' },
+      where: { agentId, status: { in: ['checkout'] } },
       _avg: { commission: true }
     });
 
@@ -2237,7 +2415,7 @@ export class PropertyService {
       by: ['clientId'],
       where: {
         agentId,
-        status: 'completed'
+        status: 'checkout'
       },
       _sum: { commission: true },
       having: {
@@ -2350,7 +2528,8 @@ export class PropertyService {
       take: limit
     });
 
-    return properties.map((p: any) => this.transformToPropertySummary(p));
+    // Apply 14% markup for guest view
+    return properties.map((p: any) => this.transformToPropertySummaryForGuest(p));
   }
 
   async getSimilarProperties(propertyId: number, limit: number = 6): Promise<PropertySummary[]> {
@@ -2378,7 +2557,8 @@ export class PropertyService {
       take: limit
     });
 
-    return properties.map((p: any) => this.transformToPropertySummary(p));
+    // Apply 14% markup for guest view
+    return properties.map((p: any) => this.transformToPropertySummaryForGuest(p));
   }
 
   async uploadPropertyImages(propertyId: number, hostId: number, category: keyof PropertyImages, imageUrls: string[]): Promise<PropertyInfo> {
@@ -2762,14 +2942,14 @@ export class PropertyService {
             where: {
               propertyId: property.id,
               createdAt: { gte: startDate },
-              status: { in: ['confirmed', 'completed'] }
+              status: { in: ['confirmed', 'checkedin', 'checkout'] }
             }
           }),
           prisma.booking.aggregate({
             where: {
               propertyId: property.id,
               createdAt: { gte: startDate },
-              status: 'completed'
+              status: 'checkout'
             },
             _sum: { totalPrice: true }
           }),
@@ -2949,7 +3129,7 @@ export class PropertyService {
     const bookings = await prisma.booking.findMany({
       where: {
         propertyId: { in: propertyIds },
-        status: { in: ['confirmed', 'completed'] },
+        status: { in: ['confirmed', 'checkedin', 'checkout'] },
         OR: [
           { checkIn: { gte: startDate, lte: endDate } },
           { checkOut: { gte: startDate, lte: endDate } },
@@ -3159,7 +3339,7 @@ export class PropertyService {
         host: { select: { firstName: true, lastName: true, email: true } },
         reviews: { select: { rating: true } },
         bookings: {
-          where: { status: 'completed' },
+          where: { status: { in: ['checkout'] } },
           select: { totalPrice: true }
         }
       },
@@ -3732,10 +3912,6 @@ export class PropertyService {
 
   async getTransactionMonitoringDashboard(agentId: number) {
     return await this.enhancedService.getTransactionMonitoringDashboard(agentId);
-  }
-
-  async getAgentEscrowTransactions(agentId: number) {
-    return await this.enhancedService.getAgentEscrowTransactions(agentId);
   }
 
   async getAgentPaymentTransactions(agentId: number) {

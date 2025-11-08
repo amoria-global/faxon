@@ -20,7 +20,6 @@ import {
   validateTourUpdate,
   validateBookingUpdate,
   validatePaymentAction,
-  validateEscrowAction,
   validateBulkOperation,
   validateExport,
   validateAnalytics,
@@ -324,39 +323,6 @@ router.post('/payments/:id/action',
   adminController.processPaymentAction
 );
 
-// === ESCROW TRANSACTION MANAGEMENT ===
-
-// List escrow transactions
-router.get('/escrow',
-  requirePermissions('escrow.view'),
-  validateAdminQuery,
-  parseFilters,
-  validateDateRange,
-  auditLog('LIST_ESCROW', 'escrow'),
-  adminController.getEscrowTransactions
-);
-
-// Get specific escrow transaction
-router.get('/escrow/:id',
-  requirePermissions('escrow.view'),
-  auditLog('VIEW_ESCROW', 'escrow'),
-  adminController.getEscrowTransaction
-);
-
-// Release escrow
-router.post('/escrow/:id/release',
-  requirePermissions('escrow.manage'),
-  auditLog('RELEASE_ESCROW', 'escrow'),
-  adminController.releaseEscrow
-);
-
-// Dispute escrow
-router.post('/escrow/:id/dispute',
-  requirePermissions('escrow.manage'),
-  auditLog('DISPUTE_ESCROW', 'escrow'),
-  adminController.disputeEscrow
-);
-
 // === WITHDRAWAL MANAGEMENT ===
 
 // List withdrawal requests
@@ -399,6 +365,13 @@ router.post('/wallets/:id/adjust',
   requirePermissions('payments.process'),
   auditLog('ADJUST_WALLET', 'wallet'),
   adminController.adjustWalletBalance
+);
+
+// Get provider wallet balances (Xentripay & Pawapay)
+router.get('/wallets/provider-balances',
+  requirePermissions('payments.view'),
+  auditLog('VIEW_PROVIDER_WALLET_BALANCES', 'wallet_balances'),
+  adminController.getProviderWalletBalances
 );
 
 // ===================================================================

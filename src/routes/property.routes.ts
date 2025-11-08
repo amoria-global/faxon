@@ -23,6 +23,7 @@ const agentPerformanceController = new AgentPerformanceController();
 // Search and browse properties
 router.get('/search', propertyController.searchProperties);
 router.get('/featured', propertyController.getFeaturedProperties);
+router.get('/monthly-rentals', propertyController.getMonthlyRentals);
 router.get('/suggestions/location', propertyController.getLocationSuggestions);
 router.get('/:id', propertyController.getPropertyById);
 router.get('/:id/similar', propertyController.getSimilarProperties);
@@ -66,10 +67,6 @@ router.post('/agent/performance/save-metrics', validateAgent, agentPerformanceCo
 // --- AGENT TRANSACTION MONITORING ROUTES ---
 // Transaction monitoring dashboard
 router.get('/agent/transactions/monitoring', validateAgent, enhancedPropertyController.getTransactionMonitoringDashboard);
-
-// Escrow transaction routes
-router.get('/agent/transactions/escrow', validateAgent, enhancedPropertyController.getAgentEscrowTransactions);
-router.get('/agent/transactions/escrow/summary', validateAgent, enhancedPropertyController.getAgentTransactionSummary);
 
 // Payment transaction routes
 router.get('/agent/transactions/payment', validateAgent, enhancedPropertyController.getAgentPaymentTransactions);

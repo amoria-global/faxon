@@ -1,28 +1,38 @@
 // --- PROPERTY DTOs ---
 export interface CreatePropertyDto {
   name: string;
-    location: {
+  location: {
     type: 'upi' | 'address';
     upi: string;
     address: string;
     upiDocument?: string;
   } | string;
+  coordinates?: {
+    latitude: number;
+    longitude: number;
+  };
   type: string;
   category: string;
-  pricePerNight: number;
+  pricingType: 'night' | 'month';
+  pricePerNight?: number;
+  pricePerMonth?: number;
+  minimumStay?: number;
   pricePerTwoNights?: number;
   beds: number;
   baths: number;
   maxGuests: number;
   features: string[];
   description?: string;
-  availabilityDates: {
+  availabilityDates?: {
     start: string;
     end: string;
   };
+  availableFrom?: string;
+  availableTo?: string;
   images: PropertyImages;
   video3D?: string; // URL to uploaded video
   ownerDetails?: OwnerDetails;
+  clientId?: string; // For agent creating property for client
 }
 
 export interface UpdatePropertyDto {
@@ -33,11 +43,18 @@ export interface UpdatePropertyDto {
     address: string;
     upiDocument?: string;
   };
+  coordinates?: {
+    latitude: number;
+    longitude: number;
+  };
   upiNumber?: string;
   propertyAddress?: string;
   type?: string;
   category?: string;
+  pricingType?: 'night' | 'month';
   pricePerNight?: number;
+  pricePerMonth?: number;
+  minimumStay?: number;
   pricePerTwoNights?: number;
   beds?: number;
   baths?: number;
@@ -48,6 +65,8 @@ export interface UpdatePropertyDto {
     start: string;
     end: string;
   };
+  availableFrom?: string;
+  availableTo?: string;
   images?: Partial<PropertyImages>;
   video3D?: string;
   status?: PropertyStatus;
@@ -68,6 +87,7 @@ export interface PropertySearchFilters {
   status?: PropertyStatus;
   hostId?: number;
   search?: string; // Search by name or location
+  pricingType?: 'night' | 'month'; // Filter by pricing type
   sortBy?: 'price' | 'rating' | 'created_at' | 'name';
   sortOrder?: 'asc' | 'desc';
 }
@@ -77,11 +97,17 @@ export interface PropertyInfo {
   id: number;
   name: string;
   location: string;
+  coordinates?: {
+    latitude: number;
+    longitude: number;
+  };
   upiNumber?: string;
   propertyAddress?: string;
   type: string;
   category: string;
-  pricePerNight: number;
+  pricingType: 'night' | 'month';
+  pricePerNight?: number;
+  pricePerMonth?: number;
   pricePerTwoNights?: number;
   beds: number;
   baths: number;
@@ -109,7 +135,9 @@ export interface PropertySummary {
   location: string;
   category: string;
   type?: string;
-  pricePerNight: number;
+  pricingType: 'night' | 'month';
+  pricePerNight?: number;
+  pricePerMonth?: number;
   image: string; // Main image URL
   rating: number;
   reviewsCount: number;
@@ -239,7 +267,7 @@ export interface AnalyticsDataPoint {
 export type PropertyStatus = 'active' | 'inactive' | 'pending' | 'suspended' | 'draft';
 export type PropertyType = 'apartment' | 'house' | 'villa' | 'condo' | 'townhouse' | 'studio' | 'loft';
 export type PropertyCategory = 'entire_place' | 'private_room' | 'shared_room';
-export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'refunded';
+export type BookingStatus = 'pending' | 'confirmed' | 'checkedin' | 'checkout' | 'cancelled' | 'refunded';
 export type AmenityCategory = 'basic' | 'featured' | 'safety' | 'accessibility';
 export type FeatureCategory = 'interior' | 'exterior' | 'entertainment' | 'kitchen' | 'bathroom' | 'outdoor';
 

@@ -11,7 +11,7 @@ interface CompanyInfo {
 }
 
 interface AdminNotificationData {
-  type: 'checkin' | 'checkout' | 'withdrawal_method' | 'withdrawal_request' | 'completed_payment';
+  type: 'checkin' | 'checkout' | 'withdrawal_method' | 'withdrawal_request' | 'completed_payment' | 'duplicate_detection' | 'property_submission' | 'tour_booking' | 'unlock_payment';
   title: string;
   message: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
@@ -65,7 +65,7 @@ export class AdminNotificationService {
     };
 
     // Admin email for notifications
-    this.adminEmail = process.env.ADMIN_EMAIL || 'admin@jambolush.com';
+    this.adminEmail = process.env.ADMIN_EMAIL || 'admin@amoriaglobal.com';
   }
 
   /**
@@ -463,6 +463,154 @@ This is an automated admin notification from ${this.companyInfo.name}
     };
 
     await this.transactionalEmailsApi.sendTransacEmail(sendEmailRequest);
+  }
+
+  /**
+   * Send notification for new property submission
+   */
+  async sendPropertySubmissionNotification(data: {
+    propertyId: number;
+    user: { id: number; email: string; firstName: string; lastName: string };
+    property: { name: string; location?: string; type?: string };
+    checkInDate?: Date;
+  }): Promise<void> {
+    await this.sendNotification({
+      type: 'property_submission',
+      title: 'New Property Submitted for Review',
+      message: `${data.user.firstName} ${data.user.lastName} has submitted a new property "${data.property.name}" for review`,
+      severity: 'medium',
+      user: data.user,
+      resource: {
+        id: data.propertyId,
+        name: data.property.name,
+        type: 'property'
+      },
+      metadata: {
+        propertyId: data.propertyId,
+        propertyName: data.property.name,
+        propertyLocation: data.property.location || 'N/A',
+        propertyType: data.property.type || 'N/A',
+        submittedAt: data.checkInDate?.toISOString() || new Date().toISOString(),
+        status: 'Pending Review'
+      },
+      actionUrl: `${this.companyInfo.website}/admin/properties/${data.propertyId}`
+    });
+  }
+
+  /**
+   * Send notification for new tour booking
+   */
+  async sendTourBookingNotification(data: {
+    bookingId: string;
+    user: { id: number; email: string; firstName: string; lastName: string };
+    tour: { id: number | string; title: string; type?: string };
+    tourGuide: { id: number; firstName: string; lastName: string };
+    numberOfParticipants?: number;
+    totalAmount?: number;
+    currency?: string;
+    scheduleDate?: Date;
+  }): Promise<void> {
+    await this.sendNotification({
+      type: 'tour_booking',
+      title: 'New Tour Booking Created',
+      message: `${data.user.firstName} ${data.user.lastName} has booked the tour "${data.tour.title}"`,
+      severity: 'low',
+      user: data.user,
+      resource: {
+        id: data.bookingId,
+        name: data.tour.title,
+        type: 'tour'
+      },
+      metadata: {
+        bookingId: data.bookingId,
+        tourId: data.tour.id,
+        tourTitle: data.tour.title,
+        tourType: data.tour.type || 'Tour',
+        tourGuideId: data.tourGuide.id,
+        tourGuideName: `${data.tourGuide.firstName} ${data.tourGuide.lastName}`,
+        numberOfParticipants: data.numberOfParticipants || 1,
+        totalAmount: data.totalAmount,
+        currency: data.currency || 'USD',
+        scheduleDate: data.scheduleDate?.toISOString(),
+        status: 'Confirmed'
+      },
+      actionUrl: `${this.companyInfo.website}/admin/bookings/${data.bookingId}`
+    });
+  }
+
+  /**
+   * Send notification for unlock payment
+   */
+  async sendUnlockPaymentNotification(data: {
+    unlockId: string | number;
+    user: { id: number; email: string; firstName: string; lastName: string };
+    property: { id: number | string; name: string };
+    amount: number;
+    currency: string;
+    paymentMethod: string;
+  }): Promise<void> {
+    await this.sendNotification({
+      type: 'unlock_payment',
+      title: 'Property Address Unlock Payment',
+      message: `${data.user.firstName} ${data.user.lastName} paid ${data.amount.toLocaleString()} ${data.currency} to unlock property address for "${data.property.name}"`,
+      severity: 'low',
+      user: data.user,
+      resource: {
+        id: data.unlockId,
+        name: `Address Unlock - ${data.property.name}`,
+        type: 'payment'
+      },
+      metadata: {
+        unlockId: data.unlockId,
+        propertyId: data.property.id,
+        propertyName: data.property.name,
+        amount: data.amount,
+        currency: data.currency,
+        paymentMethod: data.paymentMethod,
+        unlockedAt: new Date().toISOString()
+      },
+      actionUrl: `${this.companyInfo.website}/admin/properties/${data.property.id}`
+    });
+  }
+
+  /**
+   * Send notification for duplicate detection
+   */
+  async sendDuplicateDetectionNotification(data: {
+    entityType: 'property' | 'tour';
+    entityId: string;
+    duplicateOfId: string;
+    uploader: { id: number; email: string; firstName: string; lastName: string };
+    originalOwner?: { id: number; firstName: string; lastName: string };
+    entityName: string;
+    duplicateEntityName: string;
+    similarityScore: number;
+    similarityReasons: string[];
+  }): Promise<void> {
+    await this.sendNotification({
+      type: 'duplicate_detection',
+      title: `⚠️ Duplicate ${data.entityType.toUpperCase()} Detected`,
+      message: `A potential duplicate ${data.entityType} has been detected during upload. The system blocked the creation with ${data.similarityScore}% similarity to an existing ${data.entityType}.`,
+      severity: 'high',
+      user: data.uploader,
+      resource: {
+        id: data.entityId,
+        name: data.entityName,
+        type: data.entityType
+      },
+      metadata: {
+        'Duplicate Of ID': data.duplicateOfId,
+        'Duplicate Name': data.duplicateEntityName,
+        'Similarity Score': `${data.similarityScore}%`,
+        'Reasons': data.similarityReasons.join('; '),
+        'Original Owner': data.originalOwner
+          ? `${data.originalOwner.firstName} ${data.originalOwner.lastName} (ID: ${data.originalOwner.id})`
+          : 'N/A',
+        'Uploader': `${data.uploader.firstName} ${data.uploader.lastName} (ID: ${data.uploader.id})`,
+        'Status': 'Blocked - Requires Review'
+      },
+      actionUrl: `${this.companyInfo.website}/admin/duplicates`
+    });
   }
 }
 

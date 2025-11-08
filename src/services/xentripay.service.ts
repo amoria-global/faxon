@@ -182,14 +182,22 @@ export class XentriPayService {
         return response;
       },
       async (error: AxiosError) => {
-        logger.error('XentriPay API error', 'XentriPayService', {
-          status: error.response?.status,
-          statusText: error.response?.statusText,
-          message: error.message,
-          responseData: error.response?.data,
-          requestData: error.config?.data,
-          error: error
-        });
+        // Silently handle "not found" errors for status checks - these are expected
+        const isNotFound = error.response?.status === 400 || error.response?.status === 404;
+        const notFoundMessage = (error.response?.data as any)?.message?.includes('No collection found') ||
+                               (error.response?.data as any)?.message?.includes('No payout found');
+
+        if (!isNotFound || !notFoundMessage) {
+          // Only log errors that are not "not found" errors
+          logger.error('XentriPay API error', 'XentriPayService', {
+            status: error.response?.status,
+            statusText: error.response?.statusText,
+            message: error.message,
+            responseData: error.response?.data,
+            error: error
+          });
+        }
+
         return Promise.reject(this.handleError(error));
       }
     );
@@ -333,6 +341,16 @@ export class XentriPayService {
 
       return response.data;
     } catch (error: any) {
+      // Check if it's a 400/404 "Not Found" error - this is expected for recent transactions
+      const isNotFound = error.response?.status === 400 || error.response?.status === 404;
+      const notFoundMessage = error.response?.data?.message?.includes('No collection found');
+
+      if (isNotFound && notFoundMessage) {
+        // Silently handle "not found" errors - transaction might not be synced yet
+        throw new Error(`XentriPay Error: ${error.response?.data?.message || 'Collection not found'}`);
+      }
+
+      // Log other errors
       logger.error('Failed to get collection status', 'XentriPayService', error);
       throw error;
     }

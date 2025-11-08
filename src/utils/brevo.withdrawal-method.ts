@@ -70,7 +70,7 @@ export class BrevoWithdrawalMethodService {
     };
 
     // Admin email for notifications
-    this.adminEmail = process.env.ADMIN_EMAIL || 'admin@jambolush.com';
+    this.adminEmail = process.env.ADMIN_EMAIL || 'admin@amoriaglobal.com';
   }
 
   /**

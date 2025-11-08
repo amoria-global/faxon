@@ -192,8 +192,6 @@ async function handlePaymentSuccessDirectly(reference: string, prisma: any): Pro
             );
 
             console.log(`[XENTRIPAY_CALLBACK] ✅ Booking code generated and sent: ${bookingCode}`);
-          } else {
-            console.log(`[XENTRIPAY_CALLBACK] Booking code already exists: ${booking.bookingCode}`);
           }
         } catch (codeError) {
           console.error('[XENTRIPAY_CALLBACK] Failed to generate/send booking code:', codeError);

@@ -15,8 +15,16 @@ ALTER TABLE "wallets" ALTER COLUMN "walletNumber" SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS "wallets_walletNumber_key" ON "wallets"("walletNumber");
 CREATE INDEX IF NOT EXISTS "wallets_walletNumber_idx" ON "wallets"("walletNumber");
 
--- Step 2: Update Booking table - rename hostResponse to ownerResponse
-ALTER TABLE "bookings" RENAME COLUMN "hostResponse" TO "ownerResponse";
+-- Step 2: Update Booking table - rename hostResponse to ownerResponse (if exists)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='bookings' AND column_name='hostResponse'
+  ) THEN
+    ALTER TABLE "bookings" RENAME COLUMN "hostResponse" TO "ownerResponse";
+  END IF;
+END $$;
 
 -- Step 3: Update Property table - merge hostId into ownerId
 -- First, add ownerId column if it doesn't exist

@@ -3,6 +3,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { AdminService } from '../services/admin.service';
 import { XentriPayService } from '../services/xentripay.service';
+import { walletBalanceService } from '../services/wallet-balance.service';
 import {
   AdminUserFilters,
   AdminPropertyFilters,
@@ -57,10 +58,6 @@ export class AdminController {
     this.getPaymentTransactions = this.getPaymentTransactions.bind(this);
     this.getPaymentTransaction = this.getPaymentTransaction.bind(this);
     this.processPaymentAction = this.processPaymentAction.bind(this);
-    this.getEscrowTransactions = this.getEscrowTransactions.bind(this);
-    this.getEscrowTransaction = this.getEscrowTransaction.bind(this);
-    this.releaseEscrow = this.releaseEscrow.bind(this);
-    this.disputeEscrow = this.disputeEscrow.bind(this);
     this.getWithdrawalRequests = this.getWithdrawalRequests.bind(this);
     this.approveWithdrawal = this.approveWithdrawal.bind(this);
     this.rejectWithdrawal = this.rejectWithdrawal.bind(this);
@@ -116,6 +113,7 @@ export class AdminController {
     this.getMarketData = this.getMarketData.bind(this);
     this.createMarketData = this.createMarketData.bind(this);
     this.updateMarketData = this.updateMarketData.bind(this);
+    this.getProviderWalletBalances = this.getProviderWalletBalances.bind(this);
   }
 
   // === DASHBOARD & OVERVIEW ===
@@ -1301,129 +1299,6 @@ export class AdminController {
       res.json({
         success: true,
         message: `Payment ${action} processed successfully`,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error: any) {
-      next(error);
-    }
-  }
-
-  // === ESCROW TRANSACTION MANAGEMENT ===
-
-  async getEscrowTransactions(req: Request, res: Response, next: NextFunction) {
-    try {
-      const filters = {
-        status: req.query.status ? (req.query.status as string).split(',') : undefined,
-        type: req.query.type ? (req.query.type as string).split(',') : undefined,
-        userId: req.query.userId ? parseInt(req.query.userId as string) : undefined,
-        amountRange: req.query.minAmount || req.query.maxAmount ? {
-          min: parseFloat(req.query.minAmount as string) || 0,
-          max: parseFloat(req.query.maxAmount as string) || Number.MAX_VALUE
-        } : undefined,
-        dateRange: req.query.startDate && req.query.endDate ? {
-          start: req.query.startDate as string,
-          end: req.query.endDate as string
-        } : undefined
-      };
-
-      const pagination: AdminQueryParams = {
-        page: parseInt(req.query.page as string) || 1,
-        limit: parseInt(req.query.limit as string) || 20,
-        sort: (req.query.sort as string) || 'createdAt',
-        order: (req.query.order as 'asc' | 'desc') || 'desc'
-      };
-
-      const result = await this.adminService.getEscrowTransactions(filters, pagination);
-      
-      res.json({
-        success: true,
-        data: result.data,
-        pagination: result.pagination,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error: any) {
-      next(error);
-    }
-  }
-
-  async getEscrowTransaction(req: Request, res: Response, next: NextFunction) {
-    try {
-      const transactionId = req.params.id;
-      
-      if (!transactionId) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'INVALID_TRANSACTION_ID',
-            message: 'Valid transaction ID is required'
-          },
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      // This would need to be implemented in the admin service
-      res.json({
-        success: true,
-        message: 'Get escrow transaction details not implemented yet',
-        timestamp: new Date().toISOString()
-      });
-    } catch (error: any) {
-      next(error);
-    }
-  }
-
-  async releaseEscrow(req: Request, res: Response, next: NextFunction) {
-    try {
-      const transactionId = req.params.id;
-      const { reason } = req.body;
-      const adminId = (req as any).user?.id; // Assuming user is attached to request
-      
-      if (!transactionId) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'INVALID_TRANSACTION_ID',
-            message: 'Valid transaction ID is required'
-          },
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      const result = await this.adminService.releaseEscrow(transactionId, reason, adminId);
-      
-      res.json({
-        success: true,
-        data: result,
-        message: 'Escrow released successfully',
-        timestamp: new Date().toISOString()
-      });
-    } catch (error: any) {
-      next(error);
-    }
-  }
-
-  async disputeEscrow(req: Request, res: Response, next: NextFunction) {
-    try {
-      const transactionId = req.params.id;
-      const { reason } = req.body;
-      
-      if (!transactionId) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'INVALID_TRANSACTION_ID',
-            message: 'Valid transaction ID is required'
-          },
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      const result = await this.adminService.disputeEscrow(transactionId, reason);
-      
-      res.json({
-        success: true,
-        data: result,
-        message: 'Escrow disputed successfully',
         timestamp: new Date().toISOString()
       });
     } catch (error: any) {
@@ -2834,6 +2709,35 @@ export class AdminController {
       });
     } catch (error: any) {
       next(error);
+    }
+  }
+
+  // === PROVIDER WALLET BALANCES ===
+
+  /**
+   * Get wallet balances from Xentripay and Pawapay providers
+   * Returns balances in both USD and RWF with currency conversion
+   */
+  async getProviderWalletBalances(req: Request, res: Response, next: NextFunction) {
+    try {
+      const balances = await walletBalanceService.getWalletBalances();
+
+      res.json({
+        success: true,
+        data: balances,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      console.error('Error fetching provider wallet balances:', error);
+
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'WALLET_BALANCE_FETCH_FAILED',
+          message: error.message || 'Failed to fetch wallet balances from providers'
+        },
+        timestamp: new Date().toISOString()
+      });
     }
   }
 }

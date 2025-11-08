@@ -1,17 +1,17 @@
 -- Add agent and owner relationships to Property table
-ALTER TABLE "properties" ADD COLUMN "ownerId" INTEGER;
-ALTER TABLE "properties" ADD COLUMN "agentId" INTEGER;
-ALTER TABLE "properties" ADD COLUMN "commissionRate" DOUBLE PRECISION DEFAULT 0.10;
+ALTER TABLE "properties" ADD COLUMN IF NOT EXISTS "ownerId" INTEGER;
+ALTER TABLE "properties" ADD COLUMN IF NOT EXISTS "agentId" INTEGER;
+ALTER TABLE "properties" ADD COLUMN IF NOT EXISTS "commissionRate" DOUBLE PRECISION DEFAULT 0.10;
 
 -- Add check-in/check-out validation to Booking table
-ALTER TABLE "bookings" ADD COLUMN "checkInValidated" BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE "bookings" ADD COLUMN "checkInValidatedAt" TIMESTAMP(3);
-ALTER TABLE "bookings" ADD COLUMN "checkInValidatedBy" INTEGER;
-ALTER TABLE "bookings" ADD COLUMN "checkOutValidated" BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE "bookings" ADD COLUMN "checkOutValidatedAt" TIMESTAMP(3);
-ALTER TABLE "bookings" ADD COLUMN "checkOutValidatedBy" INTEGER;
-ALTER TABLE "bookings" ADD COLUMN "checkInCode" TEXT;
-ALTER TABLE "bookings" ADD COLUMN "checkOutCode" TEXT;
+ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "checkInValidated" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "checkInValidatedAt" TIMESTAMP(3);
+ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "checkInValidatedBy" INTEGER;
+ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "checkOutValidated" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "checkOutValidatedAt" TIMESTAMP(3);
+ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "checkOutValidatedBy" INTEGER;
+ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "checkInCode" TEXT;
+ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "checkOutCode" TEXT;
 
 -- Create AgentCommission table
 CREATE TABLE "agent_commissions" (

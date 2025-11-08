@@ -43,36 +43,61 @@ export class PropertyController {
       const hostId = parseInt(req.user.userId);
       const propertyData: CreatePropertyDto = req.body;
 
-      const requiredFields = ['name', 'location', 'type', 'category', 'pricePerNight', 'beds', 'baths', 'maxGuests'];
-      const missingFields = requiredFields.filter(field => !propertyData[field as keyof CreatePropertyDto]);
-      
-      if (missingFields.length > 0) {
+      // Base required fields
+      const baseRequiredFields = ['name', 'location', 'type', 'category', 'pricingType', 'beds', 'baths', 'maxGuests'];
+      const missingBaseFields = baseRequiredFields.filter(field => !propertyData[field as keyof CreatePropertyDto]);
+
+      if (missingBaseFields.length > 0) {
         res.status(400).json({
           success: false,
           message: 'Missing required fields',
-          errors: missingFields.map(field => `${field} is required`)
+          errors: missingBaseFields.map(field => `${field} is required`)
         });
         return;
       }
 
-      if (propertyData.pricePerNight <= 0) {
+      // Validate pricing type
+      if (!['night', 'month'].includes(propertyData.pricingType)) {
         res.status(400).json({
           success: false,
-          message: 'Price per night must be greater than 0'
+          message: 'Invalid pricing type. Must be "night" or "month"'
         });
         return;
       }
 
-      if (!propertyData.availabilityDates?.start || !propertyData.availabilityDates?.end) {
+      // Validate appropriate price field based on pricing type
+      if (propertyData.pricingType === 'night') {
+        if (!propertyData.pricePerNight || propertyData.pricePerNight <= 0) {
+          res.status(400).json({
+            success: false,
+            message: 'pricePerNight is required and must be greater than 0 when pricingType is "night"'
+          });
+          return;
+        }
+      } else if (propertyData.pricingType === 'month') {
+        if (!propertyData.pricePerMonth || propertyData.pricePerMonth <= 0) {
+          res.status(400).json({
+            success: false,
+            message: 'pricePerMonth is required and must be greater than 0 when pricingType is "month"'
+          });
+          return;
+        }
+      }
+
+      // Validate availability dates (support both formats)
+      const availStart = propertyData.availabilityDates?.start || propertyData.availableFrom;
+      const availEnd = propertyData.availabilityDates?.end || propertyData.availableTo;
+
+      if (!availStart || !availEnd) {
         res.status(400).json({
           success: false,
-          message: 'Availability dates are required'
+          message: 'Availability dates are required (availableFrom and availableTo)'
         });
         return;
       }
 
       const property = await this.propertyService.createProperty(hostId, propertyData);
-      
+
       res.status(201).json({
         success: true,
         message: 'Property created successfully',
@@ -216,6 +241,7 @@ export class PropertyController {
         availableFrom: req.query.availableFrom as string,
         availableTo: req.query.availableTo as string,
         search: req.query.search as string,
+        pricingType: req.query.pricingType as 'night' | 'month',
         sortBy: req.query.sortBy as 'price' | 'rating' | 'created_at' | 'name',
         sortOrder: req.query.sortOrder as 'asc' | 'desc'
       };
@@ -293,7 +319,7 @@ export class PropertyController {
     try {
       const limit = parseInt(req.query.limit as string) || 8;
       const properties = await this.propertyService.getFeaturedProperties(limit);
-      
+
       res.json({
         success: true,
         message: 'Featured properties retrieved successfully',
@@ -304,6 +330,52 @@ export class PropertyController {
       res.status(500).json({
         success: false,
         message: 'Failed to retrieve featured properties'
+      });
+    }
+  };
+
+  getMonthlyRentals = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+
+      const filters: PropertySearchFilters = {
+        pricingType: 'month',
+        location: req.query.location as string,
+        type: req.query.type as string,
+        category: req.query.category as string,
+        minPrice: req.query.minPrice ? parseFloat(req.query.minPrice as string) : undefined,
+        maxPrice: req.query.maxPrice ? parseFloat(req.query.maxPrice as string) : undefined,
+        beds: req.query.beds ? parseInt(req.query.beds as string) : undefined,
+        baths: req.query.baths ? parseInt(req.query.baths as string) : undefined,
+        maxGuests: req.query.maxGuests ? parseInt(req.query.maxGuests as string) : undefined,
+        features: req.query.features ? (req.query.features as string).split(',') : undefined,
+        availableFrom: req.query.availableFrom as string,
+        availableTo: req.query.availableTo as string,
+        search: req.query.search as string,
+        sortBy: req.query.sortBy as 'price' | 'rating' | 'created_at' | 'name',
+        sortOrder: req.query.sortOrder as 'asc' | 'desc'
+      };
+
+      // Remove undefined values
+      Object.keys(filters).forEach(key => {
+        if (filters[key as keyof PropertySearchFilters] === undefined) {
+          delete filters[key as keyof PropertySearchFilters];
+        }
+      });
+
+      const result = await this.propertyService.searchProperties(filters, page, limit);
+
+      res.json({
+        success: true,
+        message: 'Monthly rental properties retrieved successfully',
+        data: result
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch monthly rentals', 'PropertyController', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve monthly rental properties'
       });
     }
   };
@@ -2363,54 +2435,6 @@ export class PropertyController {
       res.status(500).json({
         success: false,
         message: error.message || 'Failed to retrieve monitoring data'
-      });
-    }
-  };
-
-  getAgentEscrowTransactions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      if (!req.user) {
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required'
-        });
-        return;
-      }
-
-      const agentId = parseInt(req.user.userId);
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 20;
-      const status = req.query.status as string;
-
-      const escrowTransactions = await this.propertyService.getAgentEscrowTransactions(agentId);
-
-      let filteredTransactions = escrowTransactions;
-      if (status) {
-        filteredTransactions = escrowTransactions.filter((t: any) => t.status === status);
-      }
-
-      const startIndex = (page - 1) * limit;
-      const endIndex = startIndex + limit;
-      const paginatedTransactions = filteredTransactions.slice(startIndex, endIndex);
-
-      res.json({
-        success: true,
-        message: 'Escrow transactions retrieved successfully',
-        data: {
-          transactions: paginatedTransactions,
-          total: filteredTransactions.length,
-          page,
-          limit,
-          totalPages: Math.ceil(filteredTransactions.length / limit),
-          hasNext: endIndex < filteredTransactions.length,
-          hasPrevious: page > 1
-        }
-      });
-    } catch (error: any) {
-      logger.error('Failed to fetch escrow transactions', 'PropertyController', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to retrieve escrow transactions'
       });
     }
   };

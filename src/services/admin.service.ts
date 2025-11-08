@@ -22,7 +22,6 @@ import {
   AdminBookingListItem,
   AdminBookingDetails,
   AdminPaymentTransaction,
-  AdminEscrowTransaction,
   AdminWithdrawalRequest,
   AdminSystemAnalytics,
   AdminFinancialReport,
@@ -47,7 +46,7 @@ export class AdminService {
 
   constructor(xentriPayService?: XentriPayService) {
     this.mailingService = new BrevoMailingService();
-    this.adminEmail = process.env.ADMIN_EMAIL || 'admin@jambolush.com';
+    this.adminEmail = process.env.ADMIN_EMAIL || 'admin@amoriaglobal.com';
     this.xentriPayService = xentriPayService;
     this.companyInfo = {
       name: 'Jambolush',
@@ -129,7 +128,6 @@ export class AdminService {
         cancelledBookings,
         totalRevenue: revenueData.total,
         platformFees: revenueData.fees,
-        escrowHeld: escrowData.held,
         disputesOpen: disputes
       },
       growth: {
@@ -744,7 +742,9 @@ export class AdminService {
           location: true,
           type: true,
           category: true,
+          pricingType: true,
           pricePerNight: true,
+          pricePerMonth: true,
           status: true,
           isVerified: true,
           isInstantBook: true,
@@ -776,7 +776,9 @@ export class AdminService {
       location: property.location,
       type: property.type,
       category: property.category,
+      pricingType: property.pricingType as 'night' | 'month' | undefined,
       pricePerNight: property.pricePerNight,
+      pricePerMonth: property.pricePerMonth,
       currency: 'RWF', // Default currency
       status: property.status,
       isVerified: property.isVerified,
@@ -2992,252 +2994,6 @@ export class AdminService {
     };
 
     return transformedTransaction;
-  }
-
-  // DEPRECATED: Escrow system has been removed
-  async getEscrowTransactions(filters: any, pagination: AdminQueryParams): Promise<AdminPaginatedResponse<AdminEscrowTransaction>> {
-    // const { page = 1, limit = 20, sort = 'createdAt', order = 'desc' } = pagination;
-    // const skip = (page - 1) * limit;
-    //
-    // const where = this.buildEscrowWhereClause(filters);
-    //
-    // const [transactions, total] = await Promise.all([
-    //   prisma.escrowTransaction.findMany({
-    //     where,
-    //     include: {
-    //       user: {
-    //         select: {
-    //           firstName: true,
-    //           lastName: true,
-    //           email: true
-    //         }
-    //       },
-    //       recipient: {
-    //         select: {
-    //           firstName: true,
-    //           lastName: true,
-    //           email: true
-    //         }
-    //       }
-    //     },
-    //     orderBy: { [sort]: order },
-    //     skip,
-    //     take: limit
-    //   }),
-    //   prisma.escrowTransaction.count({ where })
-    // ]);
-    //
-    // const transformedTransactions: AdminEscrowTransaction[] | any = transactions.map(transaction => ({
-    //   id: transaction.id,
-    //   userId: transaction.userId,
-    //   userName: `${transaction.user.firstName} ${transaction.user.lastName}`,
-    //   userEmail: transaction.user.email,
-    //   recipientId: transaction.recipientId,
-    //   recipientName: transaction.recipient ? `${transaction.recipient.firstName} ${transaction.recipient.lastName}` : undefined,
-    //   recipientEmail: transaction.recipient?.email,
-    //   type: transaction.type,
-    //   amount: transaction.amount,
-    //   currency: transaction.currency,
-    //   status: transaction.status,
-    //   reference: transaction.reference,
-    //   description: transaction.description,
-    //   escrowId: transaction.escrowId,
-    //   fundedAt: transaction.fundedAt?.toISOString(),
-    //   releasedAt: transaction.releasedAt?.toISOString(),
-    //   releasedBy: transaction.releasedBy,
-    //   releaseReason: transaction.releaseReason,
-    //   disputedAt: transaction.disputedAt?.toISOString(),
-    //   disputedBy: transaction.disputedBy,
-    //   disputeReason: transaction.disputeReason,
-    //   resolvedAt: transaction.resolvedAt?.toISOString(),
-    //   cancelledAt: transaction.cancelledAt?.toISOString(),
-    //   cancellationReason: transaction.cancellationReason,
-    //   createdAt: transaction.createdAt.toISOString(),
-    //   metadata: transaction.metadata
-    // }));
-
-    return {
-      data: [],
-      pagination: {
-        page: 1,
-        limit: 20,
-        total: 0,
-        totalPages: 0,
-        hasNext: false,
-        hasPrev: false
-      },
-      filters,
-      sort: { field: 'createdAt', order: 'desc' }
-    };
-  }
-
-  // DEPRECATED: Escrow system has been removed
-  async releaseEscrow(transactionId: string, releaseReason: string, adminId: number): Promise<AdminEscrowTransaction> {
-    throw new Error('Escrow system has been deprecated and is no longer available');
-    // const transaction: any = await prisma.escrowTransaction.findUnique({
-    //   where: { id: transactionId },
-    //   include: {
-    //     user: {
-    //       select: {
-    //         firstName: true,
-    //         lastName: true,
-    //         email: true
-    //       }
-    //     },
-    //     recipient: {
-    //       select: {
-    //         firstName: true,
-    //         lastName: true,
-    //         email: true
-    //       }
-    //     }
-    //   }
-    // });
-    //
-    // if (!transaction) {
-    //   throw new Error('Escrow transaction not found');
-    // }
-    //
-    // const updatedTransaction = await prisma.escrowTransaction.update({
-    //   where: { id: transactionId },
-    //   data: {
-    //     status: 'COMPLETED',
-    //     releasedAt: new Date(),
-    //     releasedBy: adminId,
-    //     releaseReason,
-    //     updatedAt: new Date()
-    //   }
-    // });
-    //
-    // await this.sendAdminNotification({
-    //   type: 'escrow_released',
-    //   title: 'Escrow Funds Released',
-    //   message: `Escrow funds of RWF ${transaction.amount.toLocaleString()} have been released by administrator.`,
-    //   severity: 'medium',
-    //   reason: releaseReason,
-    //   resource: {
-    //     id: transactionId,
-    //     name: `Escrow Transaction ${transactionId}`,
-    //     type: 'transaction'
-    //   },
-    //   metadata: {
-    //     amount: transaction.amount,
-    //     currency: transaction.currency,
-    //     fromUser: `${transaction.user.firstName} ${transaction.user.lastName}`,
-    //     toUser: transaction.recipient ? `${transaction.recipient.firstName} ${transaction.recipient.lastName}` : 'N/A',
-    //     releasedBy: adminId,
-    //     releaseReason
-    //   }
-    // });
-    //
-    // // Transform and return
-    // return {
-    //   id: updatedTransaction.id,
-    //   userId: updatedTransaction.userId,
-    //   userName: `${transaction.user.firstName} ${transaction.user.lastName}`,
-    //   userEmail: transaction.user.email,
-    //   recipientId: updatedTransaction.recipientId,
-    //   recipientName: transaction.recipient ? `${transaction.recipient.firstName} ${transaction.recipient.lastName}` : undefined,
-    //   recipientEmail: transaction.recipient?.email,
-    //   type: updatedTransaction.type,
-    //   amount: updatedTransaction.amount,
-    //   currency: updatedTransaction.currency,
-    //   status: updatedTransaction.status,
-    //   reference: updatedTransaction.reference,
-    //   description: updatedTransaction.description,
-    //   escrowId: updatedTransaction.escrowId,
-    //   fundedAt: updatedTransaction.fundedAt?.toISOString(),
-    //   releasedAt: updatedTransaction.releasedAt?.toISOString(),
-    //   releasedBy: updatedTransaction.releasedBy,
-    //   releaseReason: updatedTransaction.releaseReason,
-    //   disputedAt: updatedTransaction.disputedAt?.toISOString(),
-    //   disputedBy: updatedTransaction.disputedBy,
-    //   disputeReason: updatedTransaction.disputeReason,
-    //   resolvedAt: updatedTransaction.resolvedAt?.toISOString(),
-    //   cancelledAt: updatedTransaction.cancelledAt?.toISOString(),
-    //   cancellationReason: updatedTransaction.cancellationReason,
-    //   createdAt: updatedTransaction.createdAt.toISOString(),
-    //   metadata: updatedTransaction.metadata
-    // };
-  }
-
-  // DEPRECATED: Escrow system has been removed
-  async disputeEscrow(transactionId: string, disputeReason: string, adminId?: number): Promise<AdminEscrowTransaction> {
-    throw new Error('Escrow system has been deprecated and is no longer available');
-    // const transaction: any = await prisma.escrowTransaction.findUnique({
-    //   where: { id: transactionId },
-    //   include: {
-    //     user: {
-    //       select: {
-    //         firstName: true,
-    //         lastName: true,
-    //         email: true
-    //       }
-    //     },
-    //     recipient: {
-    //       select: {
-    //         firstName: true,
-    //         lastName: true,
-    //         email: true
-    //       }
-    //     }
-    //   }
-    // });
-    //
-    // if (!transaction) {
-    //   throw new Error('Escrow transaction not found');
-    // }
-    //
-    // const updatedTransaction = await prisma.escrowTransaction.update({
-    //   where: { id: transactionId },
-    //   data: {
-    //     status: 'DISPUTED',
-    //     disputedAt: new Date(),
-    //     disputeReason,
-    //     updatedAt: new Date()
-    //   }
-    // });
-    //
-    // // Send critical alert for dispute
-    // await this.sendCriticalAlert({
-    //   id: `escrow-dispute-${transactionId}`,
-    //   type: 'critical',
-    //   title: 'Escrow Transaction Disputed',
-    //   message: `Escrow transaction of RWF ${transaction.amount.toLocaleString()} has been marked as disputed and requires immediate resolution.`,
-    //   createdAt: new Date().toISOString(),
-    //   isRead: false,
-    //   severity: 'critical',
-    //   actionRequired: true
-    // });
-    //
-    // return {
-    //   id: updatedTransaction.id,
-    //   userId: updatedTransaction.userId,
-    //   userName: `${transaction.user.firstName} ${transaction.user.lastName}`,
-    //   userEmail: transaction.user.email,
-    //   recipientId: updatedTransaction.recipientId,
-    //   recipientName: transaction.recipient ? `${transaction.recipient.firstName} ${transaction.recipient.lastName}` : undefined,
-    //   recipientEmail: transaction.recipient?.email,
-    //   type: updatedTransaction.type,
-    //   amount: updatedTransaction.amount,
-    //   currency: updatedTransaction.currency,
-    //   status: updatedTransaction.status,
-    //   reference: updatedTransaction.reference,
-    //   description: updatedTransaction.description,
-    //   escrowId: updatedTransaction.escrowId,
-    //   fundedAt: updatedTransaction.fundedAt?.toISOString(),
-    //   releasedAt: updatedTransaction.releasedAt?.toISOString(),
-    //   releasedBy: updatedTransaction.releasedBy,
-    //   releaseReason: updatedTransaction.releaseReason,
-    //   disputedAt: updatedTransaction.disputedAt?.toISOString(),
-    //   disputedBy: updatedTransaction.disputedBy,
-    //   disputeReason: updatedTransaction.disputeReason,
-    //   resolvedAt: updatedTransaction.resolvedAt?.toISOString(),
-    //   cancelledAt: updatedTransaction.cancelledAt?.toISOString(),
-    //   cancellationReason: updatedTransaction.cancellationReason,
-    //   createdAt: updatedTransaction.createdAt.toISOString(),
-    //   metadata: updatedTransaction.metadata
-    // };
   }
 
   // === WITHDRAWAL & PAYOUT MANAGEMENT ===
