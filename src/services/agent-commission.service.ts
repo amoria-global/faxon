@@ -492,6 +492,8 @@ export class AgentCommissionService {
       beds: property.beds,
       baths: property.baths,
       maxGuests: property.maxGuests,
+      minStay: property.minStay || 1,
+      maxStay: property.maxStay,
       features: JSON.parse(property.features || '[]'),
       description: property.description,
       images: JSON.parse(property.images || '{}'),
@@ -507,8 +509,7 @@ export class AgentCommissionService {
         availableFrom: property.availableFrom?.toISOString(),
         availableTo: property.availableTo?.toISOString(),
         blockedDates: [],
-        minStay: property.minStay,
-        maxStay: property.maxStay
+        minStay: property.minStay || 1
       },
       createdAt: property.createdAt.toISOString(),
       updatedAt: property.updatedAt.toISOString(),

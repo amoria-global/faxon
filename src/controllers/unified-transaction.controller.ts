@@ -2195,6 +2195,248 @@ export class UnifiedTransactionController {
       });
     }
   }
+
+  /**
+   * Get user bonuses (list all bonuses for a user)
+   */
+  async getUserBonuses(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = parseInt(req.params.userId);
+
+      if (isNaN(userId)) {
+        res.status(400).json({ success: false, message: 'Invalid user ID' });
+        return;
+      }
+
+      const bonuses = await prisma.bonus.findMany({
+        where: { userId },
+        include: {
+          property: {
+            select: {
+              id: true,
+              name: true,
+              location: true,
+              images: true
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      const summary = {
+        totalBonuses: bonuses.length,
+        totalPending: bonuses.filter(b => b.status === 'pending').length,
+        totalClaimed: bonuses.filter(b => b.status === 'claimed').length,
+        totalExpired: bonuses.filter(b => b.status === 'expired').length,
+        totalAmountPending: bonuses.filter(b => b.status === 'pending').reduce((sum, b) => sum + b.amount, 0),
+        totalAmountClaimed: bonuses.filter(b => b.status === 'claimed').reduce((sum, b) => sum + b.amount, 0)
+      };
+
+      res.status(200).json({
+        success: true,
+        data: {
+          bonuses: bonuses.map(b => ({
+            id: b.id,
+            amount: b.amount,
+            currency: b.currency,
+            sourceType: b.sourceType,
+            sourceId: b.sourceId,
+            propertyId: b.propertyId,
+            property: b.property ? {
+              id: b.property.id,
+              name: b.property.name,
+              location: b.property.location,
+              image: b.property.images ? (Array.isArray(b.property.images) ? b.property.images[0] : null) : null
+            } : null,
+            description: b.description,
+            status: b.status,
+            claimedAt: b.claimedAt,
+            expiresAt: b.expiresAt,
+            metadata: b.metadata,
+            createdAt: b.createdAt
+          })),
+          summary
+        }
+      });
+    } catch (error) {
+      logger.error('Error getting user bonuses', 'UnifiedTransactionController', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get user bonuses',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Get wallet history with bonuses included
+   */
+  async getWalletHistoryWithBonuses(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = parseInt(req.params.userId);
+
+      if (isNaN(userId)) {
+        res.status(400).json({ success: false, message: 'Invalid user ID' });
+        return;
+      }
+
+      // Get wallet
+      const wallet = await prisma.wallet.findUnique({
+        where: { userId }
+      });
+
+      if (!wallet) {
+        res.status(404).json({ success: false, message: 'Wallet not found' });
+        return;
+      }
+
+      // Get wallet transactions
+      const walletTransactions = await prisma.walletTransaction.findMany({
+        where: { walletId: wallet.id },
+        orderBy: { createdAt: 'desc' },
+        take: 50 // Limit to last 50 transactions
+      });
+
+      // Get bonuses
+      const bonuses = await prisma.bonus.findMany({
+        where: { userId },
+        include: {
+          property: {
+            select: {
+              id: true,
+              name: true,
+              location: true
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      res.status(200).json({
+        success: true,
+        data: {
+          wallet: {
+            balance: wallet.balance,
+            pendingBalance: wallet.pendingBalance,
+            currency: wallet.currency,
+            isActive: wallet.isActive
+          },
+          transactions: walletTransactions.map(t => ({
+            id: t.id,
+            type: t.type,
+            amount: t.amount,
+            balanceBefore: t.balanceBefore,
+            balanceAfter: t.balanceAfter,
+            reference: t.reference,
+            description: t.description,
+            transactionId: t.transactionId,
+            createdAt: t.createdAt
+          })),
+          bonuses: bonuses.map(b => ({
+            id: b.id,
+            amount: b.amount,
+            currency: b.currency,
+            sourceType: b.sourceType,
+            sourceId: b.sourceId,
+            propertyId: b.propertyId,
+            property: b.property ? {
+              id: b.property.id,
+              name: b.property.name,
+              location: b.property.location
+            } : null,
+            description: b.description,
+            status: b.status,
+            claimedAt: b.claimedAt,
+            expiresAt: b.expiresAt,
+            createdAt: b.createdAt
+          }))
+        }
+      });
+    } catch (error) {
+      logger.error('Error getting wallet history with bonuses', 'UnifiedTransactionController', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get wallet history',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Claim a bonus (mark as claimed and add to wallet if not already claimed)
+   */
+  async claimBonus(req: Request, res: Response): Promise<void> {
+    try {
+      const { bonusId } = req.params;
+      const userId = (req as any).user?.id;
+
+      if (!userId) {
+        res.status(401).json({ success: false, message: 'Unauthorized' });
+        return;
+      }
+
+      // Get bonus
+      const bonus = await prisma.bonus.findUnique({
+        where: { id: bonusId }
+      });
+
+      if (!bonus) {
+        res.status(404).json({ success: false, message: 'Bonus not found' });
+        return;
+      }
+
+      // Check if bonus belongs to user
+      if (bonus.userId !== userId) {
+        res.status(403).json({ success: false, message: 'This bonus does not belong to you' });
+        return;
+      }
+
+      // Check if already claimed
+      if (bonus.status === 'claimed') {
+        res.status(400).json({ success: false, message: 'Bonus already claimed' });
+        return;
+      }
+
+      // Check if expired
+      if (bonus.expiresAt && bonus.expiresAt < new Date()) {
+        // Mark as expired
+        await prisma.bonus.update({
+          where: { id: bonusId },
+          data: { status: 'expired' }
+        });
+        res.status(400).json({ success: false, message: 'Bonus has expired' });
+        return;
+      }
+
+      // Note: For address unlock bonuses, wallet is already funded when created (status = 'claimed')
+      // This endpoint is for future use where bonuses might be created as 'pending'
+      // and need to be manually claimed
+
+      // Mark bonus as claimed
+      const updatedBonus = await prisma.bonus.update({
+        where: { id: bonusId },
+        data: {
+          status: 'claimed',
+          claimedAt: new Date()
+        }
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'Bonus claimed successfully',
+        data: {
+          bonus: updatedBonus
+        }
+      });
+    } catch (error) {
+      logger.error('Error claiming bonus', 'UnifiedTransactionController', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to claim bonus',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
 }
 
 export const unifiedTransactionController = new UnifiedTransactionController();

@@ -207,6 +207,7 @@ export interface AdminPropertyListItem {
   pricingType?: 'night' | 'month';
   pricePerNight: number | null;
   pricePerMonth?: number | null;
+  minStay: number;
   currency: string;
   status: string;
   isVerified: boolean;

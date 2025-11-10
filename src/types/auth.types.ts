@@ -152,6 +152,9 @@ export interface UserInfo {
   referralCode?: string;
   referralStatus?: string;
   referredAt?: string;
+
+  // Agent Assessment
+  agentAssessment?: AgentAssessmentInfo;
 }
 
 export interface UpdateUserProfileDto {
@@ -506,4 +509,50 @@ export interface AdminDashboardSummary {
     tourGuides: number;
     agents: number;
   };
+}
+
+// --- AGENT ASSESSMENT TYPES ---
+
+export interface AssessmentQuestion {
+  questionId: number;
+  question: string;
+  answer: string;
+  isCorrect: boolean;
+}
+
+export interface AgentAssessmentInfo {
+  id: string;
+  agentId: number;
+  totalQuestions: number;
+  correctAnswers: number;
+  score: number; // Percentage (0-100)
+  isPassed: boolean; // true if score >= 80
+  status: 'pending' | 'submitted' | 'passed' | 'failed';
+  submittedAt?: string;
+  reviewedAt?: string;
+  reviewedBy?: number;
+  reviewerNotes?: string;
+  attemptNumber: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SubmitAssessmentDto {
+  questionsAndAnswers: AssessmentQuestion[]; // Array of 40 questions with answers
+}
+
+export interface AgentAssessmentResponse {
+  success: boolean;
+  data: {
+    assessment: AgentAssessmentInfo;
+    message: string;
+  };
+}
+
+export interface GetAssessmentStatusResponse {
+  hasSubmitted: boolean;
+  assessment?: AgentAssessmentInfo;
+  canRetake: boolean;
+  remainingAttempts: number;
+  maxAttempts: number;
 }

@@ -692,14 +692,14 @@ export class CheckInService {
   private async processPropertyCheckIn(booking: any, checkInBy: number): Promise<void> {
     console.log(`[CHECKIN] Processing property check-in for booking ${booking.id}`);
 
-    // Update booking with check-in details and change status to checked_in
+    // Update booking with check-in details and change status to checkedin
     await prisma.booking.update({
       where: { id: booking.id },
       data: {
         checkInValidated: true,
         checkInValidatedAt: new Date(),
         checkInValidatedBy: checkInBy,
-        status: 'checked_in' // Change status from 'confirmed' to 'checked_in'
+        status: 'checkedin' // Change status from 'confirmed' to 'checkedin'
       }
     });
 
@@ -751,15 +751,15 @@ export class CheckInService {
   private async processTourCheckIn(booking: any, checkInBy: number): Promise<void> {
     console.log(`[CHECKIN] Processing tour check-in for booking ${booking.id}`);
 
-    // Update tour booking with check-in details and change status to checked_in
+    // Update tour booking with check-in details and change status to checkedin
     await prisma.tourBooking.update({
       where: { id: booking.id },
       data: {
-        checkInStatus: 'checked_in',
+        checkInStatus: 'checkedin',
         checkInTime: new Date(),
         checkInValidated: true,
         checkInValidatedAt: new Date(),
-        status: 'checked_in' // Change status from 'confirmed' to 'checked_in'
+        status: 'checkedin' // Change status from 'confirmed' to 'checkedin'
       }
     });
 
@@ -922,14 +922,14 @@ export class CheckInService {
           };
         }
 
-        // Update booking with check-out details and change status to checked_out
+        // Update booking with check-out details and change status to checkout
         const updatedBooking = await prisma.booking.update({
           where: { id: bookingId },
           data: {
             checkOutValidated: true,
             checkOutValidatedAt: new Date(),
             checkOutValidatedBy: checkOutBy,
-            status: 'checked_out' // Change status from 'checked_in' to 'checked_out'
+            status: 'checkout' // Change status from 'checkedin' to 'checkout'
           },
           include: {
             property: true,
@@ -1031,12 +1031,12 @@ export class CheckInService {
           };
         }
 
-        // Update tour booking with check-out time and change status to checked_out
+        // Update tour booking with check-out time and change status to completed
         const updatedTourBooking = await prisma.tourBooking.update({
           where: { id: bookingId },
           data: {
             checkOutTime: new Date(),
-            status: 'checked_out' // Change status from 'checked_in' to 'checked_out'
+            status: 'completed' // Change status from 'checkedin' to 'completed'
           },
           include: {
             tour: true,
@@ -1174,7 +1174,7 @@ export class CheckInService {
         }
 
         // Check if check-in has occurred
-        if (tourBooking.checkInStatus !== 'checked_in') {
+        if (tourBooking.checkInStatus !== 'checkedin') {
           return {
             canWithdraw: false,
             reason: 'Guest must check in before funds can be withdrawn'

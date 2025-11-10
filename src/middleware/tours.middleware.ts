@@ -238,6 +238,28 @@ export const validateAdmin = (req: AuthenticatedRequest, res: Response, next: Ne
   next();
 };
 
+// Validate that user is either an admin or tour guide
+export const validateAdminOrTourGuide = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  if (!req.user) {
+    res.status(401).json({
+      success: false,
+      message: 'Authentication required'
+    });
+    return;
+  }
+
+  // Check if user type is admin or tourguide
+  if (req.user.userType && !['admin', 'tourguide'].includes(req.user.userType)) {
+    res.status(403).json({
+      success: false,
+      message: 'Admin or Tour Guide access required'
+    });
+    return;
+  }
+
+  next();
+};
+
 // Validate tour guide access to specific tour
 export const validateTourGuideAccess = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -251,12 +273,19 @@ export const validateTourGuideAccess = async (req: AuthenticatedRequest, res: Re
 
     const tourId = req.params.id;
     const tourGuideId = parseInt(req.user.userId);
+    const userType = req.user.userType;
 
     if (!tourId) {
       res.status(400).json({
         success: false,
         message: 'Tour ID is required'
       });
+      return;
+    }
+
+    // Admins have access to all tours
+    if (userType === 'admin') {
+      next();
       return;
     }
 
@@ -374,7 +403,7 @@ export const validateTourBookingUpdate = (req: AuthenticatedRequest, res: Respon
 
   // Validate check-in status if provided
   if (data.checkInStatus) {
-    const validCheckInStatuses: TourCheckInStatus[] = ['not_checked_in', 'checked_in', 'checked_out', 'no_show'];
+    const validCheckInStatuses: TourCheckInStatus[] = ['not_checkedin', 'checkedin', 'no_show'];
     if (!validCheckInStatuses.includes(data.checkInStatus)) {
       errors.push(`Invalid check-in status. Valid options: ${validCheckInStatuses.join(', ')}`);
     }

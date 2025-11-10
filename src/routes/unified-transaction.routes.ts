@@ -248,4 +248,27 @@ router.post('/property-payment/collect/:bookingId', (req, res) => unifiedTransac
  */
 router.get('/property-payments/pending/:hostId', (req, res) => unifiedTransactionController.getPendingPropertyPayments(req, res));
 
+// ==================== BONUS ENDPOINTS ====================
+
+/**
+ * @route GET /api/transactions/bonuses/:userId
+ * @desc Get all bonuses for a user (list)
+ * @access Protected - User can only access their own bonuses
+ */
+router.get('/bonuses/:userId', authenticate, authorizeOwnTransactions, (req, res) => unifiedTransactionController.getUserBonuses(req, res));
+
+/**
+ * @route GET /api/transactions/wallet/:userId/with-bonuses
+ * @desc Get wallet history with bonuses included (transactions + bonuses)
+ * @access Protected - User can only access their own wallet
+ */
+router.get('/wallet/:userId/with-bonuses', authenticate, authorizeOwnWallet, (req, res) => unifiedTransactionController.getWalletHistoryWithBonuses(req, res));
+
+/**
+ * @route POST /api/transactions/bonuses/:bonusId/claim
+ * @desc Claim a bonus (mark as claimed)
+ * @access Protected - User must own the bonus
+ */
+router.post('/bonuses/:bonusId/claim', authenticate, (req, res) => unifiedTransactionController.claimBonus(req, res));
+
 export default router;

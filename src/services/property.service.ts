@@ -773,8 +773,14 @@ export class PropertyService {
       totalProperties,
       activeProperties,
       bookings,
-      reviews
+      reviews,
+      earnings,
+      propertyViews,
+      wishlistCount,
+      blockedDates,
+      pendingPayments
     ] = await Promise.all([
+      // Existing queries
       prisma.property.count({ where: { hostId } }),
       prisma.property.count({ where: { hostId, status: 'active' } }),
       prisma.booking.findMany({
@@ -788,8 +794,72 @@ export class PropertyService {
       }),
       prisma.review.count({
         where: { property: { hostId } }
+      }),
+      // NEW: Owner earnings data
+      prisma.ownerEarning.aggregate({
+        where: { ownerId: hostId },
+        _sum: {
+          grossAmount: true,
+          platformFee: true,
+          ownerEarning: true
+        },
+        _count: true
+      }),
+      // NEW: Property views analytics
+      prisma.propertyView.aggregate({
+        where: { property: { hostId } },
+        _count: true,
+        _avg: { duration: true }
+      }),
+      // NEW: Wishlist popularity
+      prisma.wishlist.count({
+        where: { property: { hostId } }
+      }),
+      // NEW: Blocked dates
+      prisma.blockedDate.count({
+        where: {
+          property: { hostId },
+          isActive: true,
+          endDate: { gte: new Date() }
+        }
+      }),
+      // NEW: Pending payments
+      prisma.ownerPayment.count({
+        where: {
+          ownerId: hostId,
+          status: { in: ['pending', 'approved'] }
+        }
       })
     ]);
+
+    // Calculate earnings status breakdown
+    const earningsStatus = await prisma.ownerEarning.groupBy({
+      by: ['status'],
+      where: { ownerId: hostId },
+      _sum: { ownerEarning: true },
+      _count: true
+    });
+
+    // Get property performance with views
+    const propertiesWithViews = await prisma.property.findMany({
+      where: { hostId },
+      select: {
+        id: true,
+        name: true,
+        views: true,
+        totalBookings: true,
+        averageRating: true,
+        _count: {
+          select: {
+            bookings: true,
+            reviews: true,
+            wishlistedBy: true
+          }
+        }
+      },
+      orderBy: { views: 'desc' },
+      take: 5
+    });
 
     const totalBookings = bookings.length;
     const totalRevenue = bookings
@@ -812,9 +882,37 @@ export class PropertyService {
       totalRevenue,
       averageRating: avgRating._avg.averageRating || 0,
       recentBookings: bookings.slice(0, 5).map((b: any) => this.transformToBookingInfo(b)),
-      propertyPerformance: [],
+      propertyPerformance: propertiesWithViews.map((p: any) => ({
+        propertyId: p.id,
+        propertyName: p.name,
+        views: p.views,
+        bookings: p._count.bookings,
+        rating: p.averageRating,
+        reviewsCount: p._count.reviews,
+        wishlistedBy: p._count.wishlistedBy,
+        conversionRate: p.views > 0 ? ((p._count.bookings / p.views) * 100).toFixed(2) : '0'
+      })),
       upcomingCheckIns: upcomingCheckIns.map((b: any) => this.transformToBookingInfo(b)),
-      pendingReviews: reviews
+      pendingReviews: reviews,
+      // NEW FIELDS:
+      earnings: {
+        totalGross: earnings._sum.grossAmount || 0,
+        totalPlatformFee: earnings._sum.platformFee || 0,
+        totalNet: earnings._sum.ownerEarning || 0,
+        transactionsCount: earnings._count || 0,
+        byStatus: earningsStatus.map((s: any) => ({
+          status: s.status,
+          amount: s._sum.ownerEarning || 0,
+          count: s._count
+        }))
+      },
+      analytics: {
+        totalViews: propertyViews._count || 0,
+        averageViewDuration: Math.round(propertyViews._avg.duration || 0),
+        totalWishlisted: wishlistCount,
+        activeBlockedDates: blockedDates,
+        pendingPayments: pendingPayments
+      }
     };
   }
 
@@ -1149,46 +1247,68 @@ export class PropertyService {
     const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
 
     const [
+      // Fetch from OwnerEarning table (actual earnings after platform fees)
       totalEarnings,
       monthlyEarnings,
       yearlyEarnings,
       lastMonthEarnings,
+      // Fetch pending and completed payouts from OwnerPayment
+      pendingPayouts,
+      completedPayouts,
+      // Booking data for occupancy calculations
       totalBookings,
       monthlyBookings,
       occupiedNights,
-      totalNights
+      totalNights,
+      // Wallet data for actual balance
+      walletData
     ] = await Promise.all([
-      prisma.booking.aggregate({
-        where: {
-          property: { hostId },
-          status: 'checkout'
-        },
-        _sum: { totalPrice: true }
+      // Total earnings from OwnerEarning table
+      prisma.ownerEarning.aggregate({
+        where: { ownerId: hostId },
+        _sum: { ownerEarning: true, grossAmount: true, platformFee: true }
       }),
-      prisma.booking.aggregate({
+      // Monthly earnings
+      prisma.ownerEarning.aggregate({
         where: {
-          property: { hostId },
-          status: 'checkout',
-          checkOut: { gte: startOfMonth }
+          ownerId: hostId,
+          createdAt: { gte: startOfMonth }
         },
-        _sum: { totalPrice: true }
+        _sum: { ownerEarning: true }
       }),
-      prisma.booking.aggregate({
+      // Yearly earnings
+      prisma.ownerEarning.aggregate({
         where: {
-          property: { hostId },
-          status: 'checkout',
-          checkOut: { gte: startOfYear }
+          ownerId: hostId,
+          createdAt: { gte: startOfYear }
         },
-        _sum: { totalPrice: true }
+        _sum: { ownerEarning: true }
       }),
-      prisma.booking.aggregate({
+      // Last month earnings for growth calculation
+      prisma.ownerEarning.aggregate({
         where: {
-          property: { hostId },
-          status: 'checkout',
-          checkOut: { gte: lastMonthStart, lte: lastMonthEnd }
+          ownerId: hostId,
+          createdAt: { gte: lastMonthStart, lte: lastMonthEnd }
         },
-        _sum: { totalPrice: true }
+        _sum: { ownerEarning: true }
       }),
+      // Pending payouts from OwnerPayment table
+      prisma.ownerPayment.aggregate({
+        where: {
+          ownerId: hostId,
+          status: { in: ['pending', 'approved'] }
+        },
+        _sum: { netAmount: true }
+      }),
+      // Completed payouts
+      prisma.ownerPayment.aggregate({
+        where: {
+          ownerId: hostId,
+          status: 'paid'
+        },
+        _sum: { netAmount: true }
+      }),
+      // Booking counts
       prisma.booking.count({
         where: {
           property: { hostId },
@@ -1202,6 +1322,7 @@ export class PropertyService {
           checkOut: { gte: startOfMonth }
         }
       }),
+      // Occupied nights for occupancy calculation
       prisma.booking.findMany({
         where: {
           property: { hostId },
@@ -1209,8 +1330,14 @@ export class PropertyService {
         },
         select: { checkIn: true, checkOut: true }
       }),
+      // Total properties for occupancy calculation
       prisma.property.count({
         where: { hostId, status: 'active' }
+      }),
+      // Wallet balance
+      prisma.wallet.findUnique({
+        where: { userId: hostId },
+        select: { balance: true, pendingBalance: true }
       })
     ]);
 
@@ -1222,34 +1349,39 @@ export class PropertyService {
     const totalAvailableNights = totalNights * 365;
     const occupancyRate = totalAvailableNights > 0 ? (occupiedNightsCount / totalAvailableNights) * 100 : 0;
 
-    const avgNightlyRate = occupiedNightsCount > 0 ? (totalEarnings._sum.totalPrice || 0) / occupiedNightsCount : 0;
+    const totalEarningsAmount = Number(totalEarnings._sum.ownerEarning || 0);
+    const avgNightlyRate = occupiedNightsCount > 0 ? totalEarningsAmount / occupiedNightsCount : 0;
 
-    const currentMonth = monthlyEarnings._sum.totalPrice || 0;
-    const lastMonth = lastMonthEarnings._sum.totalPrice || 0;
+    const currentMonth = Number(monthlyEarnings._sum.ownerEarning || 0);
+    const lastMonth = Number(lastMonthEarnings._sum.ownerEarning || 0);
     const revenueGrowth = lastMonth > 0 ? ((currentMonth - lastMonth) / lastMonth) * 100 : 0;
 
     return {
-      totalEarnings: totalEarnings._sum.totalPrice || 0,
+      totalEarnings: totalEarningsAmount,
       monthlyEarnings: currentMonth,
-      yearlyEarnings: yearlyEarnings._sum.totalPrice || 0,
-      pendingPayouts: 0,
-      completedPayouts: 0,
+      yearlyEarnings: Number(yearlyEarnings._sum.ownerEarning || 0),
+      pendingPayouts: Number(pendingPayouts._sum.netAmount || 0),
+      completedPayouts: Number(completedPayouts._sum.netAmount || 0),
       averageNightlyRate: avgNightlyRate,
       occupancyRate: occupancyRate,
-      revenueGrowth: revenueGrowth
+      revenueGrowth: revenueGrowth,
+      // Additional fields
+      currentBalance: walletData ? Number(walletData.balance) : 0,
+      pendingBalance: walletData ? Number(walletData.pendingBalance) : 0
     };
   }
 
   async getEarningsBreakdown(hostId: number): Promise<EarningsBreakdown[]> {
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
+    // Get all properties for the host
     const properties = await prisma.property.findMany({
       where: { hostId },
       include: {
         bookings: {
           where: { status: { in: ['checkout'] } },
           select: {
-            totalPrice: true,
+            id: true,
             checkIn: true,
             checkOut: true,
             createdAt: true
@@ -1258,36 +1390,59 @@ export class PropertyService {
       }
     });
 
-    return properties.map(property => {
-      const allBookings = property.bookings;
-      const monthlyBookings = allBookings.filter(b => new Date(b.checkOut) >= startOfMonth);
-      
-      const totalEarnings = allBookings.reduce((sum, b) => sum + b.totalPrice, 0);
-      const monthlyEarnings = monthlyBookings.reduce((sum, b) => sum + b.totalPrice, 0);
-      
-      const totalNights = allBookings.reduce((sum, b) => {
-        const nights = Math.ceil((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / (1000 * 60 * 60 * 24));
-        return sum + nights;
-      }, 0);
+    // Get earnings breakdown by property from OwnerEarning table
+    const earningsData = await Promise.all(
+      properties.map(async (property) => {
+        const [totalEarnings, monthlyEarnings] = await Promise.all([
+          prisma.ownerEarning.aggregate({
+            where: {
+              ownerId: hostId,
+              propertyId: property.id
+            },
+            _sum: { ownerEarning: true, grossAmount: true, platformFee: true },
+            _count: true
+          }),
+          prisma.ownerEarning.aggregate({
+            where: {
+              ownerId: hostId,
+              propertyId: property.id,
+              createdAt: { gte: startOfMonth }
+            },
+            _sum: { ownerEarning: true }
+          })
+        ]);
 
-      const avgBookingValue = allBookings.length > 0 ? totalEarnings / allBookings.length : 0;
-      const occupancyRate = totalNights > 0 ? (totalNights / (365 * (new Date().getFullYear() - new Date(property.createdAt).getFullYear() + 1))) * 100 : 0;
-      
-      const lastBooking = allBookings.length > 0 
-        ? allBookings.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
-        : null;
+        const allBookings = property.bookings;
+        const totalNights = allBookings.reduce((sum, b) => {
+          const nights = Math.ceil((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / (1000 * 60 * 60 * 24));
+          return sum + nights;
+        }, 0);
 
-      return {
-        propertyId: property.id,
-        propertyName: property.name,
-        totalEarnings,
-        monthlyEarnings,
-        bookingsCount: allBookings.length,
-        averageBookingValue: avgBookingValue,
-        occupancyRate: Math.min(occupancyRate, 100),
-        lastBooking: lastBooking?.createdAt.toISOString()
-      };
-    });
+        const totalEarningsAmount = Number(totalEarnings._sum.ownerEarning || 0);
+        const avgBookingValue = totalEarnings._count > 0 ? totalEarningsAmount / totalEarnings._count : 0;
+        const occupancyRate = totalNights > 0 ? (totalNights / (365 * (new Date().getFullYear() - new Date(property.createdAt).getFullYear() + 1))) * 100 : 0;
+
+        const lastBooking = allBookings.length > 0
+          ? allBookings.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
+          : null;
+
+        return {
+          propertyId: property.id,
+          propertyName: property.name,
+          totalEarnings: totalEarningsAmount,
+          monthlyEarnings: Number(monthlyEarnings._sum.ownerEarning || 0),
+          bookingsCount: totalEarnings._count,
+          averageBookingValue: avgBookingValue,
+          occupancyRate: Math.min(occupancyRate, 100),
+          lastBooking: lastBooking?.createdAt.toISOString(),
+          // Additional fields
+          grossAmount: Number(totalEarnings._sum.grossAmount || 0),
+          platformFee: Number(totalEarnings._sum.platformFee || 0)
+        };
+      })
+    );
+
+    return earningsData;
   }
 
   async getHostAnalytics(hostId: number, timeRange: 'week' | 'month' | 'quarter' | 'year' = 'month'): Promise<HostAnalytics> {
@@ -1404,8 +1559,21 @@ export class PropertyService {
       totalCommissions,
       pendingCommissions,
       recentBookings,
-      monthlyCommissions
+      monthlyCommissions,
+      // NEW: Leads management data
+      leadsData,
+      // NEW: Inquiries data
+      inquiriesData,
+      // NEW: Client interactions
+      interactionsData,
+      // NEW: Agent reviews
+      reviewsData,
+      // NEW: Commission details
+      commissionsDetail,
+      // NEW: Property views for agent properties
+      propertyViewsData
     ] = await Promise.all([
+      // Existing queries
       prisma.agentBooking.groupBy({
         by: ['clientId'],
         where: { agentId }
@@ -1423,7 +1591,7 @@ export class PropertyService {
         _sum: { commission: true }
       }),
       prisma.agentBooking.aggregate({
-        where: { 
+        where: {
           agentId,
           status: 'active'
         },
@@ -1437,15 +1605,77 @@ export class PropertyService {
         orderBy: { createdAt: 'desc' },
         take: 10
       }),
-      this.getAgentMonthlyCommissions(agentId)
+      this.getAgentMonthlyCommissions(agentId),
+      // NEW: Fetch leads with status breakdown
+      prisma.lead.groupBy({
+        by: ['status'],
+        where: { agentId },
+        _count: true
+      }),
+      // NEW: Fetch inquiries data
+      prisma.inquiry.aggregate({
+        where: { agentId },
+        _count: true,
+        _avg: { responseTime: true }
+      }),
+      // NEW: Fetch client interactions
+      prisma.clientInteraction.aggregate({
+        where: { agentId },
+        _count: true,
+        _avg: { clientSatisfaction: true }
+      }),
+      // NEW: Fetch agent reviews
+      prisma.agentReview.aggregate({
+        where: { agentId },
+        _count: true,
+        _avg: {
+          rating: true,
+          communicationRating: true,
+          professionalismRating: true,
+          knowledgeRating: true,
+          responsivenessRating: true,
+          resultsRating: true
+        }
+      }),
+      // NEW: Fetch commission details by status
+      prisma.agentCommission.groupBy({
+        by: ['status'],
+        where: { agentId },
+        _sum: { amount: true },
+        _count: true
+      }),
+      // NEW: Fetch property views for agent-managed properties
+      prisma.propertyView.aggregate({
+        where: { property: { agentId } },
+        _count: true
+      })
     ]);
 
     const totalClients = totalClientsData.length;
     const activeClients = activeClientsData.length;
 
-    const avgCommissionPerBooking = recentBookings.length > 0 
-      ? (totalCommissions._sum.commission || 0) / recentBookings.length 
+    const avgCommissionPerBooking = recentBookings.length > 0
+      ? (totalCommissions._sum.commission || 0) / recentBookings.length
       : 0;
+
+    // Calculate lead conversion rate
+    const totalLeads = leadsData.reduce((sum: number, lead: any) => sum + lead._count, 0);
+    const convertedLeads = leadsData.find((l: any) => l.status === 'converted')?._count || 0;
+    const leadConversionRate = totalLeads > 0 ? ((convertedLeads / totalLeads) * 100).toFixed(2) : '0';
+
+    // Get pending inquiries count
+    const pendingInquiriesCount = await prisma.inquiry.count({
+      where: { agentId, isResponded: false }
+    });
+
+    // Get upcoming interactions
+    const upcomingInteractions = await prisma.clientInteraction.count({
+      where: {
+        agentId,
+        scheduledAt: { gte: new Date() },
+        completedAt: null
+      }
+    });
 
     return {
       totalClients,
@@ -1454,7 +1684,49 @@ export class PropertyService {
       pendingCommissions: pendingCommissions._sum.commission || 0,
       avgCommissionPerBooking,
       recentBookings: recentBookings.map(this.transformToAgentBookingInfo),
-      monthlyCommissions
+      monthlyCommissions,
+      // NEW FIELDS:
+      leads: {
+        total: totalLeads,
+        byStatus: leadsData.map((l: any) => ({
+          status: l.status,
+          count: l._count
+        })),
+        conversionRate: leadConversionRate
+      },
+      inquiries: {
+        total: inquiriesData._count || 0,
+        pending: pendingInquiriesCount,
+        averageResponseTime: Math.round(inquiriesData._avg.responseTime || 0)
+      },
+      interactions: {
+        total: interactionsData._count || 0,
+        upcoming: upcomingInteractions,
+        averageClientSatisfaction: interactionsData._avg.clientSatisfaction || 0
+      },
+      reviews: {
+        count: reviewsData._count || 0,
+        averageRating: reviewsData._avg.rating || 0,
+        categoryRatings: {
+          communication: reviewsData._avg.communicationRating || 0,
+          professionalism: reviewsData._avg.professionalismRating || 0,
+          knowledge: reviewsData._avg.knowledgeRating || 0,
+          responsiveness: reviewsData._avg.responsivenessRating || 0,
+          results: reviewsData._avg.resultsRating || 0
+        }
+      },
+      commissions: {
+        total: totalCommissions._sum.commission || 0,
+        pending: pendingCommissions._sum.commission || 0,
+        byStatus: commissionsDetail.map((c: any) => ({
+          status: c.status,
+          amount: c._sum.amount || 0,
+          count: c._count
+        }))
+      },
+      propertyViews: {
+        total: propertyViewsData._count || 0
+      }
     };
   }
 
@@ -2029,6 +2301,8 @@ export class PropertyService {
       beds: property.beds,
       baths: property.baths,
       maxGuests: property.maxGuests,
+      minStay: property.minStay || 1,
+      maxStay: property.maxStay,
       features: property.features ? JSON.parse(property.features as string) : [],
       description: property.description,
       images: property.images ? JSON.parse(property.images as string) : {},
@@ -2082,6 +2356,7 @@ export class PropertyService {
         ? { pricePerNight: property.pricePerNight }
         : { pricePerMonth: property.pricePerMonth }
       ),
+      minStay: property.minStay || 1,
       image: mainImage,
       rating: property.averageRating || 0,
       reviewsCount: property.reviewsCount || 0,

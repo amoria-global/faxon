@@ -460,10 +460,36 @@ export interface TourGuideDashboard {
   averageRating: number;
   totalParticipants: number;
   recentBookings: TourBookingInfo[];
-  tourPerformance: TourAnalytics[];
+  tourPerformance: any[];
   upcomingTours: TourScheduleInfo[];
   pendingReviews: number;
   monthlyEarnings: TourEarningsData[];
+  // NEW FIELDS:
+  messages?: {
+    total: number;
+    unread: number;
+  };
+  notifications?: {
+    total: number;
+    unread: number;
+  };
+  reviews?: {
+    total: number;
+    averageRating: number;
+    wouldRecommend: number;
+    recommendationRate: string;
+  };
+  earnings?: {
+    total: number;
+    byStatus: { status: string; netAmount: number; grossAmount: number; commission: number; count: number }[];
+  };
+  scheduleUtilization?: {
+    totalSchedules: number;
+    totalSlots: number;
+    bookedSlots: number;
+    availableSlots: number;
+    utilizationRate: string;
+  };
 }
 
 export interface TourEarningsData {
@@ -737,7 +763,7 @@ export interface TourSystemAnalytics {
 export type TourDifficulty = 'easy' | 'moderate' | 'challenging' | 'extreme';
 export type TourBookingStatus = 'pending' | 'confirmed' | 'checkedin' | 'cancelled' | 'completed' | 'refunded' | 'no_show';
 export type TourPaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded' | 'partially_refunded';
-export type TourCheckInStatus = 'not_checked_in' | 'checked_in' | 'checked_out' | 'no_show';
+export type TourCheckInStatus = 'not_checkedin' | 'checkedin' | 'no_show';
 export type TourEarningsStatus = 'pending' | 'approved' | 'paid' | 'disputed';
 export type TourMessageType = 'booking_inquiry' | 'booking_confirmation' | 'tour_update' | 'general' | 'support' | 'system';
 export type TourNotificationType = 'booking_received' | 'booking_confirmed' | 'booking_cancelled' | 'tour_reminder' | 'review_received' | 'payment_received' | 'message_received' | 'schedule_reminder' | 'system_update';

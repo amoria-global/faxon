@@ -1,6 +1,7 @@
 //src/controllers/booking.controller.ts
 import { Request, Response } from 'express';
 import { BookingService } from '../services/booking.service';
+import { BookingPriceService } from '../services/booking-price.service';
 import { refundService } from '../services/refund.service';
 import {
   CreatePropertyBookingDto,
@@ -24,9 +25,11 @@ interface AuthenticatedRequest extends Request {
 
 export class BookingController {
   private bookingService: BookingService;
+  private bookingPriceService: BookingPriceService;
 
   constructor() {
     this.bookingService = new BookingService();
+    this.bookingPriceService = new BookingPriceService();
   }
 
   // --- GENERAL BOOKING ENDPOINTS ---
@@ -61,7 +64,8 @@ export class BookingController {
         return;
       }
 
-      const booking = await this.bookingService.getBookingById(bookingId, userId, type);
+      const userType = req.user.userType;
+      const booking = await this.bookingPriceService.getBookingById(bookingId, userId, userType, type);
 
       if (!booking) {
         res.status(404).json({
@@ -176,6 +180,7 @@ export class BookingController {
       }
 
       const userId = parseInt(req.user.userId);
+      const userType = req.user.userType;
       const bookingId = req.params.bookingId;
 
       if (!bookingId) {
@@ -186,8 +191,8 @@ export class BookingController {
         return;
       }
 
-      const booking = await this.bookingService.getPropertyBookingById(bookingId, userId);
-      
+      const booking = await this.bookingPriceService.getPropertyBookingById(bookingId, userId, userType);
+
       if (!booking) {
         res.status(404).json({
           success: false,
@@ -259,6 +264,7 @@ export class BookingController {
       }
 
       const userId = parseInt(req.user.userId);
+      const userType = req.user.userType;
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
 
@@ -281,7 +287,7 @@ export class BookingController {
         }
       });
 
-      const result = await this.bookingService.searchPropertyBookings(userId, filters, page, limit);
+      const result = await this.bookingPriceService.searchPropertyBookings(userId, userType, filters, page, limit);
       
       res.json({
         success: true,
@@ -385,6 +391,7 @@ export class BookingController {
       }
 
       const userId = parseInt(req.user.userId);
+      const userType = req.user.userType;
       const bookingId = req.params.bookingId;
 
       if (!bookingId) {
@@ -395,8 +402,8 @@ export class BookingController {
         return;
       }
 
-      const booking = await this.bookingService.getTourBookingById(bookingId, userId);
-      
+      const booking = await this.bookingPriceService.getTourBookingById(bookingId, userId, userType);
+
       if (!booking) {
         res.status(404).json({
           success: false,
@@ -468,6 +475,7 @@ export class BookingController {
       }
 
       const userId = parseInt(req.user.userId);
+      const userType = req.user.userType;
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
 
@@ -491,7 +499,7 @@ export class BookingController {
         }
       });
 
-      const result = await this.bookingService.searchTourBookings(userId, filters, page, limit);
+      const result = await this.bookingPriceService.searchTourBookings(userId, userType, filters, page, limit);
       
       res.json({
         success: true,
@@ -994,7 +1002,7 @@ export class BookingController {
       // Update check-in status and change status to 'checkedin'
       const updatedBooking = await this.bookingService.updateTourBooking(bookingId, userId, {
         status: 'checkedin',
-        checkInStatus: 'checked_in'
+        checkInStatus: 'checkedin'
       });
 
       res.json({
@@ -1045,7 +1053,7 @@ export class BookingController {
       }
 
       // Validate check-in was done
-      if (booking.checkInStatus !== 'checked_in') {
+      if (booking.checkInStatus !== 'checkedin') {
         res.status(400).json({
           success: false,
           message: 'Cannot check-out. Participant has not checked in yet.'
@@ -1053,9 +1061,8 @@ export class BookingController {
         return;
       }
 
-      // Update check-out status
+      // Update check-out status (tour bookings use 'completed' status, not a separate checkout status)
       const updatedBooking = await this.bookingService.updateTourBooking(bookingId, userId, {
-        checkInStatus: 'checked_out',
         status: 'completed'
       });
 

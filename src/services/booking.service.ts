@@ -845,11 +845,16 @@ export class BookingService {
     if (data.checkInStatus) updateData.checkInStatus = data.checkInStatus;
 
     // Handle check-in/out times
-    if (data.checkInStatus === 'checked_in' && !booking.checkInTime) {
+    if (data.checkInStatus && data.checkInStatus === 'checkedin' && !booking.checkInTime) {
       updateData.checkInTime = new Date();
     }
 
-    if (data.checkInStatus === 'checked_out' && !booking.checkOutTime) {
+    if (data.checkInStatus && data.checkInStatus === 'no_show' && !booking.checkOutTime) {
+      updateData.checkOutTime = new Date();
+    }
+
+    // Handle checkout time based on status (not checkInStatus)
+    if (data.status === 'completed' && !booking.checkOutTime) {
       updateData.checkOutTime = new Date();
     }
 
@@ -1140,7 +1145,25 @@ export class BookingService {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new Error('User not found');
 
-    const [propertyBookings, tourBookings] = await Promise.all([
+    const [
+      propertyBookings,
+      tourBookings,
+      // NEW: Wallet data
+      walletData,
+      // NEW: Wishlist count
+      wishlistCount,
+      // NEW: Reviews given
+      reviewsGiven,
+      tourReviewsGiven,
+      // NEW: Deal codes
+      dealCodes,
+      // NEW: Address unlocks
+      addressUnlocks,
+      // NEW: Notifications
+      notifications,
+      // NEW: Payment transactions
+      paymentTransactions
+    ] = await Promise.all([
       prisma.booking.findMany({
         where: { guestId: userId },
         include: { property: { select: { location: true } } }
@@ -1153,12 +1176,68 @@ export class BookingService {
               locationCity: true
             }
           },
-          schedule: {          // Fix: Include schedule
+          schedule: {
             select: {
               startDate: true
             }
           }
         }
+      }),
+      // NEW: Fetch wallet information
+      prisma.wallet.findUnique({
+        where: { userId },
+        select: {
+          balance: true,
+          pendingBalance: true,
+          currency: true,
+          walletNumber: true,
+          isVerified: true
+        }
+      }),
+      // NEW: Fetch wishlist count
+      prisma.wishlist.count({
+        where: { userId }
+      }),
+      // NEW: Fetch property reviews given
+      prisma.review.count({
+        where: { userId }
+      }),
+      // NEW: Fetch tour reviews given
+      prisma.tourReview.count({
+        where: { userId }
+      }),
+      // NEW: Fetch deal codes
+      prisma.dealCode.findMany({
+        where: { userId },
+        select: {
+          code: true,
+          remainingUnlocks: true,
+          isActive: true,
+          expiresAt: true,
+          _count: {
+            select: { usage: true }
+          }
+        }
+      }),
+      // NEW: Fetch address unlocks
+      prisma.propertyAddressUnlock.aggregate({
+        where: { userId },
+        _count: true,
+        _sum: {
+          paymentAmountUsd: true
+        }
+      }),
+      // NEW: Fetch notifications (tour notifications)
+      prisma.tourNotification.aggregate({
+        where: { userId },
+        _count: true
+      }),
+      // NEW: Fetch payment transactions
+      prisma.paymentTransaction.groupBy({
+        by: ['status'],
+        where: { userId },
+        _count: true,
+        _sum: { amount: true }
       })
     ]);
 
@@ -1194,8 +1273,38 @@ export class BookingService {
     const upcomingBookings = propertyBookings.filter(b =>
       b.status === 'confirmed' && new Date(b.checkIn) > new Date()
     ).length + tourBookings.filter(b =>
-      b.status === 'confirmed' && new Date(b.schedule.startDate) > new Date()  // Fix: Now schedule is available
+      b.status === 'confirmed' && new Date(b.schedule.startDate) > new Date()
     ).length;
+
+    // Get pending reviews (bookings completed without reviews)
+    const pendingPropertyReviews = await prisma.booking.count({
+      where: {
+        guestId: userId,
+        status: 'checkout',
+        reviews: { none: {} }
+      }
+    });
+
+    const pendingTourReviews = await prisma.tourBooking.count({
+      where: {
+        userId,
+        status: 'completed',
+        reviews: { none: {} }
+      }
+    });
+
+    // Get unread notifications
+    const unreadNotifications = await prisma.tourNotification.count({
+      where: { userId, isRead: false }
+    });
+
+    // Get active withdrawal requests
+    const activeWithdrawals = await prisma.withdrawalRequest.count({
+      where: {
+        userId,
+        status: { in: ['PENDING', 'PROCESSING'] }
+      }
+    });
 
     return {
       totalBookings,
@@ -1205,7 +1314,56 @@ export class BookingService {
       averageBookingValue,
       favoriteDestinations,
       upcomingBookings,
-      memberSince: user.createdAt.toISOString()
+      memberSince: user.createdAt.toISOString(),
+      // NEW FIELDS:
+      wallet: walletData ? {
+        balance: walletData.balance,
+        pendingBalance: walletData.pendingBalance,
+        currency: walletData.currency,
+        walletNumber: walletData.walletNumber,
+        isVerified: walletData.isVerified
+      } : null,
+      wishlist: {
+        totalItems: wishlistCount
+      },
+      reviews: {
+        propertyReviewsGiven: reviewsGiven,
+        tourReviewsGiven: tourReviewsGiven,
+        totalReviews: reviewsGiven + tourReviewsGiven,
+        pendingPropertyReviews,
+        pendingTourReviews,
+        totalPendingReviews: pendingPropertyReviews + pendingTourReviews
+      },
+      dealCodes: {
+        total: dealCodes.length,
+        active: dealCodes.filter(dc => dc.isActive && new Date(dc.expiresAt) > new Date()).length,
+        codes: dealCodes.map(dc => ({
+          code: dc.code,
+          remainingUnlocks: dc.remainingUnlocks,
+          isActive: dc.isActive,
+          expiresAt: dc.expiresAt.toISOString(),
+          timesUsed: dc._count.usage
+        }))
+      },
+      addressUnlocks: {
+        total: addressUnlocks._count || 0,
+        totalSpent: Number(addressUnlocks._sum.paymentAmountUsd || 0)
+      },
+      notifications: {
+        total: notifications._count || 0,
+        unread: unreadNotifications
+      },
+      payments: {
+        transactionCount: paymentTransactions.reduce((sum: number, t: any) => sum + t._count, 0),
+        byStatus: paymentTransactions.map((t: any) => ({
+          status: t.status,
+          count: t._count,
+          totalAmount: t._sum.amount || 0
+        }))
+      },
+      withdrawals: {
+        active: activeWithdrawals
+      }
     };
   }
 

@@ -206,22 +206,37 @@ router.post('/unlock/cancel', propertyAddressUnlockController.cancelUnlockReques
 
 /**
  * @route   GET /api/properties/host/unlock-requests
- * @desc    Get host unlock requests - NO MONEY DETAILS (host view)
+ * @desc    Get host unlock analytics (host view)
  * @access  Private (Hosts only)
  * @returns {
- *            totalRequests: number,
- *            pendingRequests: number,
- *            completedRequests: number,
- *            requestsByProperty: Array<{
- *              propertyId: number,
- *              propertyName: string,
- *              requests: Array<{
- *                requestDate: Date,
- *                status: string,
- *                requestType: string,
- *                guest: { name, email, phone }
- *                // NO money amounts, NO unlock codes
- *              }>
+ *            totalUnlocks: number,
+ *            revenue: {
+ *              total: number,
+ *              nonRefundable: number,
+ *              monthlyBooking: number,
+ *              currency: string
+ *            },
+ *            appreciationStats: {
+ *              appreciated: number,
+ *              neutral: number,
+ *              notAppreciated: number
+ *            },
+ *            topUnlockedProperties: Array<{
+ *              propertyId: string,
+ *              title: string,
+ *              unlockCount: number,
+ *              revenue: number
+ *            }>,
+ *            recentUnlocks: Array<{
+ *              id: string,
+ *              propertyId: string,
+ *              propertyTitle: string,
+ *              unlockDate: string,
+ *              appreciationSubmitted: boolean,
+ *              appreciationLevel: string | null,
+ *              paymentMethod: string,
+ *              paymentStatus: string,
+ *              guest: { id, name, email, phone, profileImage }
  *            }>
  *          }
  */

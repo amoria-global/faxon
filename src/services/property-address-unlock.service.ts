@@ -677,6 +677,78 @@ export class PropertyAddressUnlockService {
           });
           // Don't fail the payment completion if admin notification fails
         }
+
+        // ✅ AGENT COMMISSION: If property has an agent AND payment method is non_refundable_fee
+        // Give agent 25% of payment amount and create a bonus
+        if (updatedUnlock.paymentMethod === 'non_refundable_fee') {
+          try {
+            // Fetch full unlock with property and agent details
+            const unlockWithAgent = await prisma.propertyAddressUnlock.findUnique({
+              where: { transactionReference },
+              include: {
+                property: {
+                  include: {
+                    agent: true
+                  }
+                }
+              }
+            });
+
+            if (unlockWithAgent?.property.agent) {
+              const agentId = unlockWithAgent.property.agent.id;
+              const paymentAmountRwf = Number(unlockWithAgent.paymentAmountRwf);
+              const commissionAmount = paymentAmountRwf * 0.25; // 25% commission
+
+              logger.info('Processing agent commission for address unlock', 'PropertyAddressUnlock', {
+                unlockId: unlockWithAgent.unlockId,
+                agentId,
+                paymentAmountRwf,
+                commissionAmount
+              });
+
+              // Fund agent wallet with 25% commission
+              await this.fundAgentWalletForUnlock(
+                agentId,
+                commissionAmount,
+                unlockWithAgent.unlockId,
+                unlockWithAgent.propertyId
+              );
+
+              // Create bonus record for tracking and claiming
+              await prisma.bonus.create({
+                data: {
+                  userId: agentId,
+                  amount: commissionAmount,
+                  currency: 'RWF',
+                  sourceType: 'address_unlock',
+                  sourceId: unlockWithAgent.unlockId,
+                  propertyId: unlockWithAgent.propertyId,
+                  description: `Agent commission (25%) for property address unlock: ${unlockWithAgent.property.name}`,
+                  status: 'claimed', // Automatically claimed since wallet is already funded
+                  claimedAt: new Date(),
+                  metadata: {
+                    paymentMethod: 'non_refundable_fee',
+                    paymentAmountRwf,
+                    commissionRate: 0.25,
+                    transactionReference
+                  } as any
+                }
+              });
+
+              logger.info('✅ Agent commission and bonus created successfully', 'PropertyAddressUnlock', {
+                unlockId: unlockWithAgent.unlockId,
+                agentId,
+                commissionAmount
+              });
+            }
+          } catch (commissionError) {
+            logger.error('Failed to process agent commission for unlock', 'PropertyAddressUnlock', {
+              error: commissionError instanceof Error ? commissionError.message : 'Unknown error',
+              transactionReference
+            });
+            // Don't fail the payment completion if commission processing fails
+          }
+        }
       }
     } catch (error) {
       logger.error('Error processing payment callback', 'PropertyAddressUnlock', {
@@ -1630,18 +1702,53 @@ export class PropertyAddressUnlockService {
   }
 
   /**
-   * Get host unlock requests - NO MONEY DETAILS
-   * Host can see: requests list, guest contact info, request status
-   * Host CANNOT see: payment amounts, transaction details, unlock codes
+   * Get host unlock analytics
+   * Returns analytics for all unlock requests on host's properties including:
+   * - Total unlocks count
+   * - Revenue breakdown (total, non-refundable, monthly booking)
+   * - Appreciation statistics (appreciated, neutral, not appreciated)
+   * - Top unlocked properties by count
+   * - Recent unlock requests with guest details
    */
   async getHostUnlockRequests(hostId: number): Promise<{
     success: boolean;
     message: string;
     data: {
-      totalRequests: number;
-      pendingRequests: number;
-      completedRequests: number;
-      requestsByProperty: any[];
+      totalUnlocks: number;
+      revenue: {
+        total: number;
+        nonRefundable: number;
+        monthlyBooking: number;
+        currency: string;
+      };
+      appreciationStats: {
+        appreciated: number;
+        neutral: number;
+        notAppreciated: number;
+      };
+      topUnlockedProperties: Array<{
+        propertyId: string;
+        title: string;
+        unlockCount: number;
+        revenue: number;
+      }>;
+      recentUnlocks: Array<{
+        id: string;
+        propertyId: string;
+        propertyTitle: string;
+        unlockDate: string;
+        appreciationSubmitted: boolean;
+        appreciationLevel: string | null;
+        paymentMethod: string;
+        paymentStatus: string;
+        guest: {
+          id: number;
+          name: string;
+          email: string;
+          phone: string | null;
+          profileImage: string | null;
+        };
+      }>;
     };
   }> {
     try {
@@ -1658,19 +1765,29 @@ export class PropertyAddressUnlockService {
           success: true,
           message: 'No properties found for this host',
           data: {
-            totalRequests: 0,
-            pendingRequests: 0,
-            completedRequests: 0,
-            requestsByProperty: []
+            totalUnlocks: 0,
+            revenue: {
+              total: 0,
+              nonRefundable: 0,
+              monthlyBooking: 0,
+              currency: 'RWF'
+            },
+            appreciationStats: {
+              appreciated: 0,
+              neutral: 0,
+              notAppreciated: 0
+            },
+            topUnlockedProperties: [],
+            recentUnlocks: []
           }
         };
       }
 
-      // Get all unlock requests for host's properties
+      // Get all unlock requests for host's properties (only completed for analytics)
       const unlocks = await prisma.propertyAddressUnlock.findMany({
         where: {
           propertyId: { in: propertyIds },
-          paymentStatus: { in: ['COMPLETED', 'PENDING'] }
+          paymentStatus: 'COMPLETED'
         },
         include: {
           property: {
@@ -1694,59 +1811,87 @@ export class PropertyAddressUnlockService {
           }
         },
         orderBy: {
-          createdAt: 'desc'
+          unlockedAt: 'desc'
         }
       });
 
-      const pendingCount = unlocks.filter(u => u.paymentStatus === 'PENDING').length;
-      const completedCount = unlocks.filter(u => u.paymentStatus === 'COMPLETED').length;
+      // Calculate revenue statistics
+      const revenue = {
+        total: unlocks.reduce((sum, unlock) =>
+          sum + parseFloat(unlock.paymentAmountRwf.toString()), 0
+        ),
+        nonRefundable: unlocks
+          .filter(u => u.paymentMethod === 'non_refundable_fee')
+          .reduce((sum, unlock) => sum + parseFloat(unlock.paymentAmountRwf.toString()), 0),
+        monthlyBooking: unlocks
+          .filter(u => u.paymentMethod === 'three_month_30_percent')
+          .reduce((sum, unlock) => sum + parseFloat(unlock.paymentAmountRwf.toString()), 0),
+        currency: 'RWF'
+      };
 
-      // Group requests by property - NO MONEY DETAILS
-      const requestsByProperty = propertyIds.map(propertyId => {
-        const propertyUnlocks = unlocks.filter(u => u.propertyId === propertyId);
-        const property = propertyUnlocks[0]?.property;
+      // Calculate appreciation statistics
+      const appreciationStats = {
+        appreciated: unlocks.filter(u => u.appreciationLevel === 'appreciated').length,
+        neutral: unlocks.filter(u => u.appreciationLevel === 'neutral').length,
+        notAppreciated: unlocks.filter(u => u.appreciationLevel === 'not_appreciated').length
+      };
 
-        return {
-          propertyId,
-          propertyName: property?.name || 'Unknown',
-          propertyLocation: property?.location || 'Unknown',
-          propertyType: property?.type || 'Unknown',
-          propertyImage: property?.images ? (Array.isArray(property.images) ? property.images[0] : null) : null,
-          totalRequests: propertyUnlocks.length,
-          pendingRequests: propertyUnlocks.filter(u => u.paymentStatus === 'PENDING').length,
-          completedRequests: propertyUnlocks.filter(u => u.paymentStatus === 'COMPLETED').length,
-          requests: propertyUnlocks.map(unlock => ({
-            // Request info - no unlock ID or codes exposed to host
-            requestDate: unlock.createdAt,
-            status: unlock.paymentStatus === 'COMPLETED' ? 'Directions Requested' : 'Pending',
-            requestType: unlock.paymentMethod === 'three_month_30_percent' ? 'Booking Interest' : 'Quick View',
+      // Calculate top unlocked properties
+      const propertyMap = new Map<number, {
+        count: number;
+        revenue: number;
+        property: { id: number; name: string; location: string; type: string; images: any };
+      }>();
 
-            // Guest contact info - so host can reach out
-            guest: {
-              id: unlock.user.id,
-              name: `${unlock.user.firstName} ${unlock.user.lastName}`,
-              email: unlock.user.email,
-              phone: unlock.user.phone,
-              profileImage: unlock.user.profileImage
-            },
-
-            // Appreciation/feedback if submitted
-            appreciationSubmitted: unlock.appreciationSubmitted,
-            appreciationLevel: unlock.appreciationLevel,
-
-            // NO payment amounts, NO transaction reference, NO unlock codes
-          }))
+      unlocks.forEach(unlock => {
+        const existing = propertyMap.get(unlock.propertyId) || {
+          count: 0,
+          revenue: 0,
+          property: unlock.property
         };
-      }).filter(p => p.totalRequests > 0);
+        existing.count++;
+        existing.revenue += parseFloat(unlock.paymentAmountRwf.toString());
+        propertyMap.set(unlock.propertyId, existing);
+      });
+
+      const topUnlockedProperties = Array.from(propertyMap.entries())
+        .map(([propertyId, data]) => ({
+          propertyId: propertyId.toString(),
+          title: data.property.name,
+          unlockCount: data.count,
+          revenue: Math.round(data.revenue)
+        }))
+        .sort((a, b) => b.unlockCount - a.unlockCount)
+        .slice(0, 10);
+
+      // Create recent unlocks list
+      const recentUnlocks = unlocks.slice(0, 50).map(unlock => ({
+        id: unlock.unlockId,
+        propertyId: unlock.propertyId.toString(),
+        propertyTitle: unlock.property.name,
+        unlockDate: (unlock.unlockedAt || unlock.createdAt).toISOString(),
+        appreciationSubmitted: unlock.appreciationSubmitted,
+        appreciationLevel: unlock.appreciationLevel,
+        paymentMethod: unlock.paymentMethod,
+        paymentStatus: unlock.paymentStatus,
+        guest: {
+          id: unlock.user.id,
+          name: `${unlock.user.firstName} ${unlock.user.lastName}`,
+          email: unlock.user.email,
+          phone: unlock.user.phone,
+          profileImage: unlock.user.profileImage
+        }
+      }));
 
       return {
         success: true,
-        message: 'Host unlock requests retrieved successfully',
+        message: 'Host unlock analytics retrieved successfully',
         data: {
-          totalRequests: unlocks.length,
-          pendingRequests: pendingCount,
-          completedRequests: completedCount,
-          requestsByProperty
+          totalUnlocks: unlocks.length,
+          revenue,
+          appreciationStats,
+          topUnlockedProperties,
+          recentUnlocks
         }
       };
     } catch (error) {
@@ -1757,12 +1902,22 @@ export class PropertyAddressUnlockService {
 
       return {
         success: false,
-        message: 'Failed to retrieve unlock requests',
+        message: 'Failed to retrieve unlock analytics',
         data: {
-          totalRequests: 0,
-          pendingRequests: 0,
-          completedRequests: 0,
-          requestsByProperty: []
+          totalUnlocks: 0,
+          revenue: {
+            total: 0,
+            nonRefundable: 0,
+            monthlyBooking: 0,
+            currency: 'RWF'
+          },
+          appreciationStats: {
+            appreciated: 0,
+            neutral: 0,
+            notAppreciated: 0
+          },
+          topUnlockedProperties: [],
+          recentUnlocks: []
         }
       };
     }
@@ -2074,6 +2229,76 @@ export class PropertyAddressUnlockService {
           recentActivity: []
         }
       };
+    }
+  }
+
+  /**
+   * Fund agent wallet for address unlock commission
+   * Credits agent wallet with commission amount
+   */
+  private async fundAgentWalletForUnlock(
+    agentId: number,
+    amount: number,
+    unlockId: string,
+    propertyId: number
+  ): Promise<void> {
+    try {
+      // Get or create wallet for agent
+      let wallet = await prisma.wallet.findUnique({
+        where: { userId: agentId }
+      });
+
+      if (!wallet) {
+        wallet = await prisma.wallet.create({
+          data: {
+            userId: agentId,
+            balance: 0,
+            pendingBalance: 0,
+            currency: 'RWF', // Agent commissions are in RWF
+            isActive: true
+          }
+        });
+      }
+
+      // Credit to balance (immediately available for withdrawal)
+      const newBalance = (wallet.balance || 0) + amount;
+
+      // Update wallet balance
+      await prisma.wallet.update({
+        where: { userId: agentId },
+        data: { balance: newBalance }
+      });
+
+      // Create wallet transaction record
+      await prisma.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'credit',
+          amount: Math.abs(amount),
+          balanceBefore: wallet.balance || 0,
+          balanceAfter: newBalance,
+          reference: `UNLOCK-COMMISSION-${unlockId}`,
+          description: `Agent commission (25%) for address unlock - Property ID: ${propertyId}`,
+          transactionId: unlockId
+        }
+      });
+
+      logger.info('[ADDRESS_UNLOCK] Agent wallet funded successfully', 'PropertyAddressUnlock', {
+        agentId,
+        amount,
+        unlockId,
+        previousBalance: wallet.balance || 0,
+        newBalance,
+        note: 'Funds are immediately available for withdrawal'
+      });
+    } catch (error) {
+      logger.error('[ADDRESS_UNLOCK] Failed to fund agent wallet', 'PropertyAddressUnlock', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        agentId,
+        amount,
+        unlockId
+      });
+      throw error;
     }
   }
 }
