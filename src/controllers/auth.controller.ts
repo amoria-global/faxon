@@ -1126,4 +1126,183 @@ async getKYCStatus(req: Request, res: Response, next: NextFunction) {
       });
     }
   }
+
+  // --- AGENT ASSESSMENT METHODS ---
+
+  async submitAgentAssessment(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'User not authenticated'
+        });
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const { questionsAndAnswers } = req.body;
+
+      if (!questionsAndAnswers || !Array.isArray(questionsAndAnswers)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Questions and answers are required and must be an array'
+        });
+      }
+
+      if (questionsAndAnswers.length !== 40) {
+        return res.status(400).json({
+          success: false,
+          message: 'Assessment must contain exactly 40 questions with answers'
+        });
+      }
+
+      // Validate each question has required fields
+      const isValid = questionsAndAnswers.every(q =>
+        typeof q.questionId === 'number' &&
+        typeof q.question === 'string' &&
+        typeof q.answer === 'string' &&
+        typeof q.isCorrect === 'boolean'
+      );
+
+      if (!isValid) {
+        return res.status(400).json({
+          success: false,
+          message: 'Each question must have questionId, question, answer, and isCorrect fields'
+        });
+      }
+
+      const assessment = await authService.submitAgentAssessment(agentId, {
+        questionsAndAnswers
+      });
+
+      const MAX_ATTEMPTS = 3;
+      const remainingAttempts = MAX_ATTEMPTS - assessment.attemptNumber;
+
+      let message: string;
+      if (assessment.isPassed) {
+        message = `Congratulations! You passed with a score of ${assessment.score.toFixed(1)}%. Your assessment is complete.`;
+      } else if (remainingAttempts > 0) {
+        message = `You scored ${assessment.score.toFixed(1)}%. You need 80% or higher to pass. You have ${remainingAttempts} attempt${remainingAttempts === 1 ? '' : 's'} remaining.`;
+      } else {
+        message = `You scored ${assessment.score.toFixed(1)}%. You have used all ${MAX_ATTEMPTS} attempts. Please contact support for assistance.`;
+      }
+
+      res.json({
+        success: true,
+        data: {
+          assessment,
+          message,
+          remainingAttempts
+        }
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
+
+  async getAgentAssessmentStatus(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'User not authenticated'
+        });
+      }
+
+      const agentId = parseInt(req.user.userId);
+      const assessment = await authService.getAgentAssessmentStatus(agentId);
+
+      // Determine if retake is allowed:
+      // - No assessment yet: can take (first attempt)
+      // - Already passed (score >= 80%): CANNOT retake
+      // - Failed but reached max attempts (3): CANNOT retake
+      // - Failed and under max attempts: CAN retake
+      const MAX_ATTEMPTS = 3;
+      const canRetake = assessment
+        ? !assessment.isPassed && assessment.attemptNumber < MAX_ATTEMPTS
+        : true;
+
+      const remainingAttempts = assessment
+        ? Math.max(0, MAX_ATTEMPTS - assessment.attemptNumber)
+        : MAX_ATTEMPTS;
+
+      res.json({
+        success: true,
+        data: {
+          hasSubmitted: assessment !== null,
+          assessment: assessment || undefined,
+          canRetake,
+          remainingAttempts,
+          maxAttempts: MAX_ATTEMPTS
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
+
+  async getAllAgentAssessments(req: Request, res: Response, next: NextFunction) {
+    try {
+      const status = req.query.status as string;
+      const isPassed = req.query.isPassed === 'true' ? true : req.query.isPassed === 'false' ? false : undefined;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+
+      const result = await authService.getAllAgentAssessments({
+        status,
+        isPassed,
+        page,
+        limit
+      });
+
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
+
+  async reviewAgentAssessment(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'User not authenticated'
+        });
+      }
+
+      const { assessmentId } = req.params;
+      const { notes } = req.body;
+      const reviewerId = parseInt(req.user.userId);
+
+      const assessment = await authService.reviewAgentAssessment(
+        assessmentId,
+        reviewerId,
+        notes
+      );
+
+      res.json({
+        success: true,
+        data: {
+          assessment,
+          message: 'Assessment reviewed successfully'
+        }
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
 }

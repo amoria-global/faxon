@@ -6,11 +6,11 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { config } from '../config/config';
 import { BrevoMailingService } from '../utils/brevo.auth';
 import { BrevoSMSService } from '../utils/brevo.sms.auth';
-import { 
-  RegisterDto, 
-  LoginDto, 
-  OAuthDto, 
-  JwtPayload, 
+import {
+  RegisterDto,
+  LoginDto,
+  OAuthDto,
+  JwtPayload,
   UserInfo,
   AuthResponse,
   ChangePasswordDto,
@@ -20,7 +20,10 @@ import {
   AdminUpdateUserDto,
   TourGuideLoginResponse,
   TourGuideType,
-  DocumentType
+  DocumentType,
+  SubmitAssessmentDto,
+  AssessmentQuestion,
+  AgentAssessmentInfo
 } from '../types/auth.types';
 
 const prisma = new PrismaClient();
@@ -340,9 +343,9 @@ export class AuthService {
     // Send welcome notifications
     await this.sendNotifications(user, 'welcome', req);
 
-    return { 
-      user: this.transformToUserInfo(user), 
-      accessToken, 
+    return {
+      user: await this.transformToUserInfo(user),
+      accessToken,
       refreshToken,
       applicationId
     };
@@ -390,7 +393,7 @@ export class AuthService {
       await this.sendNotifications(user, 'two_factor', req, verification);
 
       return {
-        user: this.transformToUserInfo(user),
+        user: await this.transformToUserInfo(user),
         accessToken: '',
         refreshToken: '',
         requiresTwoFactor: true,
@@ -412,10 +415,10 @@ export class AuthService {
     // Send login notifications
     await this.sendNotifications(updatedUser, 'login', req);
 
-    const baseResponse = { 
-      user: this.transformToUserInfo(updatedUser), 
-      accessToken, 
-      refreshToken 
+    const baseResponse = {
+      user: await this.transformToUserInfo(updatedUser),
+      accessToken,
+      refreshToken
     };
 
     // Enhanced response for tour guides
@@ -465,7 +468,7 @@ export class AuthService {
     await this.createSession(user.id, refreshToken);
 
     return {
-      user: this.transformToUserInfo(updatedUser),
+      user: await this.transformToUserInfo(updatedUser),
       accessToken,
       refreshToken
     };
@@ -843,7 +846,7 @@ export class AuthService {
       data: updateData
     });
 
-    return this.transformToUserInfo(updatedUser);
+    return await this.transformToUserInfo(updatedUser);
   }
 
   async getUserDocuments(userId: number): Promise<{
@@ -944,10 +947,10 @@ export class AuthService {
     const notificationType = isNewUser ? 'welcome' : 'login';
     await this.sendNotifications(user, notificationType, req);
 
-    return { 
-      user: this.transformToUserInfo(user), 
-      accessToken, 
-      refreshToken 
+    return {
+      user: await this.transformToUserInfo(user),
+      accessToken,
+      refreshToken
     };
   }
 
@@ -1003,7 +1006,7 @@ export class AuthService {
     });
 
     return {
-      user: this.transformToUserInfo(session.user),
+      user: await this.transformToUserInfo(session.user),
       accessToken,
       refreshToken
     };
@@ -1047,7 +1050,7 @@ export class AuthService {
         }
       });
     }
-    return this.transformToUserInfo(user);
+    return await this.transformToUserInfo(user);
   }
 
   async updateUserProfile(userId: number, data: UpdateUserProfileDto, req?: any): Promise<UserInfo> {
@@ -1114,7 +1117,7 @@ export class AuthService {
 
     await this.sendNotifications(updatedUser, 'profile_update', req);
 
-    return this.transformToUserInfo(updatedUser);
+    return await this.transformToUserInfo(updatedUser);
   }
 
   async updateProfileImage(userId: number, imageUrl: string): Promise<UserInfo> {
@@ -1123,7 +1126,7 @@ export class AuthService {
       data: { profileImage: imageUrl }
     });
 
-    return this.transformToUserInfo(user);
+    return await this.transformToUserInfo(user);
   }
 
   // --- COMMUNICATION PREFERENCES ---
@@ -1140,7 +1143,7 @@ export class AuthService {
       }
     });
 
-    return this.transformToUserInfo(updatedUser);
+    return await this.transformToUserInfo(updatedUser);
   }
 
   // --- PASSWORD MANAGEMENT ---
@@ -1269,7 +1272,7 @@ export class AuthService {
       orderBy: { createdAt: 'desc' }
     });
 
-    return users.map((user: any) => this.transformToUserInfo(user));
+    return Promise.all(users.map((user: any) => this.transformToUserInfo(user)));
   }
 
   async getUserByEmail(email: string): Promise<UserInfo | null> {
@@ -1277,7 +1280,7 @@ export class AuthService {
       where: { email }
     });
 
-    return user ? this.transformToUserInfo(user) : null;
+    return user ? await this.transformToUserInfo(user) : null;
   }
 
   async getUserById(id: number): Promise<UserInfo | null> {
@@ -1285,7 +1288,7 @@ export class AuthService {
       where: { id }
     });
 
-    return user ? this.transformToUserInfo(user) : null;
+    return user ? await this.transformToUserInfo(user) : null;
   }
 
   async getUsersByProvider(provider: 'manual' | 'google' | 'apple'): Promise<UserInfo[]> {
@@ -1294,7 +1297,7 @@ export class AuthService {
       orderBy: { createdAt: 'desc' }
     });
 
-    return users.map((user: any) => this.transformToUserInfo(user));
+    return Promise.all(users.map((user: any) => this.transformToUserInfo(user)));
   }
 
   async getUserSessions(userId: number): Promise<UserSession[]> {
@@ -1386,7 +1389,7 @@ export class AuthService {
     });
 
     await this.sendNotifications(user, 'welcome', req);
-    return this.transformToUserInfo(user);
+    return await this.transformToUserInfo(user);
   }
 
   async adminUpdateUser(userId: number, data: AdminUpdateUserDto & UpdateUserProfileDto): Promise<UserInfo> {
@@ -1438,7 +1441,7 @@ export class AuthService {
       data: updateData
     });
 
-    return this.transformToUserInfo(updatedUser);
+    return await this.transformToUserInfo(updatedUser);
   }
 
   async adminDeleteUser(userId: number): Promise<{ message: string }> {
@@ -1498,7 +1501,7 @@ export class AuthService {
     });
 
     await this.sendNotifications(updatedUser, 'account_status', req, undefined, { status: 'suspended' });
-    return this.transformToUserInfo(updatedUser);
+    return await this.transformToUserInfo(updatedUser);
   }
 
   async adminActivateUser(userId: number, req?: any): Promise<UserInfo> {
@@ -1526,7 +1529,7 @@ export class AuthService {
     });
 
     await this.sendNotifications(updatedUser, 'account_status', req, undefined, { status: 'reactivated' });
-    return this.transformToUserInfo(updatedUser);
+    return await this.transformToUserInfo(updatedUser);
   }
 
   async adminResetUserPassword(userId: number, req?: any): Promise<{ temporaryPassword: string }> {
@@ -1607,7 +1610,7 @@ export class AuthService {
     }
 
     return {
-      user: this.transformToUserInfo(updatedUser),
+      user: await this.transformToUserInfo(updatedUser),
       requiresDocumentUpload: !addressDocumentUrl
     };
   }
@@ -1666,7 +1669,7 @@ export class AuthService {
       }
     }
 
-    return this.transformToUserInfo(updatedUser);
+    return await this.transformToUserInfo(updatedUser);
   }
 
   // --- REFERRAL SYSTEM ---
@@ -1943,7 +1946,7 @@ export class AuthService {
     );
   }
 
-  private transformToUserInfo(user: any): UserInfo {
+  private async transformToUserInfo(user: any): Promise<UserInfo> {
     let languages, specializations, certifications;
     try {
       languages = user.languages ? JSON.parse(user.languages) : undefined;
@@ -1953,6 +1956,12 @@ export class AuthService {
       languages = user.languages;
       specializations = user.specializations;
       certifications = user.certifications;
+    }
+
+    // Fetch agent assessment if user is an agent
+    let agentAssessment = undefined;
+    if (user.userType === 'agent') {
+      agentAssessment = await this.getAgentAssessmentStatus(user.id);
     }
 
     return {
@@ -2016,7 +2025,209 @@ export class AuthService {
       referredBy: user.referredBy,
       referralCode: user.referralCode,
       referralStatus: user.referralStatus,
-      referredAt: user.referredAt?.toISOString()
+      referredAt: user.referredAt?.toISOString(),
+      // Agent Assessment
+      agentAssessment: agentAssessment || undefined
+    };
+  }
+
+  // --- AGENT ASSESSMENT METHODS ---
+
+  // Maximum number of attempts allowed (including the first attempt)
+  private readonly MAX_ASSESSMENT_ATTEMPTS = 3;
+
+  /**
+   * Submit agent assessment with 40 questions and answers
+   * Automatically calculates score and determines pass/fail (80% required)
+   * Maximum 3 attempts allowed, no retakes after passing
+   */
+  async submitAgentAssessment(agentId: number, data: SubmitAssessmentDto): Promise<AgentAssessmentInfo> {
+    // Verify user is an agent
+    const user = await prisma.user.findUnique({
+      where: { id: agentId },
+      select: { userType: true }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    if (user.userType !== 'agent') {
+      throw new Error('Only agents can submit assessments');
+    }
+
+    // Validate questions and answers
+    if (!data.questionsAndAnswers || data.questionsAndAnswers.length !== 40) {
+      throw new Error('Assessment must contain exactly 40 questions with answers');
+    }
+
+    // Check if assessment already exists
+    const existingAssessment = await prisma.agentAssessment.findUnique({
+      where: { agentId }
+    });
+
+    // Prevent retakes if already passed (score >= 80%)
+    if (existingAssessment && existingAssessment.isPassed) {
+      throw new Error('You have already passed the assessment. No retakes are allowed after passing.');
+    }
+
+    // Check maximum attempts (3 attempts total)
+    if (existingAssessment && existingAssessment.attemptNumber >= this.MAX_ASSESSMENT_ATTEMPTS) {
+      throw new Error(`Maximum assessment attempts (${this.MAX_ASSESSMENT_ATTEMPTS}) reached. Please contact support for assistance.`);
+    }
+
+    // Calculate score
+    const correctAnswers = data.questionsAndAnswers.filter(q => q.isCorrect).length;
+    const score = (correctAnswers / 40) * 100;
+    const isPassed = score >= 80;
+    const status = isPassed ? 'passed' : 'failed';
+
+    let assessment;
+
+    if (existingAssessment) {
+      // Update existing assessment (retake)
+      assessment = await prisma.agentAssessment.update({
+        where: { agentId },
+        data: {
+          questionsAndAnswers: data.questionsAndAnswers as any,
+          totalQuestions: 40,
+          correctAnswers,
+          score,
+          isPassed,
+          status,
+          submittedAt: new Date(),
+          attemptNumber: existingAssessment.attemptNumber + 1
+        }
+      });
+    } else {
+      // Create new assessment (first attempt)
+      assessment = await prisma.agentAssessment.create({
+        data: {
+          agentId,
+          questionsAndAnswers: data.questionsAndAnswers as any,
+          totalQuestions: 40,
+          correctAnswers,
+          score,
+          isPassed,
+          status,
+          submittedAt: new Date(),
+          attemptNumber: 1
+        }
+      });
+    }
+
+    return this.mapAssessmentToInfo(assessment);
+  }
+
+  /**
+   * Get agent assessment status
+   */
+  async getAgentAssessmentStatus(agentId: number): Promise<AgentAssessmentInfo | null> {
+    const assessment = await prisma.agentAssessment.findUnique({
+      where: { agentId }
+    });
+
+    if (!assessment) {
+      return null;
+    }
+
+    return this.mapAssessmentToInfo(assessment);
+  }
+
+  /**
+   * Admin: Review and update assessment
+   */
+  async reviewAgentAssessment(
+    assessmentId: string,
+    reviewerId: number,
+    notes?: string
+  ): Promise<AgentAssessmentInfo> {
+    const assessment = await prisma.agentAssessment.update({
+      where: { id: assessmentId },
+      data: {
+        reviewedAt: new Date(),
+        reviewedBy: reviewerId,
+        reviewerNotes: notes
+      }
+    });
+
+    return this.mapAssessmentToInfo(assessment);
+  }
+
+  /**
+   * Get all agent assessments (Admin only)
+   */
+  async getAllAgentAssessments(filters?: {
+    status?: string;
+    isPassed?: boolean;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 10;
+    const offset = (page - 1) * limit;
+
+    const where: any = {};
+    if (filters?.status) where.status = filters.status;
+    if (filters?.isPassed !== undefined) where.isPassed = filters.isPassed;
+
+    const [assessments, total] = await Promise.all([
+      prisma.agentAssessment.findMany({
+        where,
+        include: {
+          agent: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true
+            }
+          }
+        },
+        orderBy: { submittedAt: 'desc' },
+        skip: offset,
+        take: limit
+      }),
+      prisma.agentAssessment.count({ where })
+    ]);
+
+    return {
+      assessments: assessments.map(a => ({
+        ...this.mapAssessmentToInfo(a),
+        agent: {
+          id: a.agent.id,
+          fullName: `${a.agent.firstName} ${a.agent.lastName}`.trim(),
+          email: a.agent.email,
+          phone: a.agent.phone
+        }
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    };
+  }
+
+  /**
+   * Helper method to map Prisma assessment to AgentAssessmentInfo
+   */
+  private mapAssessmentToInfo(assessment: any): AgentAssessmentInfo {
+    return {
+      id: assessment.id,
+      agentId: assessment.agentId,
+      totalQuestions: assessment.totalQuestions,
+      correctAnswers: assessment.correctAnswers,
+      score: assessment.score,
+      isPassed: assessment.isPassed,
+      status: assessment.status,
+      submittedAt: assessment.submittedAt?.toISOString(),
+      reviewedAt: assessment.reviewedAt?.toISOString(),
+      reviewedBy: assessment.reviewedBy,
+      reviewerNotes: assessment.reviewerNotes,
+      attemptNumber: assessment.attemptNumber,
+      createdAt: assessment.createdAt.toISOString(),
+      updatedAt: assessment.updatedAt.toISOString()
     };
   }
 }

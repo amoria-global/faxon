@@ -79,4 +79,12 @@ router.get('/kyc/status', authenticate, authController.getKYCStatus);
 router.get('/agent/referrals', authorize('agent', 'admin'), authController.getAgentReferrals);
 router.get('/agent/referral-code', authorize('agent', 'admin'), authController.getAgentReferralCode);
 
+// --- AGENT ASSESSMENT ROUTES ---
+router.post('/agent/assessment/submit', authorize('agent', 'admin'), authController.submitAgentAssessment);
+router.get('/agent/assessment/status', authorize('agent', 'admin'), authController.getAgentAssessmentStatus);
+
+// Admin routes for assessments
+router.get('/admin/agent-assessments', adminOnly, authController.getAllAgentAssessments);
+router.put('/admin/agent-assessments/:assessmentId/review', adminOnly, authController.reviewAgentAssessment);
+
 export default router;

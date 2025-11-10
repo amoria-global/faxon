@@ -861,6 +861,17 @@ async function handleDepositCompletion(
             paymentCurrency: 'USD',
             paymentReference: transaction.externalId || transaction.reference
           }).catch(err => console.error('[PAWAPAY_CALLBACK] Failed to send host notification email:', err));
+
+          // Send SMS notification to host
+          if (booking.property.host.phone) {
+            try {
+              const hostSmsMessage = `New booking confirmed! Guest: ${booking.guest.firstName} ${booking.guest.lastName}. Property: ${booking.property.name}. Check-in: ${new Date(booking.checkIn).toLocaleDateString()}. Amount: $${booking.totalPrice}. Payment completed.`;
+              await smsService.sendNotificationSMS(booking.property.host.phone, hostSmsMessage);
+              console.log(`[PAWAPAY_CALLBACK] SMS sent to host ${booking.property.host.phone}`);
+            } catch (smsError) {
+              console.error('[PAWAPAY_CALLBACK] Failed to send SMS to host:', smsError);
+            }
+          }
         }
 
         // Send notification to agent
@@ -890,10 +901,11 @@ async function handleDepositCompletion(
       include: {
         tour: {
           include: {
-            tourGuide: { select: { id: true, email: true, firstName: true, lastName: true } }
+            tourGuide: { select: { id: true, email: true, firstName: true, lastName: true, phone: true } }
           }
         },
-        user: { select: { id: true, email: true, firstName: true, lastName: true, phone: true } }
+        user: { select: { id: true, email: true, firstName: true, lastName: true, phone: true } },
+        schedule: { select: { startDate: true, endDate: true } }
       }
     });
 
@@ -1002,6 +1014,18 @@ async function handleDepositCompletion(
       // Note: EmailService doesn't have tour-specific templates yet, so we'll use booking templates as fallback
       // TODO: Add tour-specific email templates to EmailService
       console.log(`[PAWAPAY_CALLBACK] ⚠️ Tour booking emails need tour-specific templates - using generic confirmation`);
+
+      // Send SMS notification to tour guide
+      if (tourBooking.tour.tourGuide && tourBooking.tour.tourGuide.phone) {
+        try {
+          const tourDate = new Date(tourBooking.schedule.startDate).toLocaleDateString();
+          const guideSmsMessage = `New tour booking confirmed! Guest: ${tourBooking.user.firstName} ${tourBooking.user.lastName}. Tour: ${tourBooking.tour.title}. Date: ${tourDate}. Participants: ${tourBooking.numberOfParticipants}. Amount: ${tourBooking.totalAmount} ${tourBooking.currency}. Payment completed.`;
+          await smsService.sendNotificationSMS(tourBooking.tour.tourGuide.phone, guideSmsMessage);
+          console.log(`[PAWAPAY_CALLBACK] SMS sent to tour guide ${tourBooking.tour.tourGuide.phone}`);
+        } catch (smsError) {
+          console.error('[PAWAPAY_CALLBACK] Failed to send SMS to tour guide:', smsError);
+        }
+      }
     }
   } catch (error) {
     console.error('[PAWAPAY] Error handling deposit completion:', error);

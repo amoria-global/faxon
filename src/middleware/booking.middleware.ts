@@ -225,7 +225,7 @@ export const validateBookingUpdate = (req: AuthenticatedRequest, res: Response, 
 
   // Validate check-in status for tour bookings
   if ('checkInStatus' in data && data.checkInStatus) {
-    const validCheckInStatuses: TourCheckInStatus[] = ['not_checked_in', 'checked_in', 'checked_out', 'no_show'];
+    const validCheckInStatuses: TourCheckInStatus[] = ['not_checkedin', 'checkedin', 'no_show'];
     if (!validCheckInStatuses.includes(data.checkInStatus)) {
       errors.push('Invalid check-in status provided');
     }
@@ -562,3 +562,27 @@ function isValidPhoneNumber(phone: string): boolean {
   const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
   return phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''));
 }
+
+// Middleware to validate provider roles (host, agent, tourguide) for price reduction
+export const validateProviderRole = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  if (!req.user) {
+    res.status(401).json({
+      success: false,
+      message: 'Authentication required'
+    });
+    return;
+  }
+
+  const userType = req.user.userType?.toLowerCase();
+  const validProviderRoles = ['host', 'agent', 'tourguide'];
+
+  if (!userType || !validProviderRoles.includes(userType)) {
+    res.status(403).json({
+      success: false,
+      message: 'Access denied. Only hosts, agents, and tour guides can access this resource.'
+    });
+    return;
+  }
+
+  next();
+};

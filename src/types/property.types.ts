@@ -112,6 +112,8 @@ export interface PropertyInfo {
   beds: number;
   baths: number;
   maxGuests: number;
+  minStay: number;
+  maxStay?: number;
   features: string[];
   description?: string;
   images: PropertyImages;
@@ -138,6 +140,7 @@ export interface PropertySummary {
   pricingType: 'night' | 'month';
   pricePerNight?: number;
   pricePerMonth?: number;
+  minStay: number;
   image: string; // Main image URL
   rating: number;
   reviewsCount: number;
@@ -342,9 +345,24 @@ export interface HostDashboard {
   totalRevenue: number;
   averageRating: number;
   recentBookings: BookingInfo[];
-  propertyPerformance: PropertyAnalytics[];
+  propertyPerformance: any[];
   upcomingCheckIns: BookingInfo[];
   pendingReviews: number;
+  // NEW FIELDS:
+  earnings?: {
+    totalGross: number;
+    totalPlatformFee: number;
+    totalNet: number;
+    transactionsCount: number;
+    byStatus: { status: string; amount: number; count: number }[];
+  };
+  analytics?: {
+    totalViews: number;
+    averageViewDuration: number;
+    totalWishlisted: number;
+    activeBlockedDates: number;
+    pendingPayments: number;
+  };
 }
 
 export interface PropertyInsights {
@@ -470,6 +488,8 @@ export interface EarningsOverview {
   averageNightlyRate: number;
   occupancyRate: number;
   revenueGrowth: number; // percentage
+  currentBalance?: number;
+  pendingBalance?: number;
 }
 
 export interface EarningsBreakdown {
@@ -481,6 +501,8 @@ export interface EarningsBreakdown {
   averageBookingValue: number;
   occupancyRate: number;
   lastBooking?: string;
+  grossAmount?: number;
+  platformFee?: number;
 }
 
 export interface PayoutHistory {
@@ -702,6 +724,41 @@ export interface AgentDashboard {
   avgCommissionPerBooking: number;
   recentBookings: AgentBookingInfo[];
   monthlyCommissions: MonthlyCommissionData[];
+  // NEW FIELDS:
+  leads?: {
+    total: number;
+    byStatus: { status: string; count: number }[];
+    conversionRate: string;
+  };
+  inquiries?: {
+    total: number;
+    pending: number;
+    averageResponseTime: number;
+  };
+  interactions?: {
+    total: number;
+    upcoming: number;
+    averageClientSatisfaction: number;
+  };
+  reviews?: {
+    count: number;
+    averageRating: number;
+    categoryRatings: {
+      communication: number;
+      professionalism: number;
+      knowledge: number;
+      responsiveness: number;
+      results: number;
+    };
+  };
+  commissions?: {
+    total: number;
+    pending: number;
+    byStatus: { status: string; amount: number; count: number }[];
+  };
+  propertyViews?: {
+    total: number;
+  };
 }
 
 export interface AgentBookingInfo {

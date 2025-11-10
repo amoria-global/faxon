@@ -1533,16 +1533,19 @@ export class StatusPollerService {
   ): Promise<void> {
     try {
 
-      const isAlreadyConfirmed = booking.status === 'confirmed' && booking.paymentStatus === 'completed';
+      // Terminal statuses that should not be updated
+      const terminalStatuses = ['confirmed', 'checkedin', 'checkout', 'cancelled', 'completed', 'refunded', 'no_show'];
+      const isTerminalStatus = terminalStatuses.includes(booking.status);
       const shouldSendNotification = await this.shouldSendNotification(provider, transactionId);
 
-      // Skip if already confirmed AND notifications already sent
-      if (isAlreadyConfirmed && !shouldSendNotification) {
+      // Skip if booking is in a terminal state AND notifications already sent
+      if (isTerminalStatus && !shouldSendNotification) {
+        console.log(`[STATUS_POLLER] ⏭️ Skipping booking ${booking.id} - already in terminal status: ${booking.status}`);
         return;
       }
 
-      // Update booking status to confirmed (if not already)
-      if (!isAlreadyConfirmed) {
+      // Update booking status to confirmed (only if not in terminal state)
+      if (!isTerminalStatus) {
         await prisma.booking.update({
           where: { id: booking.id },
           data: {
@@ -1586,13 +1589,17 @@ export class StatusPollerService {
   ): Promise<void> {
     try {
 
-      // Check if booking is already failed
-      if (booking.status === 'failed' && booking.paymentStatus === 'failed') {
-        // Only skip if both payment and booking are failed
-        return; // Don't send notification if already failed
+      // Terminal statuses that should not be updated
+      const terminalStatuses = ['confirmed', 'checkedin', 'checkout', 'cancelled', 'completed', 'refunded', 'no_show', 'failed'];
+      const isTerminalStatus = terminalStatuses.includes(booking.status);
+
+      // Skip if booking is already in a terminal state
+      if (isTerminalStatus) {
+        console.log(`[STATUS_POLLER] ⏭️ Skipping booking ${booking.id} - already in terminal status: ${booking.status}`);
+        return;
       }
 
-      // Update booking status to failed
+      // Update booking status to failed (only if not in terminal state)
       await prisma.booking.update({
         where: { id: booking.id },
         data: {

@@ -266,6 +266,51 @@ export interface GuestBookingStats {
   upcomingBookings: number;
   memberSince: string;
   loyaltyPoints?: number;
+  // NEW FIELDS:
+  wallet?: {
+    balance: number;
+    pendingBalance: number;
+    currency: string;
+    walletNumber: string | null;
+    isVerified: boolean;
+  } | null;
+  wishlist?: {
+    totalItems: number;
+  };
+  reviews?: {
+    propertyReviewsGiven: number;
+    tourReviewsGiven: number;
+    totalReviews: number;
+    pendingPropertyReviews: number;
+    pendingTourReviews: number;
+    totalPendingReviews: number;
+  };
+  dealCodes?: {
+    total: number;
+    active: number;
+    codes: {
+      code: string;
+      remainingUnlocks: number;
+      isActive: boolean;
+      expiresAt: string;
+      timesUsed: number;
+    }[];
+  };
+  addressUnlocks?: {
+    total: number;
+    totalSpent: number;
+  };
+  notifications?: {
+    total: number;
+    unread: number;
+  };
+  payments?: {
+    transactionCount: number;
+    byStatus: { status: string; count: number; totalAmount: number }[];
+  };
+  withdrawals?: {
+    active: number;
+  };
 }
 
 // --- PAYMENT & TRANSACTION TYPES ---
@@ -309,7 +354,7 @@ export interface BookingNotification {
 // --- ENUMS ---
 export type PropertyBookingStatus = 'pending' | 'confirmed' | 'checkedin' | 'checkout' | 'cancelled' | 'refunded';
 export type TourBookingStatus = 'pending' | 'confirmed' | 'checkedin' | 'cancelled' | 'completed' | 'refunded' | 'no_show';
-export type TourCheckInStatus = 'not_checked_in' | 'checked_in' | 'checked_out' | 'no_show';
+export type TourCheckInStatus = 'not_checkedin' | 'checkedin' | 'no_show';
 export type BookingNotificationType = 
   | 'booking_confirmed' 
   | 'booking_cancelled' 

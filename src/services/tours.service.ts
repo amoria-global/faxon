@@ -652,7 +652,7 @@ export class TourService {
         currency: bookingData.currency || 'USD',
         status: 'pending',
         paymentStatus: 'pending',
-        checkInStatus: 'not_checked_in'
+        checkInStatus: 'not_checkedin'
       },
       include: {
         user: {
@@ -976,8 +976,19 @@ export class TourService {
       totalParticipants,
       recentBookings,
       upcomingTours,
-      pendingReviews
+      pendingReviews,
+      // NEW: Tour messages data
+      messagesData,
+      // NEW: Tour notifications
+      notificationsData,
+      // NEW: Tour reviews detailed
+      reviewsData,
+      // NEW: Earnings breakdown by status
+      earningsBreakdown,
+      // NEW: Schedule utilization
+      scheduleData
     ] = await Promise.all([
+      // Existing queries
       prisma.tour.count({
         where: { tourGuideId }
       }),
@@ -1007,10 +1018,67 @@ export class TourService {
           status: 'completed',
           reviews: { none: {} }
         }
+      }),
+      // NEW: Fetch tour messages
+      prisma.tourMessage.aggregate({
+        where: { receiverId: tourGuideId },
+        _count: true
+      }),
+      // NEW: Fetch notifications
+      prisma.tourNotification.aggregate({
+        where: { userId: tourGuideId },
+        _count: true
+      }),
+      // NEW: Fetch detailed reviews
+      prisma.tourReview.aggregate({
+        where: { tourGuideId },
+        _count: true,
+        _avg: { rating: true }
+      }),
+      // NEW: Fetch earnings by status
+      prisma.tourEarnings.groupBy({
+        by: ['status'],
+        where: { tourGuideId },
+        _sum: { netAmount: true, amount: true, commission: true },
+        _count: true
+      }),
+      // NEW: Fetch schedule utilization
+      prisma.tourSchedule.aggregate({
+        where: { tourGuideId },
+        _sum: { availableSlots: true, bookedSlots: true },
+        _count: true
       })
     ]);
 
+    // Get unread messages count
+    const unreadMessages = await prisma.tourMessage.count({
+      where: { receiverId: tourGuideId, isRead: false }
+    });
+
+    // Get unread notifications count
+    const unreadNotifications = await prisma.tourNotification.count({
+      where: { userId: tourGuideId, isRead: false }
+    });
+
+    // Get review details
+    const wouldRecommendCount = await prisma.tourReview.count({
+      where: { tourGuideId, wouldRecommend: true }
+    });
+
+    // Get tour performance by category
+    const toursByCategory = await prisma.tour.groupBy({
+      by: ['category'],
+      where: { tourGuideId },
+      _count: true,
+      _avg: { rating: true }
+    });
+
     const monthlyEarnings = await this.getMonthlyEarnings(tourGuideId);
+
+    // Calculate schedule capacity utilization
+    const totalSlots = scheduleData._sum.availableSlots || 0;
+    const bookedSlots = scheduleData._sum.bookedSlots || 0;
+    const capacityUtilization = totalSlots > 0 ? ((bookedSlots / totalSlots) * 100).toFixed(2) : '0';
 
     return {
       totalTours,
@@ -1020,10 +1088,48 @@ export class TourService {
       averageRating: averageRating?.rating || 0,
       totalParticipants: totalParticipants._sum.numberOfParticipants || 0,
       recentBookings,
-      tourPerformance: [], // Would implement detailed tour analytics
+      tourPerformance: toursByCategory.map((t: any) => ({
+        category: t.category,
+        count: t._count,
+        averageRating: t._avg.rating || 0
+      })),
       upcomingTours,
       pendingReviews,
-      monthlyEarnings
+      monthlyEarnings,
+      // NEW FIELDS:
+      messages: {
+        total: messagesData._count || 0,
+        unread: unreadMessages
+      },
+      notifications: {
+        total: notificationsData._count || 0,
+        unread: unreadNotifications
+      },
+      reviews: {
+        total: reviewsData._count || 0,
+        averageRating: reviewsData._avg.rating || 0,
+        wouldRecommend: wouldRecommendCount,
+        recommendationRate: reviewsData._count > 0
+          ? ((wouldRecommendCount / reviewsData._count) * 100).toFixed(2)
+          : '0'
+      },
+      earnings: {
+        total: totalRevenue._sum.netAmount || 0,
+        byStatus: earningsBreakdown.map((e: any) => ({
+          status: e.status,
+          netAmount: e._sum.netAmount || 0,
+          grossAmount: e._sum.amount || 0,
+          commission: e._sum.commission || 0,
+          count: e._count
+        }))
+      },
+      scheduleUtilization: {
+        totalSchedules: scheduleData._count || 0,
+        totalSlots: totalSlots,
+        bookedSlots: bookedSlots,
+        availableSlots: totalSlots - bookedSlots,
+        utilizationRate: capacityUtilization
+      }
     };
   }
 
@@ -1254,7 +1360,8 @@ export class TourService {
       data: {
         ...updateData,
         tourGuideId: tourGuideId,
-        itinerary: updateData.itinerary ? JSON.stringify(updateData.itinerary) : undefined},
+        itinerary: updateData.itinerary ? JSON.stringify(updateData.itinerary) : undefined
+      },
       include: {
         tourGuide: {
           select: {

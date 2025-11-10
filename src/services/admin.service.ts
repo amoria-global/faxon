@@ -745,6 +745,7 @@ export class AdminService {
           pricingType: true,
           pricePerNight: true,
           pricePerMonth: true,
+          minStay: true,
           status: true,
           isVerified: true,
           isInstantBook: true,
@@ -779,6 +780,7 @@ export class AdminService {
       pricingType: property.pricingType as 'night' | 'month' | undefined,
       pricePerNight: property.pricePerNight,
       pricePerMonth: property.pricePerMonth,
+      minStay: property.minStay || 1,
       currency: 'RWF', // Default currency
       status: property.status,
       isVerified: property.isVerified,

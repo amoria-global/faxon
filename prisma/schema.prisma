@@ -9,120 +9,122 @@ datasource db {
 }
 
 model User {
-  id                     Int                      @id @default(autoincrement())
-  email                  String                   @unique
-  firstName              String
-  lastName               String
-  password               String?
-  provider               String                   @default("manual")
-  providerId             String?
-  phone                  String?
-  phoneCountryCode       String?
-  profileImage           String?
-  country                String?
-  state                  String?
-  province               String?
-  city                   String?
-  street                 String?
-  zipCode                String?
-  postalCode             String?
-  postcode               String?
-  pinCode                String?
-  eircode                String?
-  cep                    String?
-  status                 String                   @default("pending")
-  userType               String                   @default("guest")
-  bio                    String?
-  experience             Int?
-  languages              Json?
-  specializations        Json?
-  rating                 Float                    @default(0)
-  totalTours             Int                      @default(0)
-  isVerified             Boolean                  @default(false)
-  licenseNumber          String?
-  certifications         Json?
-  totalSessions          Int                      @default(0)
-  twoFactorEnabled       Boolean                  @default(false)
-  createdAt              DateTime                 @default(now())
-  updatedAt              DateTime                 @updatedAt
-  lastLogin              DateTime?
-  resetPasswordOtp       String?
-  resetPasswordExpires   DateTime?
-  verificationStatus     String?                  @default("unverified")
-  preferredCommunication String?                  @default("email")
-  hostNotes              String?
-  averageRating          Float                    @default(0)
-  county                 String?
-  district               String?
-  region                 String?
-  companyName            String?
-  companyTIN             String?
-  employmentContract     String?
-  nationalId             String?
-  tourGuideType          String?
-  verificationDocument   String?
-  addressDocument        String?
-  kycCompleted           Boolean                  @default(false)
-  kycStatus              String                   @default("pending")
-  kycSubmittedAt         DateTime?
-  sector                 String?
-  referralCode           String?
-  referralStatus         String                   @default("Pending")
-  referredAt             DateTime?
-  referredBy             Int?
-  passportPhotoUrl       String?
-  activityLogs           ActivityLog[]
-  agentBookings          AgentBooking[]           @relation("AgentBookings")
-  clientBookings         AgentBooking[]           @relation("ClientBookings")
-  agentCommissions       AgentCommission[]        @relation("AgentCommissions")
-  agentMetrics           AgentPerformanceMetric[] @relation("AgentMetrics")
-  agentReviews           AgentReview[]            @relation("AgentReviews")
-  clientReviews          AgentReview[]            @relation("ClientReviews")
-  bankAccounts           BankAccount[]
-  bookingsAsGuest        Booking[]                @relation("GuestBookings")
-  agentInteractions      ClientInteraction[]      @relation("AgentInteractions")
-  clientInteractions     ClientInteraction[]      @relation("ClientInteractions")
-  connected_accounts     connected_accounts[]
-  contactMessages        ContactMessage[]
-  hostEarnings           HostEarning[]            @relation("HostEarnings")
-  hostPayments           HostPayment[]            @relation("HostPayments")
-  agentInquiries         Inquiry[]                @relation("AgentInquiries")
-  clientInquiries        Inquiry[]                @relation("ClientInquiries")
-  agentLeads             Lead[]                   @relation("AgentLeads")
-  mobileMoneyAccounts    MobileMoneyAccount[]
-  ownerEarnings          OwnerEarning[]           @relation("OwnerEarnings")
-  ownerPayments          OwnerPayment[]           @relation("OwnerPayments")
-  paymentSettings        PaymentSettings?
-  paymentTransactions    PaymentTransaction[]
-  hostPayouts            Payout[]                 @relation("HostPayouts")
-  agentManagedProperties Property[]               @relation("AgentProperties")
-  ownedProperties        Property[]               @relation("OwnedProperties")
-  propertyViews          PropertyView[]           @relation("UserPropertyViews")
-  reviews                Review[]
-  tourBookingsAsGuest    TourBooking[]            @relation("GuestTourBookings")
-  tourEarnings           TourEarnings[]
-  receivedTourMessages   TourMessage[]            @relation("TourMessageReceiver")
-  sentTourMessages       TourMessage[]            @relation("TourMessageSender")
-  tourNotifications      TourNotification[]
-  tourReviews            TourReview[]
-  toursAsGuide           Tour[]                   @relation("TourGuideToTours")
-  receivedTransactions   Transaction[]            @relation("RecipientTransactions")
-  transactions           Transaction[]            @relation("UserTransactions")
-  sessions               UserSession[]
-  user_settings          user_settings?
-  user_verifications     user_verifications[]
-  referrer               User?                    @relation("UserReferrals", fields: [referredBy], references: [id])
-  referrals              User[]                   @relation("UserReferrals")
-  wallet                 Wallet?
-  wishlists              Wishlist[]
-  withdrawalMethods      WithdrawalMethod[]
-  withdrawalRequests     WithdrawalRequest[]
-  propertyAddressUnlocks       PropertyAddressUnlock[]
-  dealCodes                    DealCode[]
-  dealCodeUsage                DealCodeUsage[]
-  addressUnlockRefunds         AddressUnlockRefund[]
-  duplicateUploads             DuplicateDetectionLog[]    @relation("DuplicateUploader")
-  duplicatesAsOriginalOwner    DuplicateDetectionLog[]    @relation("DuplicateOriginalOwner")
+  id                        Int                      @id @default(autoincrement())
+  email                     String                   @unique
+  firstName                 String
+  lastName                  String
+  password                  String?
+  provider                  String                   @default("manual")
+  providerId                String?
+  phone                     String?
+  phoneCountryCode          String?
+  profileImage              String?
+  country                   String?
+  state                     String?
+  province                  String?
+  city                      String?
+  street                    String?
+  zipCode                   String?
+  postalCode                String?
+  postcode                  String?
+  pinCode                   String?
+  eircode                   String?
+  cep                       String?
+  status                    String                   @default("pending")
+  userType                  String                   @default("guest")
+  bio                       String?
+  experience                Int?
+  languages                 Json?
+  specializations           Json?
+  rating                    Float                    @default(0)
+  totalTours                Int                      @default(0)
+  isVerified                Boolean                  @default(false)
+  licenseNumber             String?
+  certifications            Json?
+  totalSessions             Int                      @default(0)
+  twoFactorEnabled          Boolean                  @default(false)
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  lastLogin                 DateTime?
+  resetPasswordOtp          String?
+  resetPasswordExpires      DateTime?
+  verificationStatus        String?                  @default("unverified")
+  preferredCommunication    String?                  @default("email")
+  hostNotes                 String?
+  averageRating             Float                    @default(0)
+  county                    String?
+  district                  String?
+  region                    String?
+  companyName               String?
+  companyTIN                String?
+  employmentContract        String?
+  nationalId                String?
+  tourGuideType             String?
+  verificationDocument      String?
+  addressDocument           String?
+  kycCompleted              Boolean                  @default(false)
+  kycStatus                 String                   @default("pending")
+  kycSubmittedAt            DateTime?
+  sector                    String?
+  referralCode              String?
+  referralStatus            String                   @default("Pending")
+  referredAt                DateTime?
+  referredBy                Int?
+  passportPhotoUrl          String?
+  activityLogs              ActivityLog[]
+  agentBookings             AgentBooking[]           @relation("AgentBookings")
+  clientBookings            AgentBooking[]           @relation("ClientBookings")
+  agentCommissions          AgentCommission[]        @relation("AgentCommissions")
+  agentMetrics              AgentPerformanceMetric[] @relation("AgentMetrics")
+  agentReviews              AgentReview[]            @relation("AgentReviews")
+  clientReviews             AgentReview[]            @relation("ClientReviews")
+  bankAccounts              BankAccount[]
+  bookingsAsGuest           Booking[]                @relation("GuestBookings")
+  agentInteractions         ClientInteraction[]      @relation("AgentInteractions")
+  clientInteractions        ClientInteraction[]      @relation("ClientInteractions")
+  connected_accounts        connected_accounts[]
+  contactMessages           ContactMessage[]
+  hostEarnings              HostEarning[]            @relation("HostEarnings")
+  hostPayments              HostPayment[]            @relation("HostPayments")
+  agentInquiries            Inquiry[]                @relation("AgentInquiries")
+  clientInquiries           Inquiry[]                @relation("ClientInquiries")
+  agentLeads                Lead[]                   @relation("AgentLeads")
+  mobileMoneyAccounts       MobileMoneyAccount[]
+  ownerEarnings             OwnerEarning[]           @relation("OwnerEarnings")
+  ownerPayments             OwnerPayment[]           @relation("OwnerPayments")
+  paymentSettings           PaymentSettings?
+  paymentTransactions       PaymentTransaction[]
+  hostPayouts               Payout[]                 @relation("HostPayouts")
+  agentManagedProperties    Property[]               @relation("AgentProperties")
+  ownedProperties           Property[]               @relation("OwnedProperties")
+  propertyViews             PropertyView[]           @relation("UserPropertyViews")
+  reviews                   Review[]
+  tourBookingsAsGuest       TourBooking[]            @relation("GuestTourBookings")
+  tourEarnings              TourEarnings[]
+  receivedTourMessages      TourMessage[]            @relation("TourMessageReceiver")
+  sentTourMessages          TourMessage[]            @relation("TourMessageSender")
+  tourNotifications         TourNotification[]
+  tourReviews               TourReview[]
+  toursAsGuide              Tour[]                   @relation("TourGuideToTours")
+  receivedTransactions      Transaction[]            @relation("RecipientTransactions")
+  transactions              Transaction[]            @relation("UserTransactions")
+  sessions                  UserSession[]
+  user_settings             user_settings?
+  user_verifications        user_verifications[]
+  referrer                  User?                    @relation("UserReferrals", fields: [referredBy], references: [id])
+  referrals                 User[]                   @relation("UserReferrals")
+  wallet                    Wallet?
+  wishlists                 Wishlist[]
+  withdrawalMethods         WithdrawalMethod[]
+  withdrawalRequests        WithdrawalRequest[]
+  propertyAddressUnlocks    PropertyAddressUnlock[]
+  dealCodes                 DealCode[]
+  dealCodeUsage             DealCodeUsage[]
+  addressUnlockRefunds      AddressUnlockRefund[]
+  duplicateUploads          DuplicateDetectionLog[]  @relation("DuplicateUploader")
+  duplicatesAsOriginalOwner DuplicateDetectionLog[]  @relation("DuplicateOriginalOwner")
+  bonuses                   Bonus[]                  @relation("UserBonuses")
+  agentAssessment           AgentAssessment?         @relation("AgentAssessment")
 
   @@map("users")
 }
@@ -292,6 +294,7 @@ model Property {
   addressUnlocks         PropertyAddressUnlock[]
   dealCodes              DealCode[]
   dealCodeUsage          DealCodeUsage[]
+  bonuses                Bonus[]                 @relation("PropertyBonuses")
 
   @@index([hostId])
   @@index([agentId])
@@ -1558,7 +1561,7 @@ model PropertyAddressUnlock {
   transactionReference    String?               @unique
   paymentStatus           String                @default("pending")
   paymentProvider         String?
-  paymentUrl              String?               // XentriPay payment URL for card payments
+  paymentUrl              String? // XentriPay payment URL for card payments
   unlockedAt              DateTime?
   appreciationSubmitted   Boolean               @default(false)
   appreciationLevel       String?
@@ -1638,21 +1641,46 @@ model AddressUnlockRefund {
   @@map("address_unlock_refunds")
 }
 
+model Bonus {
+  id          String    @id @default(cuid())
+  userId      Int // Agent who receives the bonus
+  amount      Float // Bonus amount in the same currency as wallet
+  currency    String    @default("RWF")
+  sourceType  String // Type of source: "address_unlock", "booking", "referral", etc.
+  sourceId    String // ID of the source (unlockId, bookingId, etc.)
+  propertyId  Int? // Property related to the bonus (if applicable)
+  description String? // Human-readable description
+  status      String    @default("pending") // "pending", "claimed", "expired"
+  claimedAt   DateTime?
+  expiresAt   DateTime? // Optional expiry date
+  metadata    Json? // Additional metadata
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  property    Property? @relation("PropertyBonuses", fields: [propertyId], references: [id], onDelete: SetNull)
+  user        User      @relation("UserBonuses", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([sourceType])
+  @@index([createdAt])
+  @@map("bonuses")
+}
+
 model DuplicateDetectionLog {
-  id                 Int      @id @default(autoincrement())
-  entityType         String   // 'property' or 'tour'
-  entityId           String   // ID of the new entity being created
-  duplicateOfId      String   // ID of the existing duplicate entity
-  similarityScore    Decimal  @db.Decimal(5, 2) // Overall similarity score (0-100)
-  similarityDetails  Json     // JSON containing detailed similarity breakdown
-  uploaderId         Int      // User who uploaded the duplicate
-  originalOwnerId    Int?     // Owner of the original entity
-  status             String   @default("pending") // 'pending', 'reviewed', 'dismissed'
-  adminNotified      Boolean  @default(false)
-  uploaderNotified   Boolean  @default(false)
-  ownerNotified      Boolean  @default(false)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                Int      @id @default(autoincrement())
+  entityType        String // 'property' or 'tour'
+  entityId          String // ID of the new entity being created
+  duplicateOfId     String // ID of the existing duplicate entity
+  similarityScore   Decimal  @db.Decimal(5, 2) // Overall similarity score (0-100)
+  similarityDetails Json // JSON containing detailed similarity breakdown
+  uploaderId        Int // User who uploaded the duplicate
+  originalOwnerId   Int? // Owner of the original entity
+  status            String   @default("pending") // 'pending', 'reviewed', 'dismissed'
+  adminNotified     Boolean  @default(false)
+  uploaderNotified  Boolean  @default(false)
+  ownerNotified     Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   uploader      User  @relation("DuplicateUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
   originalOwner User? @relation("DuplicateOriginalOwner", fields: [originalOwnerId], references: [id], onDelete: Cascade)
@@ -1663,4 +1691,30 @@ model DuplicateDetectionLog {
   @@index([uploaderId])
   @@index([originalOwnerId])
   @@map("duplicate_detection_logs")
+}
+
+model AgentAssessment {
+  id                 String   @id @default(cuid())
+  agentId            Int      @unique
+  questionsAndAnswers Json    // Stores array of 40 questions with their answers: [{ questionId: 1, question: "...", answer: "...", isCorrect: true/false }]
+  totalQuestions     Int      @default(40)
+  correctAnswers     Int      @default(0)
+  score              Float    @default(0) // Percentage score (0-100)
+  isPassed           Boolean  @default(false) // true if score >= 80
+  status             String   @default("pending") // pending, submitted, passed, failed
+  submittedAt        DateTime?
+  reviewedAt         DateTime?
+  reviewedBy         Int?
+  reviewerNotes      String?
+  attemptNumber      Int      @default(1) // Track multiple attempts if allowed
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  agent              User     @relation("AgentAssessment", fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([status])
+  @@index([isPassed])
+  @@index([submittedAt])
+  @@map("agent_assessments")
 }

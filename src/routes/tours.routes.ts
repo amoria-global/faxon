@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { TourController } from '../controllers/tours.controller';
 import { authenticate } from '../middleware/auth.middleware';
-import { 
-  validateTour, 
+import {
+  validateTour,
   validateTourGuide,
   validateAdmin,
+  validateAdminOrTourGuide,
   validateTourGuideAccess,
   validateTourBooking,
   validateTourBookingUpdate,
@@ -30,6 +31,7 @@ router.get('/suggestions/location', cacheMiddleware(1800), tourController.getLoc
 router.get('/guides/search', cacheMiddleware(300), tourController.searchTourGuides);
 router.get('/:id', cacheMiddleware(300), tourController.getTourById);
 router.get('/:id/reviews', cacheMiddleware(300), tourController.getTourReviews);
+router.get('/:id/schedules', cacheMiddleware(300), tourController.getTourSchedules);
 
 // --- PROTECTED ROUTES (Authentication Required) ---
 router.use(authenticate); // All routes below require authentication
@@ -46,19 +48,18 @@ router.get('/guide/dashboard/enhanced', validateTourGuide, tourController.getEnh
 
 // --- TOUR GUIDE TOUR MANAGEMENT ---
 router.post('/', validateTourGuide, validateTour, tourController.createTour);
-router.put('/:id', validateTourGuide, validateTourGuideAccess, tourController.updateTour);
-router.delete('/:id', validateTourGuide, validateTourGuideAccess, tourController.deleteTour);
+router.put('/:id', validateAdminOrTourGuide, validateTourGuideAccess, tourController.updateTour);
+router.delete('/:id', validateAdminOrTourGuide, validateTourGuideAccess, tourController.deleteTour);
 router.get('/guide/my-tours', validateTourGuide, tourController.getMyTours);
 
 // Tour status management
-router.patch('/:id/activate', validateTourGuide, validateTourGuideAccess, tourController.activateTour);
-router.patch('/:id/deactivate', validateTourGuide, validateTourGuideAccess, tourController.deactivateTour);
+router.patch('/:id/activate', validateAdminOrTourGuide, validateTourGuideAccess, tourController.activateTour);
+router.patch('/:id/deactivate', validateAdminOrTourGuide, validateTourGuideAccess, tourController.deactivateTour);
 
 // --- TOUR GUIDE SCHEDULE MANAGEMENT ---
-router.post('/:id/schedules', validateTourGuide, validateTourGuideAccess, validateTourSchedule, tourController.createTourSchedule);
-router.get('/:id/schedules', validateTourGuide, validateTourGuideAccess, tourController.getTourSchedules);
-router.put('/schedules/:scheduleId', validateTourGuide, validateScheduleAccess, validateTourSchedule, tourController.updateTourSchedule);
-router.delete('/schedules/:scheduleId', validateTourGuide, validateScheduleAccess, tourController.deleteTourSchedule);
+router.post('/:id/schedules', validateAdminOrTourGuide, validateTourGuideAccess, validateTourSchedule, tourController.createTourSchedule);
+router.put('/schedules/:scheduleId', validateAdminOrTourGuide, validateScheduleAccess, validateTourSchedule, tourController.updateTourSchedule);
+router.delete('/schedules/:scheduleId', validateAdminOrTourGuide, validateScheduleAccess, tourController.deleteTourSchedule);
 
 // --- TOUR GUIDE BOOKING MANAGEMENT ---
 router.get('/guide/bookings', validateTourGuide, tourController.getTourBookings);
@@ -66,8 +67,8 @@ router.get('/guide/bookings/calendar', validateTourGuide, tourController.getTour
 router.put('/guide/bookings/:bookingId', validateTourGuide, validateBookingAccess, validateTourBookingUpdate, tourController.updateTourBooking);
 
 // --- TOUR GUIDE MEDIA MANAGEMENT ---
-router.post('/:id/images', validateTourGuide, validateTourGuideAccess, validateTourImageUpload, tourController.uploadTourImages);
-router.delete('/:id/images', validateTourGuide, validateTourGuideAccess, tourController.removeTourImage);
+router.post('/:id/images', validateAdminOrTourGuide, validateTourGuideAccess, validateTourImageUpload, tourController.uploadTourImages);
+router.delete('/:id/images', validateAdminOrTourGuide, validateTourGuideAccess, tourController.removeTourImage);
 
 // --- TOUR GUIDE EARNINGS ---
 router.get('/guide/earnings', validateTourGuide, tourController.getTourGuideEarnings);
@@ -91,23 +92,10 @@ router.get('/admin/analytics', validateAdmin, tourController.getTourSystemAnalyt
 router.patch('/admin/bulk-update-tours', validateAdmin, validateBulkOperation, tourController.bulkUpdateTours);
 router.patch('/admin/bulk-update-bookings', validateAdmin, validateBulkOperation, tourController.bulkUpdateTourBookings);
 
-// Admin can access any tour/booking (no validateTourGuideAccess needed)
-router.put('/admin/tours/:id', validateAdmin, tourController.updateTour);
-router.delete('/admin/tours/:id', validateAdmin, tourController.deleteTour);
+// Note: Admin can now use the regular tour management routes (/:id, /schedules/:scheduleId, etc.)
+// The following routes are kept for backward compatibility but are deprecated
+// Admins should use PUT /:id instead of PUT /admin/tours/:id
 router.put('/admin/bookings/:bookingId', validateAdmin, validateTourBookingUpdate, tourController.updateTourBooking);
-
-// Admin schedule management
-router.post('/admin/tours/:id/schedules', validateAdmin, validateTourSchedule, tourController.createTourSchedule);
 router.get('/admin/tours/:id/schedules', validateAdmin, tourController.getTourSchedules);
-router.put('/admin/schedules/:scheduleId', validateAdmin, validateTourSchedule, tourController.updateTourSchedule);
-router.delete('/admin/schedules/:scheduleId', validateAdmin, tourController.deleteTourSchedule);
-
-// Admin media management
-router.post('/admin/tours/:id/images', validateAdmin, validateTourImageUpload, tourController.uploadTourImages);
-router.delete('/admin/tours/:id/images', validateAdmin, tourController.removeTourImage);
-
-// Admin status management
-router.patch('/admin/tours/:id/activate', validateAdmin, tourController.activateTour);
-router.patch('/admin/tours/:id/deactivate', validateAdmin, tourController.deactivateTour);
 
 export default router;

@@ -57,14 +57,54 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Lightweight request logger (only in development)
+// Comprehensive request/response logger (only in development)
 if (process.env.NODE_ENV === 'development') {
   app.use((req, res, next) => {
     const start = Date.now();
+
+    // Log incoming request
+    console.log('\n=== INCOMING REQUEST ===');
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    console.log(`Method: ${req.method}`);
+    console.log(`URL: ${req.originalUrl}`);
+    console.log(`IP: ${req.ip || req.socket.remoteAddress}`);
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('Query Params:', JSON.stringify(req.query, null, 2));
+    console.log('Body:', JSON.stringify(req.body, null, 2));
+
+    // Capture the original res.json and res.send to log response
+    const originalJson = res.json.bind(res);
+    const originalSend = res.send.bind(res);
+    let responseBody: any;
+
+    res.json = function(body: any) {
+      responseBody = body;
+      return originalJson(body);
+    };
+
+    res.send = function(body: any) {
+      responseBody = body;
+      return originalSend(body);
+    };
+
     res.on('finish', () => {
       const duration = Date.now() - start;
-      console.log(`[${req.method}] ${req.originalUrl} - ${res.statusCode} (${duration}ms)`);
+      console.log('\n=== OUTGOING RESPONSE ===');
+      console.log(`Timestamp: ${new Date().toISOString()}`);
+      console.log(`Method: ${req.method}`);
+      console.log(`URL: ${req.originalUrl}`);
+      console.log(`Status Code: ${res.statusCode}`);
+      console.log(`Duration: ${duration}ms`);
+      console.log('Response Headers:', JSON.stringify(res.getHeaders(), null, 2));
+      if (responseBody) {
+        console.log('Response Body:', typeof responseBody === 'string'
+          ? responseBody
+          : JSON.stringify(responseBody, null, 2)
+        );
+      }
+      console.log('========================\n');
     });
+
     next();
   });
 }
