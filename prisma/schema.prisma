@@ -62,6 +62,7 @@ model User {
   tourGuideType             String?
   verificationDocument      String?
   addressDocument           String?
+  passportPhotoUrl          String?
   kycCompleted              Boolean                  @default(false)
   kycStatus                 String                   @default("pending")
   kycSubmittedAt            DateTime?
@@ -70,7 +71,7 @@ model User {
   referralStatus            String                   @default("Pending")
   referredAt                DateTime?
   referredBy                Int?
-  pass  addressUnlockRefunds      AddressUnlockRefund[]
+  addressUnlockRefunds      AddressUnlockRefund[]
   agentAssessment           AgentAssessment?         @relation("AgentAssessment")
   agentBookings             AgentBooking[]           @relation("AgentBookings")
   clientBookings            AgentBooking[]           @relation("ClientBookings")
@@ -123,6 +124,7 @@ model User {
   wishlists                 Wishlist[]
   withdrawalMethods         WithdrawalMethod[]
   withdrawalRequests        WithdrawalRequest[]
+  activityLogs              ActivityLog[]
 
   @@map("users")
 }
@@ -1791,43 +1793,6 @@ model notification_templates {
   @@index([channel])
 }
 
-model payment_operators {
-  id                                                                           String             @id
-  name                                                                         String
-  code                                                                         String             @unique
-  country                                                                      String
-  type                                                                         String
-  enabled                                                                      Boolean            @default(false)
-  primaryProviderId                                                            String?
-  alternativeProviderId                                                        String?
-  supportedOperations                                                          Json
-  limits                                                                       Json?
-  fees                                                                         Json?
-  createdAt                                                                    DateTime           @default(now())
-  updatedAt                                                                    DateTime
-  payment_providers_payment_operators_alternativeProviderIdTopayment_providers payment_providers? @relation("payment_operators_alternativeProviderIdTopayment_providers", fields: [alternativeProviderId], references: [id])
-  payment_providers_payment_operators_primaryProviderIdTopayment_providers     payment_providers? @relation("payment_operators_primaryProviderIdTopayment_providers", fields: [primaryProviderId], references: [id])
-
-  @@index([country])
-  @@index([enabled])
-  @@index([type])
-}
-
-model payment_providers {
-  id                                                                           String              @id
-  name                                                                         String
-  type                                                                         String
-  region                                                                       String?
-  enabled                                                                      Boolean             @default(false)
-  testMode                                                                     Boolean             @default(true)
-  credentials                                                                  Json
-  config                                                                       Json?
-  createdAt                                                                    DateTime            @default(now())
-  updatedAt                                                                    DateTime
-  payment_operators_payment_operators_alternativeProviderIdTopayment_providers payment_operators[] @relation("payment_operators_alternativeProviderIdTopayment_providers")
-  payment_operators_payment_operators_primaryProviderIdTopayment_providers     payment_operators[] @relation("payment_operators_primaryProviderIdTopayment_providers")
-}
-
 model security_settings {
   id        String   @id
   category  String
@@ -1852,86 +1817,6 @@ model webhooks {
   updatedAt   DateTime
 
   @@index([active])
-false)
-  uploaderNotified  Boolean  @default(false)
-  ownerNotified     Boolean  @default(false)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  uploader      User  @relation("DuplicateUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
-  originalOwner User? @relation("DuplicateOriginalOwner", fields: [originalOwnerId], references: [id], onDelete: Cascade)
-
-  @@index([entityType])
-  @@index([status])
-  @@index([createdAt])
-  @@index([uploaderId])
-  @@index([originalOwnerId])
-  @@map("duplicate_detection_logs")
-}
-
-model AgentAssessment {
-  id                 String   @id @default(cuid())
-  agentId            Int      @unique
-  questionsAndAnswers Json    // Stores array of 40 questions with their answers: [{ questionId: 1, question: "...", answer: "...", isCorrect: true/false }]
-  totalQuestions     Int      @default(40)
-  correctAnswers     Int      @default(0)
-  score              Float    @default(0) // Percentage score (0-100)
-  isPassed           Boolean  @default(false) // true if score >= 80
-  status             String   @default("pending") // pending, submitted, passed, failed
-  submittedAt        DateTime?
-  reviewedAt         DateTime?
-  reviewedBy         Int?
-  reviewerNotes      String?
-  attemptNumber      Int      @default(1) // Track multiple attempts if allowed
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  agent              User     @relation("AgentAssessment", fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@index([agentId])
-  @@index([status])
-  @@index([isPassed])
-  @@index([submittedAt])
-  @@map("agent_assessments")
- Boolean  @default(false)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  uploader      User  @relation("DuplicateUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
-  originalOwner User? @relation("DuplicateOriginalOwner", fields: [originalOwnerId], references: [id], onDelete: Cascade)
-
-  @@index([entityType])
-  @@index([status])
-  @@index([createdAt])
-  @@index([uploaderId])
-  @@index([originalOwnerId])
-  @@map("duplicate_detection_logs")
-}
-
-model AgentAssessment {
-  id                 String   @id @default(cuid())
-  agentId            Int      @unique
-  questionsAndAnswers Json    // Stores array of 40 questions with their answers: [{ questionId: 1, question: "...", answer: "...", isCorrect: true/false }]
-  totalQuestions     Int      @default(40)
-  correctAnswers     Int      @default(0)
-  score              Float    @default(0) // Percentage score (0-100)
-  isPassed           Boolean  @default(false) // true if score >= 80
-  status             String   @default("pending") // pending, submitted, passed, failed
-  submittedAt        DateTime?
-  reviewedAt         DateTime?
-  reviewedBy         Int?
-  reviewerNotes      String?
-  attemptNumber      Int      @default(1) // Track multiple attempts if allowed
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  agent              User     @relation("AgentAssessment", fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@index([agentId])
-  @@index([status])
-  @@index([isPassed])
-  @@index([submittedAt])
-  @@map("agent_assessments")
 }
 
 // ============================================
@@ -1940,33 +1825,45 @@ model AgentAssessment {
 
 // Payment Providers Configuration
 model PaymentProvider {
-  id                     String             @id @default(cuid())
-  name                   String
-  type                   String             // mobile_money, bank, card
-  region                 String?
-  enabled                Boolean            @default(false)
-  testMode               Boolean            @default(true)
-  credentials            Json               // Encrypted API keys, secrets, merchant IDs
-  config                 Json?              // baseUrl, webhookUrl, timeout, retryAttempts, etc.
-  createdAt              DateTime           @default(now())
-  updatedAt              DateTime           @updatedAt
+  id          String   @id @default(cuid())
+  name        String
+  type        String // mobile_money, bank, card
+  region      String?
+  enabled     Boolean  @default(false)
+  testMode    Boolean  @default(true)
+  credentials Json // Encrypted API keys, secrets, merchant IDs
+  config      Json? // baseUrl, webhookUrl, timeout, retryAttempts, etc.
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  primaryOperators       PaymentOperator[]  @relation("PrimaryProvider")
-  alternativeOperators   PaymentOperator[]  @relation("AlternativeProvider")
+  primaryOperators     PaymentOperator[] @relation("PrimaryProvider")
+  alternativeOperators PaymentOperator[] @relation("AlternativeProvider")
 
   @@map("payment_providers")
 }
 
 // Payment Operators (Mobile Money & Banks)
 model PaymentOperator {
-  id                    String            @id @default(cuid())
+  id                    String   @id @default(cuid())
   name                  String
-  code                  String            @unique // MTN_RW, AIRTEL_RW, etc.
+  code                  String   @unique // MTN_RW, AIRTEL_RW, etc.
   country               String
-  type                  String            // mobile_money, bank
-  enabled               Boolean           @default(false)
+  type                  String // mobile_money, bank
+  enabled               Boolean  @default(false)
   primaryProviderId     String?
   alternativeProviderId String?
-  supportedOperations   Json              // { deposit: true, withdrawal: true, refund: true, disburse: true }
-  limits                Json?             // { minAmount, maxAmount, dailyLimit }
-  fees                  Json?             // { depositFee, withdrawalFee,
+  supportedOperations   Json // { deposit: true, withdrawal: true, refund: true, disburse: true }
+  limits                Json? // { minAmount, maxAmount, dailyLimit }
+  fees                  Json? // { depositFee, withdrawalFee, refundFee, disburseFee }
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  primaryProvider     PaymentProvider? @relation("PrimaryProvider", fields: [primaryProviderId], references: [id])
+  alternativeProvider PaymentProvider? @relation("AlternativeProvider", fields: [alternativeProviderId], references: [id])
+
+  @@index([code])
+  @@index([country])
+  @@index([type])
+  @@index([enabled])
+  @@map("payment_operators")
+}
