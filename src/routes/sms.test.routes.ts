@@ -115,7 +115,7 @@ router.post('/bulk-test', async (req, res) => {
     console.log(`Sending bulk test SMS to: ${formattedNumbers.join(', ')}`);
 
     // Send bulk SMS
-    await smsService.sendBulkSMS(formattedNumbers, testMessage, 'bulk_test');
+    await smsService.sendBulkSMS(formattedNumbers, testMessage, {}, 'bulk_test');
 
     res.json({
       success: true,

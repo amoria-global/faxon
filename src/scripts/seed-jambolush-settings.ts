@@ -324,7 +324,7 @@ async function seedJamboLushSettings() {
     // ============================================
     console.log('📧 Creating communication settings...');
 
-    await prisma.communicationSetting.upsert({
+    await prisma.communication_settings.upsert({
       where: { id: 'email' },
       update: {},
       create: {
@@ -342,7 +342,7 @@ async function seedJamboLushSettings() {
       },
     });
 
-    await prisma.communicationSetting.upsert({
+    await prisma.communication_settings.upsert({
       where: { id: 'sms' },
       update: {},
       create: {
@@ -360,7 +360,7 @@ async function seedJamboLushSettings() {
       },
     });
 
-    await prisma.communicationSetting.upsert({
+    await prisma.communication_settings.upsert({
       where: { id: 'whatsapp' },
       update: {},
       create: {
@@ -384,7 +384,7 @@ async function seedJamboLushSettings() {
     // ============================================
     console.log('🔒 Creating security settings...');
 
-    await prisma.securitySetting.upsert({
+    await prisma.security_settings.upsert({
       where: { id: 'twoFactor' },
       update: {},
       create: {
@@ -400,7 +400,7 @@ async function seedJamboLushSettings() {
       },
     });
 
-    await prisma.securitySetting.upsert({
+    await prisma.security_settings.upsert({
       where: { id: 'session' },
       update: {},
       create: {
@@ -415,7 +415,7 @@ async function seedJamboLushSettings() {
       },
     });
 
-    await prisma.securitySetting.upsert({
+    await prisma.security_settings.upsert({
       where: { id: 'passwordPolicy' },
       update: {},
       create: {
@@ -439,7 +439,7 @@ async function seedJamboLushSettings() {
     // ============================================
     console.log('📊 Creating business rules...');
 
-    await prisma.businessRule.upsert({
+    await prisma.business_rules.upsert({
       where: { id: 'booking' },
       update: {},
       create: {
@@ -453,7 +453,7 @@ async function seedJamboLushSettings() {
       },
     });
 
-    await prisma.businessRule.upsert({
+    await prisma.business_rules.upsert({
       where: { id: 'cancellation' },
       update: {},
       create: {
@@ -466,7 +466,7 @@ async function seedJamboLushSettings() {
       },
     });
 
-    await prisma.businessRule.upsert({
+    await prisma.business_rules.upsert({
       where: { id: 'payment' },
       update: {},
       create: {
@@ -480,7 +480,7 @@ async function seedJamboLushSettings() {
       },
     });
 
-    await prisma.businessRule.upsert({
+    await prisma.business_rules.upsert({
       where: { id: 'commission' },
       update: {},
       create: {
@@ -493,7 +493,7 @@ async function seedJamboLushSettings() {
       },
     });
 
-    await prisma.businessRule.upsert({
+    await prisma.business_rules.upsert({
       where: { id: 'system' },
       update: {},
       create: {
@@ -511,7 +511,7 @@ async function seedJamboLushSettings() {
       },
     });
 
-    await prisma.businessRule.upsert({
+    await prisma.business_rules.upsert({
       where: { id: 'financial' },
       update: {},
       create: {
@@ -527,7 +527,7 @@ async function seedJamboLushSettings() {
       },
     });
 
-    await prisma.businessRule.upsert({
+    await prisma.business_rules.upsert({
       where: { id: 'limits' },
       update: {},
       create: {

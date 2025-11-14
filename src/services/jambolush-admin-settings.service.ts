@@ -278,7 +278,7 @@ export class JamboLushAdminSettingsService {
   // ============================================
 
   async getAllCommunicationSettings(): Promise<CommunicationSetting[]> {
-    const settings = await prisma.communicationSetting.findMany();
+    const settings = await prisma.communication_settings.findMany();
 
     return settings.map((setting: any) => ({
       ...setting,
@@ -289,7 +289,7 @@ export class JamboLushAdminSettingsService {
   async getCommunicationSetting(
     channel: 'email' | 'sms' | 'whatsapp'
   ): Promise<CommunicationSetting | null> {
-    const setting = await prisma.communicationSetting.findUnique({
+    const setting = await prisma.communication_settings.findUnique({
       where: { id: channel },
     });
 
@@ -319,7 +319,7 @@ export class JamboLushAdminSettingsService {
       updateData.config = this.encryptCredentials(mergedConfig);
     }
 
-    const setting = await prisma.communicationSetting.upsert({
+    const setting = await prisma.communication_settings.upsert({
       where: { id: channel },
       update: updateData,
       create: {
@@ -342,13 +342,13 @@ export class JamboLushAdminSettingsService {
   // ============================================
 
   async getAllSecuritySettings(): Promise<SecuritySetting[]> {
-    return await prisma.securitySetting.findMany() as any[];
+    return await prisma.security_settings.findMany() as any[];
   }
 
   async getSecuritySetting(
     category: 'twoFactor' | 'session' | 'passwordPolicy' | 'apiSecurity'
   ): Promise<SecuritySetting | null> {
-    return await prisma.securitySetting.findFirst({
+    return await prisma.security_settings.findFirst({
       where: { category },
     }) as any;
   }
@@ -360,7 +360,7 @@ export class JamboLushAdminSettingsService {
 
     for (const [category, settings] of Object.entries(data)) {
       updates.push(
-        prisma.securitySetting.upsert({
+        prisma.security_settings.upsert({
           where: { id: category },
           update: { settings: settings as any },
           create: {
@@ -379,13 +379,13 @@ export class JamboLushAdminSettingsService {
   // ============================================
 
   async getAllBusinessRules(): Promise<BusinessRule[]> {
-    return await prisma.businessRule.findMany() as any[];
+    return await prisma.business_rules.findMany() as any[];
   }
 
   async getBusinessRule(
     category: 'booking' | 'cancellation' | 'payment' | 'commission' | 'system' | 'financial' | 'limits'
   ): Promise<BusinessRule | null> {
-    return await prisma.businessRule.findFirst({
+    return await prisma.business_rules.findFirst({
       where: { category },
     }) as any;
   }
@@ -397,7 +397,7 @@ export class JamboLushAdminSettingsService {
 
     for (const [category, rules] of Object.entries(data)) {
       updates.push(
-        prisma.businessRule.upsert({
+        prisma.business_rules.upsert({
           where: { id: category },
           update: { rules: rules as any },
           create: {
@@ -416,19 +416,19 @@ export class JamboLushAdminSettingsService {
   // ============================================
 
   async getAllJobs(): Promise<AutomatedJob[]> {
-    return await prisma.automatedJob.findMany({
+    return await prisma.automated_jobs.findMany({
       orderBy: { createdAt: 'desc' },
     }) as any[];
   }
 
   async getJob(id: string): Promise<AutomatedJob | null> {
-    return await prisma.automatedJob.findUnique({
+    return await prisma.automated_jobs.findUnique({
       where: { id },
     }) as any;
   }
 
   async createJob(data: CreateAutomatedJobDto): Promise<AutomatedJob> {
-    return await prisma.automatedJob.create({
+    return await prisma.automated_jobs.create({
       data: {
         jobType: data.jobType,
         schedule: data.schedule,
@@ -440,14 +440,14 @@ export class JamboLushAdminSettingsService {
   }
 
   async updateJob(id: string, data: UpdateAutomatedJobDto): Promise<AutomatedJob> {
-    return await prisma.automatedJob.update({
+    return await prisma.automated_jobs.update({
       where: { id },
       data: data as any,
     }) as any;
   }
 
   async deleteJob(id: string): Promise<void> {
-    await prisma.automatedJob.delete({
+    await prisma.automated_jobs.delete({
       where: { id },
     });
   }
@@ -459,7 +459,7 @@ export class JamboLushAdminSettingsService {
     // TODO: Implement job execution logic
     const executionId = `EXEC_${Date.now()}`;
 
-    await prisma.automatedJob.update({
+    await prisma.automated_jobs.update({
       where: { id },
       data: {
         lastRun: new Date(),
@@ -480,17 +480,17 @@ export class JamboLushAdminSettingsService {
   // ============================================
 
   async getAllWebhooks(): Promise<Webhook[]> {
-    return await prisma.webhook.findMany() as any[];
+    return await prisma.webhooks.findMany() as any[];
   }
 
   async getWebhook(id: string): Promise<Webhook | null> {
-    return await prisma.webhook.findUnique({
+    return await prisma.webhooks.findUnique({
       where: { id },
     }) as any;
   }
 
   async createWebhook(data: CreateWebhookDto): Promise<Webhook> {
-    return await prisma.webhook.create({
+    return await prisma.webhooks.create({
       data: {
         url: data.url,
         events: data.events as any,
@@ -502,14 +502,14 @@ export class JamboLushAdminSettingsService {
   }
 
   async updateWebhook(id: string, data: UpdateWebhookDto): Promise<Webhook> {
-    return await prisma.webhook.update({
+    return await prisma.webhooks.update({
       where: { id },
       data: data as any,
     }) as any;
   }
 
   async deleteWebhook(id: string): Promise<void> {
-    await prisma.webhook.delete({
+    await prisma.webhooks.delete({
       where: { id },
     });
   }
@@ -527,14 +527,14 @@ export class JamboLushAdminSettingsService {
     if (filters?.channel) where.channel = filters.channel;
     if (filters?.category) where.category = filters.category;
 
-    return await prisma.notificationTemplate.findMany({
+    return await prisma.notification_templates.findMany({
       where,
       orderBy: { createdAt: 'desc' },
     }) as any[];
   }
 
   async getTemplate(id: string): Promise<NotificationTemplate | null> {
-    return await prisma.notificationTemplate.findUnique({
+    return await prisma.notification_templates.findUnique({
       where: { id },
     }) as any;
   }
@@ -542,7 +542,7 @@ export class JamboLushAdminSettingsService {
   async createTemplate(
     data: CreateNotificationTemplateDto
   ): Promise<NotificationTemplate> {
-    return await prisma.notificationTemplate.create({
+    return await prisma.notification_templates.create({
       data: {
         name: data.name,
         channel: data.channel,
@@ -559,14 +559,14 @@ export class JamboLushAdminSettingsService {
     id: string,
     data: UpdateNotificationTemplateDto
   ): Promise<NotificationTemplate> {
-    return await prisma.notificationTemplate.update({
+    return await prisma.notification_templates.update({
       where: { id },
       data: data as any,
     }) as any;
   }
 
   async deleteTemplate(id: string): Promise<void> {
-    await prisma.notificationTemplate.delete({
+    await prisma.notification_templates.delete({
       where: { id },
     });
   }
@@ -576,7 +576,7 @@ export class JamboLushAdminSettingsService {
   // ============================================
 
   async createAuditLog(data: CreateAuditLogDto): Promise<AuditLog> {
-    return await prisma.auditLog.create({
+    return await prisma.audit_logs.create({
       data: {
         userId: data.userId,
         action: data.action,
@@ -612,13 +612,13 @@ export class JamboLushAdminSettingsService {
     const skip = (page - 1) * limit;
 
     const [logs, total] = await Promise.all([
-      prisma.auditLog.findMany({
+      prisma.audit_logs.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
       }),
-      prisma.auditLog.count({ where }),
+      prisma.audit_logs.count({ where }),
     ]);
 
     return { logs: logs as any[], total };
