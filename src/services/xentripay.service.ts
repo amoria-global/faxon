@@ -264,6 +264,9 @@ export class XentriPayService {
    * Initiate a collection (deposit) from customer
    * Endpoint: POST /api/collections/initiate
    * Note: Accepts USD amount but processes in RWF
+   * Supports:
+   * - Mobile Money (MTN, Airtel) via pmethod="momo"
+   * - Card payments via pmethod="cc"
    */
   async initiateCollection(request: CollectionRequest): Promise<CollectionResponse> {
     try {
@@ -306,7 +309,8 @@ export class XentriPayService {
         msisdn,
         email: payload.email,
         cname: payload.cname,
-        pmethod: payload.pmethod
+        pmethod: payload.pmethod,
+        paymentType: payload.pmethod === 'momo' ? 'Mobile Money' : 'Card Payment'
       });
 
       const response = await this.client.post<CollectionResponse>(
@@ -319,7 +323,8 @@ export class XentriPayService {
       }
 
       logger.info('Collection initiated successfully', 'XentriPayService', {
-        refid: response.data.refid
+        refid: response.data.refid,
+        paymentMethod: payload.pmethod
       });
 
       return response.data;
@@ -514,11 +519,12 @@ export class XentriPayService {
 
   /**
    * Validate and get provider ID from phone number
+   * Used for payouts (withdrawals/refunds)
    */
   getProviderIdFromPhone(phone: string): string {
     const cleaned = phone.replace(/\D/g, '');
     let nationalNumber = cleaned;
-    
+
     if (cleaned.startsWith('250')) {
       nationalNumber = cleaned.substring(3);
     }
@@ -535,6 +541,34 @@ export class XentriPayService {
     // Airtel: 73
     if (prefix === '73') {
       return '63514'; // Airtel Rwanda
+    }
+
+    throw new Error(`Unsupported mobile provider for prefix: ${prefix}`);
+  }
+
+  /**
+   * Get provider name from phone number
+   */
+  getProviderNameFromPhone(phone: string): 'MTN' | 'AIRTEL' {
+    const cleaned = phone.replace(/\D/g, '');
+    let nationalNumber = cleaned;
+
+    if (cleaned.startsWith('250')) {
+      nationalNumber = cleaned.substring(3);
+    }
+    if (nationalNumber.startsWith('0')) {
+      nationalNumber = nationalNumber.substring(1);
+    }
+
+    const prefix = nationalNumber.substring(0, 2);
+
+    // MTN: 78, 79
+    if (['78', '79'].includes(prefix)) {
+      return 'MTN';
+    }
+    // Airtel: 73
+    if (prefix === '73') {
+      return 'AIRTEL';
     }
 
     throw new Error(`Unsupported mobile provider for prefix: ${prefix}`);

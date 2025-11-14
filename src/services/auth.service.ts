@@ -5,7 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { config } from '../config/config';
 import { BrevoMailingService } from '../utils/brevo.auth';
-import { BrevoSMSService } from '../utils/brevo.sms.auth';
+import { BrevoWhatsAppAuthService } from '../utils/brevo.sms.auth';
 import {
   RegisterDto,
   LoginDto,
@@ -91,11 +91,11 @@ export class AuthService {
   };
 
   private brevoEmailService: BrevoMailingService;
-  private brevoSMSService: BrevoSMSService;
+  private brevoSMSService: BrevoWhatsAppAuthService;
 
   constructor() {
     this.brevoEmailService = new BrevoMailingService();
-    this.brevoSMSService = new BrevoSMSService();
+    this.brevoSMSService = new BrevoWhatsAppAuthService();
   }
 
   // --- CONTEXT CREATION HELPERS ---

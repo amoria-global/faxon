@@ -2,7 +2,7 @@ import axios from 'axios';
 import { config } from '../config/config';
 import { PhoneUtils } from './phone.utils';
 
-interface BrevoSMSContact {
+interface BrevoWhatsAppContact {
   number: string;
   attributes?: {
     FIRSTNAME?: string;
@@ -11,16 +11,10 @@ interface BrevoSMSContact {
   };
 }
 
-interface BrevoSMSData {
-  sender: string;
-  recipient: string;
-  content: string;
-  type?: 'transactional' | 'marketing';
-  tag?: string;
-  webUrl?: string;
-}
+// For backward compatibility
+type BrevoSMSContact = BrevoWhatsAppContact;
 
-interface SMSContext {
+interface WhatsAppContext {
   user: {
     firstName: string;
     lastName: string;
@@ -46,18 +40,40 @@ interface SMSContext {
   };
 }
 
-export class BrevoSMSService {
+// For backward compatibility
+type SMSContext = WhatsAppContext;
+
+export class BrevoWhatsAppAuthService {
   private apiKey: string;
   private apiUrl = 'https://api.brevo.com/v3';
+  private senderNumber: string;
   private defaultSender: string;
+
+  // WhatsApp Template IDs for authentication messages
+  private templateIds = {
+    welcome: process.env.BREVO_WHATSAPP_WELCOME_TEMPLATE_ID || '',
+    phoneVerification: process.env.BREVO_WHATSAPP_PHONE_VERIFICATION_TEMPLATE_ID || '',
+    passwordReset: process.env.BREVO_WHATSAPP_PASSWORD_RESET_TEMPLATE_ID || '',
+    passwordChanged: process.env.BREVO_WHATSAPP_PASSWORD_CHANGED_TEMPLATE_ID || '',
+    loginNotification: process.env.BREVO_WHATSAPP_LOGIN_NOTIFICATION_TEMPLATE_ID || '',
+    suspiciousActivity: process.env.BREVO_WHATSAPP_SUSPICIOUS_ACTIVITY_TEMPLATE_ID || '',
+    accountStatus: process.env.BREVO_WHATSAPP_ACCOUNT_STATUS_TEMPLATE_ID || '',
+    twoFactor: process.env.BREVO_WHATSAPP_TWO_FACTOR_TEMPLATE_ID || '',
+    kycStatus: process.env.BREVO_WHATSAPP_KYC_STATUS_TEMPLATE_ID || '',
+  };
 
   constructor() {
     this.apiKey = config.notifications.sms.apiKey;
-    this.defaultSender = config.notifications.sms.from || 'Jambolush';
-    
+    this.senderNumber = process.env.BREVO_WHATSAPP_SENDER_NUMBER || '';
+    this.defaultSender = process.env.BREVO_SMS_SENDER || 'Jambolush';
+
     if (!this.apiKey) {
       console.error('❌ CRITICAL: Brevo API key is missing!');
-      console.error('Please check your config file for notifications.sms.apiKey');
+      console.error('Please check your config file for notifications.sms.apiKey or BREVO_WHATSAPP_API_KEY');
+    }
+
+    if (!this.senderNumber) {
+      console.warn('⚠️  BREVO_WHATSAPP_SENDER_NUMBER not set. WhatsApp messages may fail.');
     }
   }
 
@@ -170,57 +186,72 @@ export class BrevoSMSService {
     }
   }
 
-  // Enhanced SMS sending with validation
-  async sendTransactionalSMS(smsData: BrevoSMSData): Promise<string> {
-    console.log('📱 Preparing to send SMS...');
-    
+  // Enhanced WhatsApp sending with validation
+  async sendWhatsAppMessage(
+    phoneNumber: string,
+    templateId: string,
+    params?: Record<string, string>,
+    tag?: string
+  ): Promise<string> {
+    console.log('📱 Preparing to send WhatsApp message...');
+
     // Validate input data
-    if (!smsData.recipient) {
+    if (!phoneNumber) {
       throw new Error('Recipient phone number is required');
     }
-    
-    if (!smsData.content) {
-      throw new Error('SMS content is required');
+
+    if (!templateId) {
+      throw new Error('Template ID is required for WhatsApp messages');
     }
-    
-    if (smsData.content.length > 160) {
-      console.warn(`⚠️ SMS content is ${smsData.content.length} characters (over 160, may be split into multiple messages)`);
-    }
-    
+
     // Validate phone number format
     const phoneRegex = /^\+[1-9]\d{1,14}$/;
-    if (!phoneRegex.test(smsData.recipient)) {
-      throw new Error(`Invalid phone number format: ${smsData.recipient}. Must be in international format with + prefix.`);
+    if (!phoneRegex.test(phoneNumber)) {
+      throw new Error(`Invalid phone number format: ${phoneNumber}. Must be in international format with + prefix.`);
     }
-    
-    // Validate sender name (alphanumeric, max 11 chars for some regions)
-    const sender = smsData.sender || this.defaultSender;
-    if (sender.length > 15) {
-      console.warn(`⚠️ Sender name '${sender}' is longer than 15 characters, may be truncated`);
-    }
-    
-    const requestData = {
-      sender: sender,
-      recipient: smsData.recipient,
-      content: smsData.content,
-      type: smsData.type || 'transactional',
-      tag: smsData.tag,
-      webUrl: smsData.webUrl
+
+    const requestData: any = {
+      contactNumbers: [phoneNumber],
+      templateId: parseInt(templateId),
+      senderNumber: this.senderNumber
     };
-    
-    // Remove undefined values
-    Object.keys(requestData).forEach(key => {
-      if (requestData[key as keyof typeof requestData] === undefined) {
-        delete requestData[key as keyof typeof requestData];
-      }
-    });
-    
-    console.log('📤 Final SMS request data:', JSON.stringify(requestData, null, 2));
-    
-    const response = await this.makeRequest('/transactionalSMS/sms', requestData);
-    
-    console.log('✅ SMS sent successfully, reference:', response.reference);
-    return response.reference;
+
+    // Add template parameters if provided
+    if (params && Object.keys(params).length > 0) {
+      requestData.params = params;
+    }
+
+    // Add tag if provided
+    if (tag) {
+      requestData.tag = tag;
+    }
+
+    console.log('📤 Final WhatsApp request data:', JSON.stringify(requestData, null, 2));
+
+    const response = await this.makeRequest('/whatsapp/sendMessage', requestData);
+
+    console.log('✅ WhatsApp message sent successfully, reference:', response.reference || response.id);
+    return response.reference || response.id;
+  }
+
+  // Keep legacy method for backward compatibility
+  async sendTransactionalSMS(smsData: any): Promise<string> {
+    // Convert old SMS format to WhatsApp template format
+    // This is a fallback - ideally all calls should be updated to use sendWhatsAppMessage
+    console.warn('⚠️  sendTransactionalSMS is deprecated. Please use sendWhatsAppMessage with templates.');
+
+    // Try to send using a general template
+    const generalTemplateId = process.env.BREVO_WHATSAPP_GENERAL_TEMPLATE_ID || '';
+    if (!generalTemplateId) {
+      throw new Error('General WhatsApp template not configured. Please set BREVO_WHATSAPP_GENERAL_TEMPLATE_ID');
+    }
+
+    return this.sendWhatsAppMessage(
+      smsData.recipient,
+      generalTemplateId,
+      { MESSAGE: smsData.content },
+      smsData.tag
+    );
   }
 
   // Test method with detailed debugging
@@ -274,175 +305,166 @@ export class BrevoSMSService {
     }, 'POST');
   }
 
-  // --- AUTHENTICATION SMS METHODS ---
+  // --- AUTHENTICATION WHATSAPP METHODS ---
 
-  async sendWelcomeSMS(context: SMSContext): Promise<void> {
+  async sendWelcomeSMS(context: WhatsAppContext): Promise<void> {
     if (!context.user.phone) return;
 
     const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
-    const content = this.getWelcomeSMSContent(context);
 
-    const smsData: BrevoSMSData = {
-      sender: this.defaultSender,
-      recipient: phoneNumber,
-      content,
-      type: 'transactional',
-      tag: 'welcome',
-      webUrl: `https://app.jambolush.com`
-    };
-
-    await this.sendTransactionalSMS(smsData);
-    console.log(`Welcome SMS sent to ${phoneNumber}`);
+    await this.sendWhatsAppMessage(
+      phoneNumber,
+      this.templateIds.welcome,
+      {
+        FNAME: context.user.firstName,
+        COMPANY_NAME: context.company.name
+      },
+      'welcome'
+    );
+    console.log(`Welcome WhatsApp message sent to ${phoneNumber}`);
   }
 
-  async sendPhoneVerificationSMS(context: SMSContext): Promise<void> {
+  async sendPhoneVerificationSMS(context: WhatsAppContext): Promise<void> {
     if (!context.user.phone || !context.verification) return;
 
     const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
-    const content = this.getPhoneVerificationSMSContent(context);
 
-    const smsData: BrevoSMSData = {
-      sender: this.defaultSender,
-      recipient: phoneNumber,
-      content,
-      type: 'transactional',
-      tag: 'phone_verification'
-    };
-
-    await this.sendTransactionalSMS(smsData);
-    console.log(`Phone verification SMS sent to ${phoneNumber}`);
+    await this.sendWhatsAppMessage(
+      phoneNumber,
+      this.templateIds.phoneVerification,
+      {
+        COMPANY_NAME: context.company.name,
+        CODE: context.verification.code,
+        EXPIRES_IN: context.verification.expiresIn
+      },
+      'phone_verification'
+    );
+    console.log(`Phone verification WhatsApp message sent to ${phoneNumber}`);
   }
 
-  async sendPasswordResetSMS(context: SMSContext): Promise<void> {
+  async sendPasswordResetSMS(context: WhatsAppContext): Promise<void> {
     if (!context.user.phone || !context.verification) return;
 
     const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
-    const content = this.getPasswordResetSMSContent(context);
 
-    const smsData: BrevoSMSData = {
-      sender: this.defaultSender,
-      recipient: phoneNumber,
-      content,
-      type: 'transactional',
-      tag: 'password_reset',
-      webUrl: `https://jambolush.com/all/forgotpw`
-    };
-
-    await this.sendTransactionalSMS(smsData);
-    console.log(`Password reset SMS sent to ${phoneNumber}`);
+    await this.sendWhatsAppMessage(
+      phoneNumber,
+      this.templateIds.passwordReset,
+      {
+        COMPANY_NAME: context.company.name,
+        CODE: context.verification.code,
+        EXPIRES_IN: context.verification.expiresIn
+      },
+      'password_reset'
+    );
+    console.log(`Password reset WhatsApp message sent to ${phoneNumber}`);
   }
 
-  async sendPasswordChangedSMS(context: SMSContext): Promise<void> {
+  async sendPasswordChangedSMS(context: WhatsAppContext): Promise<void> {
     if (!context.user.phone) return;
 
     const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
-    const content = this.getPasswordChangedSMSContent(context);
 
-    const smsData: BrevoSMSData = {
-      sender: this.defaultSender,
-      recipient: phoneNumber,
-      content,
-      type: 'transactional',
-      tag: 'password_changed',
-      webUrl: `https://app.jambolush.com`
-    };
+    const timestamp = context.security?.timestamp
+      ? new Date(context.security.timestamp).toLocaleString()
+      : 'recently';
 
-    await this.sendTransactionalSMS(smsData);
+    await this.sendWhatsAppMessage(
+      phoneNumber,
+      this.templateIds.passwordChanged,
+      {
+        COMPANY_NAME: context.company.name,
+        TIMESTAMP: timestamp
+      },
+      'password_changed'
+    );
     console.log(`Password changed SMS sent to ${phoneNumber}`);
   }
 
-  async sendLoginNotificationSMS(context: SMSContext): Promise<void> {
+  async sendLoginNotificationSMS(context: WhatsAppContext): Promise<void> {
     if (!context.user.phone) return;
 
     const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
-    const content = this.getLoginNotificationSMSContent(context);
 
-    const smsData: BrevoSMSData = {
-      sender: this.defaultSender,
-      recipient: phoneNumber,
-      content,
-      type: 'transactional',
-      tag: 'login_notification',
-      webUrl: `https://app.jambolush.com`
-    };
-
-    await this.sendTransactionalSMS(smsData);
-    console.log(`Login notification SMS sent to ${phoneNumber}`);
+    await this.sendWhatsAppMessage(
+      phoneNumber,
+      this.templateIds.loginNotification,
+      {
+        COMPANY_NAME: context.company.name,
+        DEVICE: context.security?.device?.split(' ')[0] || 'Unknown device',
+        LOCATION: context.security?.location || 'Unknown location'
+      },
+      'login_notification'
+    );
+    console.log(`Login notification WhatsApp message sent to ${phoneNumber}`);
   }
 
-  async sendSuspiciousActivitySMS(context: SMSContext): Promise<void> {
+  async sendSuspiciousActivitySMS(context: WhatsAppContext): Promise<void> {
     if (!context.user.phone) return;
 
     const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
-    const content = this.getSuspiciousActivitySMSContent(context);
 
-    const smsData: BrevoSMSData = {
-      sender: this.defaultSender,
-      recipient: phoneNumber,
-      content,
-      type: 'transactional',
-      tag: 'security_alert',
-      webUrl: `https://app.jambolush.com`
-    };
-
-    await this.sendTransactionalSMS(smsData);
-    console.log(`Suspicious activity SMS sent to ${phoneNumber}`);
+    await this.sendWhatsAppMessage(
+      phoneNumber,
+      this.templateIds.suspiciousActivity,
+      {
+        COMPANY_NAME: context.company.name
+      },
+      'security_alert'
+    );
+    console.log(`Suspicious activity WhatsApp message sent to ${phoneNumber}`);
   }
 
-  async sendAccountStatusChangeSMS(context: SMSContext, status: 'suspended' | 'reactivated'): Promise<void> {
+  async sendAccountStatusChangeSMS(context: WhatsAppContext, status: 'suspended' | 'reactivated'): Promise<void> {
     if (!context.user.phone) return;
 
     const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
-    const content = this.getAccountStatusSMSContent(context, status);
 
-    const smsData: BrevoSMSData = {
-      sender: this.defaultSender,
-      recipient: phoneNumber,
-      content,
-      type: 'transactional',
-      tag: `account_${status}`,
-      webUrl: status === 'suspended' ? `https://jambolush.com/all/contact-us` : `https://jambolush.com/all/login`
-    };
-
-    await this.sendTransactionalSMS(smsData);
-    console.log(`Account ${status} SMS sent to ${phoneNumber}`);
+    await this.sendWhatsAppMessage(
+      phoneNumber,
+      this.templateIds.accountStatus,
+      {
+        COMPANY_NAME: context.company.name,
+        STATUS: status.toUpperCase()
+      },
+      `account_${status}`
+    );
+    console.log(`Account ${status} WhatsApp message sent to ${phoneNumber}`);
   }
 
-  async sendTwoFactorSMS(context: SMSContext): Promise<void> {
+  async sendTwoFactorSMS(context: WhatsAppContext): Promise<void> {
     if (!context.user.phone || !context.verification) return;
 
     const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
-    const content = this.getTwoFactorSMSContent(context);
 
-    const smsData: BrevoSMSData = {
-      sender: this.defaultSender,
-      recipient: phoneNumber,
-      content,
-      type: 'transactional',
-      tag: 'two_factor_auth'
-    };
-
-    await this.sendTransactionalSMS(smsData);
-    console.log(`Two-factor authentication SMS sent to ${phoneNumber}`);
+    await this.sendWhatsAppMessage(
+      phoneNumber,
+      this.templateIds.twoFactor,
+      {
+        COMPANY_NAME: context.company.name,
+        CODE: context.verification.code,
+        EXPIRES_IN: context.verification.expiresIn
+      },
+      'two_factor_auth'
+    );
+    console.log(`Two-factor authentication WhatsApp message sent to ${phoneNumber}`);
   }
 
-  async sendKYCStatusSMS(context: SMSContext, kycStatus: 'approved' | 'rejected' | 'pending_review'): Promise<void> {
+  async sendKYCStatusSMS(context: WhatsAppContext, kycStatus: 'approved' | 'rejected' | 'pending_review'): Promise<void> {
     if (!context.user.phone) return;
 
     const phoneNumber = PhoneUtils.formatPhone(context.user.phone, true);
-    const content = this.getKYCStatusSMSContent(context, kycStatus);
 
-    const smsData: BrevoSMSData = {
-      sender: this.defaultSender,
-      recipient: phoneNumber,
-      content,
-      type: 'transactional',
-      tag: `kyc_${kycStatus}`,
-      webUrl: `https://app.jambolush.com`
-    };
-
-    await this.sendTransactionalSMS(smsData);
-    console.log(`KYC status SMS sent to ${phoneNumber}`);
+    await this.sendWhatsAppMessage(
+      phoneNumber,
+      this.templateIds.kycStatus,
+      {
+        COMPANY_NAME: context.company.name,
+        STATUS: kycStatus.toUpperCase().replace('_', ' ')
+      },
+      `kyc_${kycStatus}`
+    );
+    console.log(`KYC status WhatsApp message sent to ${phoneNumber}`);
   }
 
   // --- SMS CONTENT TEMPLATES ---
@@ -521,30 +543,24 @@ export class BrevoSMSService {
     };
   }
 
-  // --- BULK SMS METHODS ---
+  // --- BULK WHATSAPP METHODS ---
 
-  async sendBulkSMS(recipients: string[], content: string, tag?: string): Promise<void> {
-    const promises = recipients.map(recipient => 
-      this.sendTransactionalSMS({
-        sender: this.defaultSender,
-        recipient,
-        content,
-        type: 'marketing',
-        tag: tag || 'bulk_message'
-      })
+  async sendBulkSMS(recipients: string[], templateId: string, params?: Record<string, string>, tag?: string): Promise<void> {
+    const promises = recipients.map(recipient =>
+      this.sendWhatsAppMessage(recipient, templateId, params, tag || 'bulk_message')
     );
 
     await Promise.all(promises);
-    console.log(`Bulk SMS sent to ${recipients.length} recipients`);
+    console.log(`Bulk WhatsApp messages sent to ${recipients.length} recipients`);
   }
 
-  // --- SMS PREFERENCES ---
+  // --- WHATSAPP PREFERENCES ---
   async shouldSendSMS(userId: number, smsType: string): Promise<boolean> {
     // This would check user preferences from database
-    // For now, return true for all transactional SMS
+    // For now, return true for all transactional WhatsApp messages
     const transactionalTypes = [
       'phone_verification',
-      'password_reset', 
+      'password_reset',
       'password_changed',
       'security_alert',
       'two_factor_auth',
@@ -556,23 +572,44 @@ export class BrevoSMSService {
   }
 
   // --- ERROR HANDLING & RETRY ---
-  async sendSMSWithRetry(smsData: BrevoSMSData, maxRetries: number = 3): Promise<string> {
+  async sendWhatsAppWithRetry(
+    phoneNumber: string,
+    templateId: string,
+    params?: Record<string, string>,
+    tag?: string,
+    maxRetries: number = 3
+  ): Promise<string> {
     let lastError;
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        return await this.sendTransactionalSMS(smsData);
+        return await this.sendWhatsAppMessage(phoneNumber, templateId, params, tag);
       } catch (error) {
         lastError = error;
-        console.error(`SMS send attempt ${attempt} failed:`, error);
-        
+        console.error(`WhatsApp send attempt ${attempt} failed:`, error);
+
         if (attempt < maxRetries) {
           // Wait before retrying (exponential backoff)
           await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
         }
       }
     }
-     
+
     throw lastError;
   }
+
+  // Legacy method for backward compatibility
+  async sendSMSWithRetry(smsData: any, maxRetries: number = 3): Promise<string> {
+    console.warn('⚠️  sendSMSWithRetry is deprecated. Please use sendWhatsAppWithRetry.');
+    return this.sendWhatsAppWithRetry(
+      smsData.recipient,
+      process.env.BREVO_WHATSAPP_GENERAL_TEMPLATE_ID || '',
+      { MESSAGE: smsData.content },
+      smsData.tag,
+      maxRetries
+    );
+  }
 }
+
+// Export with backward compatibility
+export const BrevoSMSService = BrevoWhatsAppAuthService;

@@ -317,7 +317,7 @@ export class PropertyAddressUnlockService {
       } else {
         // For three_month_30_percent: Only for monthly properties
         // Calculate: 30% of (monthly price with 14% tax × 3 months)
-        // No validation, just process based on DB
+        // Validate that received amount matches expected amount (within 5% tolerance)
 
         if (!property.pricePerMonth) {
           return {
@@ -336,15 +336,46 @@ export class PropertyAddressUnlockService {
         const expectedAmountUSD = threeMonthsWithTax * 0.3;
         const expectedAmountRWF = Math.round(expectedAmountUSD * exchangeRate);
 
-        // Override the payment amount with the calculated amount from DB
+        // Validate received amount is within acceptable range (±5% tolerance)
+        const receivedAmountRWF = Math.round(request.paymentAmountUSD * exchangeRate);
+        const lowerBound = expectedAmountRWF * 0.95; // 5% below
+        const upperBound = expectedAmountRWF * 1.05; // 5% above
+
+        if (receivedAmountRWF < lowerBound || receivedAmountRWF > upperBound) {
+          logger.error('Payment amount validation failed for 30% method', 'PropertyAddressUnlock', {
+            propertyId: request.propertyId,
+            monthlyPrice,
+            expectedAmountUSD,
+            expectedAmountRWF,
+            receivedAmountUSD: request.paymentAmountUSD,
+            receivedAmountRWF,
+            lowerBound,
+            upperBound,
+            difference: receivedAmountRWF - expectedAmountRWF
+          });
+
+          return {
+            success: false,
+            message: `Invalid payment amount. Expected ${expectedAmountUSD.toFixed(2)} USD (${expectedAmountRWF} RWF) for 30% of 3 months rent, but received ${request.paymentAmountUSD.toFixed(2)} USD (${receivedAmountRWF} RWF).`,
+            errors: [
+              `Payment amount must be 30% of 3 months rent: ${expectedAmountUSD.toFixed(2)} USD`,
+              `Monthly rent: ${monthlyPrice} USD × 1.14 (tax) × 3 months × 0.30 = ${expectedAmountUSD.toFixed(2)} USD`
+            ]
+          };
+        }
+
+        // Use the calculated expected amount (not the received amount) for consistency
         paymentAmountRWF = expectedAmountRWF;
 
-        logger.info('30% of 3 months calculated', 'PropertyAddressUnlock', {
+        logger.info('30% of 3 months validated and calculated', 'PropertyAddressUnlock', {
           monthlyPrice,
           monthlyPriceWithTax,
           threeMonthsWithTax,
           thirtyPercent: expectedAmountUSD,
-          chargedAmountRWF: expectedAmountRWF
+          chargedAmountRWF: expectedAmountRWF,
+          receivedAmountUSD: request.paymentAmountUSD,
+          receivedAmountRWF,
+          validationPassed: true
         });
       }
 

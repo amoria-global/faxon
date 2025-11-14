@@ -212,13 +212,43 @@ export const config = {
       replyTo: process.env.SUPPORT_EMAIL || 'support@jambolush.com'
     },
 
-    // SMS settings (Africa's Talking - popular in East Africa)
+    // SMS/WhatsApp settings
     sms: {
-      provider: process.env.SMS_PROVIDER || 'africastalking',
-      apiKey: process.env.BREVO_SMS_API_KEY || '',
+      provider: process.env.SMS_PROVIDER || 'brevo_whatsapp', // Changed to WhatsApp
+      apiKey: process.env.BREVO_WHATSAPP_API_KEY || process.env.BREVO_SMS_API_KEY || '',
       username: process.env.SMS_USERNAME || 'jambolush',
       from: process.env.SMS_FROM || 'JAMBOLUSH',
       enabled: process.env.SMS_NOTIFICATIONS_ENABLED === 'true'
+    },
+
+    // WhatsApp settings (Brevo)
+    whatsapp: {
+      provider: 'brevo',
+      apiKey: process.env.BREVO_WHATSAPP_API_KEY || process.env.BREVO_SMS_API_KEY || '',
+      senderNumber: process.env.BREVO_WHATSAPP_SENDER_NUMBER || '',
+      enabled: process.env.WHATSAPP_NOTIFICATIONS_ENABLED !== 'false', // Enabled by default
+
+      // Template IDs - Must be created and approved in Brevo/WhatsApp
+      templates: {
+        // Withdrawal templates
+        withdrawalOTP: process.env.BREVO_WHATSAPP_WITHDRAWAL_OTP_TEMPLATE_ID || '',
+        transactionStatus: process.env.BREVO_WHATSAPP_TRANSACTION_STATUS_TEMPLATE_ID || '',
+
+        // Auth templates
+        welcome: process.env.BREVO_WHATSAPP_WELCOME_TEMPLATE_ID || '',
+        phoneVerification: process.env.BREVO_WHATSAPP_PHONE_VERIFICATION_TEMPLATE_ID || '',
+        passwordReset: process.env.BREVO_WHATSAPP_PASSWORD_RESET_TEMPLATE_ID || '',
+        passwordChanged: process.env.BREVO_WHATSAPP_PASSWORD_CHANGED_TEMPLATE_ID || '',
+        loginNotification: process.env.BREVO_WHATSAPP_LOGIN_NOTIFICATION_TEMPLATE_ID || '',
+        suspiciousActivity: process.env.BREVO_WHATSAPP_SUSPICIOUS_ACTIVITY_TEMPLATE_ID || '',
+        accountStatus: process.env.BREVO_WHATSAPP_ACCOUNT_STATUS_TEMPLATE_ID || '',
+        twoFactor: process.env.BREVO_WHATSAPP_TWO_FACTOR_TEMPLATE_ID || '',
+        kycStatus: process.env.BREVO_WHATSAPP_KYC_STATUS_TEMPLATE_ID || '',
+
+        // General templates
+        generalNotification: process.env.BREVO_WHATSAPP_NOTIFICATION_TEMPLATE_ID || '',
+        bookingConfirmation: process.env.BREVO_WHATSAPP_BOOKING_CONFIRMATION_TEMPLATE_ID || '',
+      }
     },
 
     // Push notifications
