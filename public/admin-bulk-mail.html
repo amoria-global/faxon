@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bulk Mail Manager - Jambolush Admin</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+  <!-- Quill Rich Text Editor -->
+  <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+  <style>
+    :root {
+      --primary-color: #083A85;
+      --primary-hover: #0a4499;
+      --success-color: #22c55e;
+      --danger-color: #ef4444;
+      --warning-color: #f59e0b;
+      --light-bg: #f9fafb;
+      --border-color: #e5e7eb;
+    }
+
+    body {
+      background: var(--light-bg);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .sidebar {
+      background: white;
+      min-height: 100vh;
+      border-right: 1px solid var(--border-color);
+      padding: 20px;
+    }
+
+    .main-content {
+      padding: 30px;
+    }
+
+    .card {
+      border: none;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border-radius: 12px;
+      margin-bottom: 20px;
+    }
+
+    .card-header {
+      background: white;
+      border-bottom: 1px solid var(--border-color);
+      padding: 20px;
+      font-weight: 600;
+      font-size: 18px;
+    }
+
+    .btn-primary {
+      background: var(--primary-color);
+      border: none;
+      padding: 10px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-hover);
+    }
+
+    .template-btn {
+      padding: 15px;
+      margin: 10px 0;
+      border: 2px solid var(--border-color);
+      border-radius: 8px;
+      background: white;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .template-btn:hover {
+      border-color: var(--primary-color);
+      background: #f0f7ff;
+    }
+
+    .template-btn.active {
+      border-color: var(--primary-color);
+      background: #f0f7ff;
+    }
+
+    .filter-chip {
+      display: inline-block;
+      padding: 6px 12px;
+      background: var(--light-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      margin: 5px;
+      font-size: 14px;
+    }
+
+    .filter-chip.active {
+      background: var(--primary-color);
+      color: white;
+      border-color: var(--primary-color);
+    }
+
+    .recipient-count {
+      background: var(--primary-color);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 8px;
+      display: inline-block;
+      font-weight: 600;
+    }
+
+    #editor-container {
+      min-height: 400px;
+      background: white;
+    }
+
+    .ql-editor {
+      min-height: 400px;
+    }
+
+    .preview-panel {
+      background: white;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 20px;
+      max-height: 600px;
+      overflow-y: auto;
+    }
+
+    .stats-card {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      text-align: center;
+      border: 1px solid var(--border-color);
+    }
+
+    .stats-number {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--primary-color);
+    }
+
+    .stats-label {
+      color: #6b7280;
+      font-size: 14px;
+      margin-top: 5px;
+    }
+
+    .variable-chip {
+      display: inline-block;
+      padding: 4px 10px;
+      background: #fef3c7;
+      border: 1px solid #f59e0b;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: monospace;
+      margin: 2px;
+      cursor: pointer;
+    }
+
+    .variable-chip:hover {
+      background: #fde68a;
+    }
+
+    .progress-bar {
+      height: 8px;
+      border-radius: 4px;
+    }
+
+    .alert-custom {
+      border-radius: 8px;
+      border: none;
+      padding: 15px 20px;
+    }
+
+    .nav-pills .nav-link {
+      border-radius: 8px;
+      margin: 5px 0;
+      color: #6b7280;
+    }
+
+    .nav-pills .nav-link.active {
+      background: var(--primary-color);
+    }
+
+    .spinner-container {
+      display: none;
+      text-align: center;
+      padding: 40px;
+    }
+
+    .spinner-container.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container-fluid">
+    <div class="row">
+      <!-- Sidebar -->
+      <div class="col-md-2 sidebar">
+        <h4 class="mb-4" style="color: var(--primary-color);">
+          <i class="bi bi-envelope-fill"></i> Bulk Mail
+        </h4>
+        <ul class="nav nav-pills flex-column">
+          <li class="nav-item">
+            <a class="nav-link active" href="#compose" onclick="showSection('compose')">
+              <i class="bi bi-pencil-square"></i> Compose
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#templates" onclick="showSection('templates')">
+              <i class="bi bi-files"></i> Templates
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#history" onclick="showSection('history')">
+              <i class="bi bi-clock-history"></i> History
+            </a>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Main Content -->
+      <div class="col-md-10 main-content">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+          <div>
+            <h2>Bulk Email Campaign Manager</h2>
+            <p class="text-muted">Send customized emails to your users</p>
+          </div>
+          <div>
+            <button class="btn btn-outline-primary me-2" onclick="previewRecipients()">
+              <i class="bi bi-people"></i> Preview Recipients
+            </button>
+            <button class="btn btn-primary" onclick="sendBulkMail()">
+              <i class="bi bi-send"></i> Send Mail
+            </button>
+          </div>
+        </div>
+
+        <!-- Stats Row -->
+        <div class="row mb-4" id="stats-row">
+          <div class="col-md-3">
+            <div class="stats-card">
+              <div class="stats-number" id="total-users">0</div>
+              <div class="stats-label">Total Users</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="stats-card">
+              <div class="stats-number" id="selected-recipients">0</div>
+              <div class="stats-label">Selected Recipients</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="stats-card">
+              <div class="stats-number" id="emails-sent">0</div>
+              <div class="stats-label">Emails Sent</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="stats-card">
+              <div class="stats-number" id="success-rate">100%</div>
+              <div class="stats-label">Success Rate</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Compose Section -->
+        <div id="compose-section">
+          <div class="row">
+            <!-- Left Column: Editor -->
+            <div class="col-md-8">
+              <!-- Template Selection -->
+              <div class="card">
+                <div class="card-header">
+                  <i class="bi bi-palette"></i> Choose Template Type
+                </div>
+                <div class="card-body">
+                  <div class="row">
+                    <div class="col-md-4">
+                      <div class="template-btn" onclick="selectTemplate('announcement')">
+                        <i class="bi bi-megaphone" style="font-size: 24px; color: #3b82f6;"></i>
+                        <h6 class="mt-2 mb-0">Announcement</h6>
+                        <small class="text-muted">Important updates</small>
+                      </div>
+                    </div>
+                    <div class="col-md-4">
+                      <div class="template-btn" onclick="selectTemplate('promotion')">
+                        <i class="bi bi-gift" style="font-size: 24px; color: #22c55e;"></i>
+                        <h6 class="mt-2 mb-0">Promotion</h6>
+                        <small class="text-muted">Special offers</small>
+                      </div>
+                    </div>
+                    <div class="col-md-4">
+                      <div class="template-btn" onclick="selectTemplate('newsletter')">
+                        <i class="bi bi-newspaper" style="font-size: 24px; color: #f59e0b;"></i>
+                        <h6 class="mt-2 mb-0">Newsletter</h6>
+                        <small class="text-muted">Regular updates</small>
+                      </div>
+                    </div>
+                    <div class="col-md-4">
+                      <div class="template-btn" onclick="selectTemplate('payment_reminder')">
+                        <i class="bi bi-credit-card" style="font-size: 24px; color: #ef4444;"></i>
+                        <h6 class="mt-2 mb-0">Payment</h6>
+                        <small class="text-muted">Payment reminders</small>
+                      </div>
+                    </div>
+                    <div class="col-md-4">
+                      <div class="template-btn" onclick="selectTemplate('booking_reminder')">
+                        <i class="bi bi-calendar-check" style="font-size: 24px; color: #8b5cf6;"></i>
+                        <h6 class="mt-2 mb-0">Booking</h6>
+                        <small class="text-muted">Booking reminders</small>
+                      </div>
+                    </div>
+                    <div class="col-md-4">
+                      <div class="template-btn active" onclick="selectTemplate('custom')">
+                        <i class="bi bi-brush" style="font-size: 24px; color: #6b7280;"></i>
+                        <h6 class="mt-2 mb-0">Custom</h6>
+                        <small class="text-muted">Create your own</small>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Email Editor -->
+              <div class="card">
+                <div class="card-header">
+                  <i class="bi bi-envelope"></i> Compose Email
+                </div>
+                <div class="card-body">
+                  <!-- Subject Line -->
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">Subject Line</label>
+                    <input type="text" class="form-control" id="email-subject"
+                           placeholder="Enter email subject (use {{firstName}}, {{lastName}}, etc.)"
+                           value="Important Update from Jambolush">
+                  </div>
+
+                  <!-- Dynamic Variables Helper -->
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">Available Variables (click to insert)</label>
+                    <div>
+                      <span class="variable-chip" onclick="insertVariable('{{firstName}}')">{{firstName}}</span>
+                      <span class="variable-chip" onclick="insertVariable('{{lastName}}')">{{lastName}}</span>
+                      <span class="variable-chip" onclick="insertVariable('{{email}}')">{{email}}</span>
+                      <span class="variable-chip" onclick="insertVariable('{{name}}')">{{name}}</span>
+                    </div>
+                    <small class="text-muted">Variables will be automatically replaced with user data</small>
+                  </div>
+
+                  <!-- Title -->
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">Email Title</label>
+                    <input type="text" class="form-control" id="email-title"
+                           placeholder="Main title of your email"
+                           value="Exciting New Features Available!">
+                  </div>
+
+                  <!-- Rich Text Editor -->
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">Message Content</label>
+                    <div id="editor-container"></div>
+                  </div>
+
+                  <!-- Button Configuration -->
+                  <div class="row">
+                    <div class="col-md-6 mb-3">
+                      <label class="form-label fw-bold">Button Text (Optional)</label>
+                      <input type="text" class="form-control" id="button-text"
+                             placeholder="e.g., Learn More">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                      <label class="form-label fw-bold">Button URL (Optional)</label>
+                      <input type="url" class="form-control" id="button-url"
+                             placeholder="https://app.jambolush.com">
+                    </div>
+                  </div>
+
+                  <!-- Image URL -->
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">Image URL (Optional)</label>
+                    <input type="url" class="form-control" id="image-url"
+                           placeholder="https://example.com/image.jpg">
+                  </div>
+
+                  <!-- Additional Info -->
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">Additional Information (Optional)</label>
+                    <textarea class="form-control" id="additional-info" rows="3"
+                              placeholder="Any extra details you want to add"></textarea>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Column: Recipients & Preview -->
+            <div class="col-md-4">
+              <!-- Recipient Selection Mode -->
+              <div class="card">
+                <div class="card-header">
+                  <i class="bi bi-people"></i> Choose Recipients
+                </div>
+                <div class="card-body">
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">Recipient Mode</label>
+                    <select class="form-select" id="recipient-mode" onchange="toggleRecipientMode()">
+                      <option value="filters">Filter Registered Users</option>
+                      <option value="custom">Custom Email List (Any Emails)</option>
+                      <option value="both">Both (Filters + Custom Emails)</option>
+                    </select>
+                  </div>
+
+                  <!-- Custom Email List Section -->
+                  <div id="custom-email-section" style="display: none;">
+                    <div class="alert alert-info alert-custom">
+                      <i class="bi bi-info-circle"></i>
+                      <strong>Send to ANY email addresses!</strong><br>
+                      <small>You can send to any email, registered or not.</small>
+                    </div>
+
+                    <div class="mb-3">
+                      <label class="form-label fw-bold">Enter Email Addresses</label>
+                      <textarea class="form-control" id="custom-emails" rows="6"
+                                placeholder="Enter one email per line or comma-separated:&#10;john@example.com&#10;jane@company.com&#10;partner@business.com"></textarea>
+                      <small class="text-muted">One per line or comma-separated. Can be ANY email addresses.</small>
+                    </div>
+
+                    <div class="mb-3">
+                      <label class="form-label fw-bold">Upload Email List (Optional)</label>
+                      <input type="file" class="form-control" id="email-file" accept=".txt,.csv"
+                             onchange="loadEmailsFromFile(event)">
+                      <small class="text-muted">Upload .txt or .csv file with email addresses</small>
+                    </div>
+
+                    <button class="btn btn-success w-100 mb-2" onclick="validateCustomEmails()">
+                      <i class="bi bi-check-circle"></i> Validate Emails (<span id="custom-email-count">0</span>)
+                    </button>
+                  </div>
+
+                  <!-- User Filters Section -->
+                  <div id="user-filters-section">
+                    <!-- Role Filter -->
+                    <div class="mb-3">
+                      <label class="form-label fw-bold">User Role</label>
+                      <select class="form-select" id="filter-role">
+                        <option value="">All Roles</option>
+                        <option value="guest">Guests</option>
+                        <option value="host">Hosts</option>
+                        <option value="guide">Guides</option>
+                      </select>
+                    </div>
+
+                    <!-- Verification Filter -->
+                    <div class="mb-3">
+                      <label class="form-label fw-bold">Verification Status</label>
+                      <select class="form-select" id="filter-verified">
+                        <option value="">All Users</option>
+                        <option value="true">Verified Only</option>
+                        <option value="false">Unverified Only</option>
+                      </select>
+                    </div>
+
+                    <!-- Booking Filter -->
+                    <div class="mb-3">
+                      <label class="form-label fw-bold">Booking Status</label>
+                      <select class="form-select" id="filter-booking">
+                        <option value="">All Users</option>
+                        <option value="true">Has Completed Booking</option>
+                        <option value="false">No Bookings</option>
+                      </select>
+                    </div>
+
+                    <!-- Date Range -->
+                    <div class="mb-3">
+                      <label class="form-label fw-bold">Registration Date</label>
+                      <input type="date" class="form-control mb-2" id="filter-date-after"
+                             placeholder="After">
+                      <input type="date" class="form-control" id="filter-date-before"
+                             placeholder="Before">
+                    </div>
+                  </div>
+
+                  <button class="btn btn-outline-primary w-100" onclick="previewRecipients()">
+                    <i class="bi bi-eye"></i> Preview All Recipients
+                  </button>
+                </div>
+              </div>
+
+              <!-- Preview -->
+              <div class="card">
+                <div class="card-header">
+                  <i class="bi bi-eye"></i> Email Preview
+                </div>
+                <div class="card-body">
+                  <button class="btn btn-outline-secondary w-100 mb-3" onclick="generatePreview()">
+                    <i class="bi bi-refresh"></i> Refresh Preview
+                  </button>
+                  <div class="preview-panel" id="preview-panel">
+                    <p class="text-muted text-center">Preview will appear here</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div class="spinner-container" id="loading-spinner">
+          <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <p class="mt-3">Processing your request...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Result Modal -->
+  <div class="modal fade" id="resultModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Email Campaign Result</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="result-body">
+          <!-- Results will be shown here -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recipients Modal -->
+  <div class="modal fade" id="recipientsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Preview Recipients</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="recipients-body">
+          <!-- Recipients list will be shown here -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+  <script>
+    // Configuration
+    const API_BASE = '/api/admin/bulk-mail';
+    let authToken = localStorage.getItem('adminToken') || '';
+    let selectedTemplate = 'custom';
+    let quill;
+
+    // Initialize Quill Editor
+    document.addEventListener('DOMContentLoaded', function() {
+      quill = new Quill('#editor-container', {
+        theme: 'snow',
+        modules: {
+          toolbar: [
+            [{ 'header': [1, 2, 3, false] }],
+            ['bold', 'italic', 'underline', 'strike'],
+            [{ 'color': [] }, { 'background': [] }],
+            [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+            [{ 'align': [] }],
+            ['link', 'image'],
+            ['clean']
+          ]
+        },
+        placeholder: 'Write your email message here... Use {{firstName}}, {{lastName}}, etc. for personalization'
+      });
+
+      // Set default content
+      quill.root.innerHTML = '<p>Hello {{firstName}}!</p><p>We have exciting news to share with you...</p>';
+    });
+
+    // Template Selection
+    function selectTemplate(type) {
+      selectedTemplate = type;
+      document.querySelectorAll('.template-btn').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      event.target.closest('.template-btn').classList.add('active');
+
+      // Load template defaults
+      const templates = {
+        announcement: {
+          subject: '📢 Important Announcement from Jambolush',
+          title: 'Important Update',
+          content: '<p>Hello {{firstName}}!</p><p>We have an important announcement to share with you...</p>'
+        },
+        promotion: {
+          subject: '🎉 Special Offer Just for You, {{firstName}}!',
+          title: 'Exclusive Promotion',
+          content: '<p>Hi {{firstName}}!</p><p>We have a special offer exclusively for you...</p>'
+        },
+        newsletter: {
+          subject: '📰 Jambolush Newsletter - Latest Updates',
+          title: 'Our Latest News',
+          content: '<p>Hello {{firstName}}!</p><p>Here are the latest updates from Jambolush...</p>'
+        },
+        payment_reminder: {
+          subject: '💳 Payment Reminder',
+          title: 'Payment Due',
+          content: '<p>Hi {{firstName}},</p><p>This is a friendly reminder about your upcoming payment...</p>'
+        },
+        booking_reminder: {
+          subject: '📅 Your Booking Reminder',
+          title: 'Upcoming Booking',
+          content: '<p>Hi {{firstName}}!</p><p>Your booking is coming up soon...</p>'
+        },
+        custom: {
+          subject: 'Important Update from Jambolush',
+          title: 'Custom Message',
+          content: '<p>Hello {{firstName}}!</p><p>Write your custom message here...</p>'
+        }
+      };
+
+      const template = templates[type];
+      document.getElementById('email-subject').value = template.subject;
+      document.getElementById('email-title').value = template.title;
+      quill.root.innerHTML = template.content;
+    }
+
+    // Insert Variable
+    function insertVariable(variable) {
+      const range = quill.getSelection(true);
+      quill.insertText(range.index, variable);
+      quill.setSelection(range.index + variable.length);
+    }
+
+    // Toggle Recipient Mode
+    function toggleRecipientMode() {
+      const mode = document.getElementById('recipient-mode').value;
+      const customSection = document.getElementById('custom-email-section');
+      const filtersSection = document.getElementById('user-filters-section');
+
+      if (mode === 'custom') {
+        customSection.style.display = 'block';
+        filtersSection.style.display = 'none';
+      } else if (mode === 'filters') {
+        customSection.style.display = 'none';
+        filtersSection.style.display = 'block';
+      } else if (mode === 'both') {
+        customSection.style.display = 'block';
+        filtersSection.style.display = 'block';
+      }
+    }
+
+    // Parse Custom Emails
+    function parseCustomEmails() {
+      const customEmailsText = document.getElementById('custom-emails').value;
+      if (!customEmailsText.trim()) return [];
+
+      // Split by newlines and commas
+      const emails = customEmailsText
+        .split(/[\n,;]+/)
+        .map(e => e.trim())
+        .filter(e => e && validateEmail(e));
+
+      return [...new Set(emails)]; // Remove duplicates
+    }
+
+    // Validate Email Format
+    function validateEmail(email) {
+      const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return re.test(email);
+    }
+
+    // Validate Custom Emails
+    function validateCustomEmails() {
+      const emails = parseCustomEmails();
+      const count = emails.length;
+
+      document.getElementById('custom-email-count').textContent = count;
+
+      if (count === 0) {
+        alert('No valid emails found. Please enter at least one email address.');
+        return;
+      }
+
+      const invalidEmails = document.getElementById('custom-emails').value
+        .split(/[\n,;]+/)
+        .map(e => e.trim())
+        .filter(e => e && !validateEmail(e));
+
+      if (invalidEmails.length > 0) {
+        alert(`Warning: ${invalidEmails.length} invalid email(s) found and will be skipped:\n${invalidEmails.slice(0, 5).join('\n')}${invalidEmails.length > 5 ? '\n...' : ''}`);
+      } else {
+        alert(`✅ All ${count} email addresses are valid!`);
+      }
+
+      document.getElementById('selected-recipients').textContent = count;
+    }
+
+    // Load Emails from File
+    function loadEmailsFromFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const content = e.target.result;
+        const existingEmails = document.getElementById('custom-emails').value;
+
+        // Append to existing emails
+        if (existingEmails.trim()) {
+          document.getElementById('custom-emails').value = existingEmails + '\n' + content;
+        } else {
+          document.getElementById('custom-emails').value = content;
+        }
+
+        // Auto-validate
+        validateCustomEmails();
+      };
+      reader.readAsText(file);
+    }
+
+    // Get Custom Recipients
+    function getCustomRecipients() {
+      const emails = parseCustomEmails();
+      return emails.map(email => ({
+        email: email,
+        firstName: '',
+        lastName: '',
+        name: email.split('@')[0]
+      }));
+    }
+
+    // Get Filters
+    function getFilters() {
+      const filters = {};
+
+      const role = document.getElementById('filter-role').value;
+      if (role) filters.role = role;
+
+      const verified = document.getElementById('filter-verified').value;
+      if (verified) filters.isVerified = verified === 'true';
+
+      const booking = document.getElementById('filter-booking').value;
+      if (booking) filters.hasCompletedBooking = booking === 'true';
+
+      const dateAfter = document.getElementById('filter-date-after').value;
+      if (dateAfter) filters.createdAfter = new Date(dateAfter).toISOString();
+
+      const dateBefore = document.getElementById('filter-date-before').value;
+      if (dateBefore) filters.createdBefore = new Date(dateBefore).toISOString();
+
+      return filters;
+    }
+
+    // Preview Recipients
+    async function previewRecipients() {
+      showLoading(true);
+      try {
+        const mode = document.getElementById('recipient-mode').value;
+        let allRecipients = [];
+
+        // Get custom emails
+        if (mode === 'custom' || mode === 'both') {
+          const customRecipients = getCustomRecipients();
+          allRecipients = [...allRecipients, ...customRecipients];
+        }
+
+        // Get filtered users
+        if (mode === 'filters' || mode === 'both') {
+          const filters = getFilters();
+
+          const response = await fetch(`${API_BASE}/recipients/preview`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify(filters)
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            allRecipients = [...allRecipients, ...result.data.recipients];
+          } else {
+            showError('Failed to preview recipients: ' + result.message);
+            showLoading(false);
+            return;
+          }
+        }
+
+        // Remove duplicate emails
+        const uniqueRecipients = Array.from(
+          new Map(allRecipients.map(r => [r.email, r])).values()
+        );
+
+        document.getElementById('selected-recipients').textContent = uniqueRecipients.length;
+
+        let html = `<div class="alert alert-${mode === 'custom' ? 'success' : 'info'}">
+          <strong>Total Recipients: ${uniqueRecipients.length}</strong>
+          ${mode === 'custom' ? '<br><small>Sending to custom email list (can be ANY emails!)</small>' : ''}
+          ${mode === 'both' ? '<br><small>Combined: Filtered users + Custom emails</small>' : ''}
+        </div>`;
+
+        html += '<div class="table-responsive"><table class="table table-sm">';
+        html += '<thead><tr><th>Name</th><th>Email</th><th>Source</th></tr></thead><tbody>';
+
+        uniqueRecipients.forEach(r => {
+          const source = r.customData?.userId ? 'Registered User' : 'Custom Email';
+          html += `<tr><td>${r.name || 'N/A'}</td><td>${r.email}</td><td><span class="badge bg-${source === 'Registered User' ? 'primary' : 'success'}">${source}</span></td></tr>`;
+        });
+
+        html += '</tbody></table></div>';
+
+        document.getElementById('recipients-body').innerHTML = html;
+        new bootstrap.Modal(document.getElementById('recipientsModal')).show();
+      } catch (error) {
+        showError('Error: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    // Generate Preview
+    async function generatePreview() {
+      showLoading(true);
+      try {
+        const templateData = {
+          type: selectedTemplate,
+          title: document.getElementById('email-title').value,
+          message: quill.root.innerHTML,
+          buttonText: document.getElementById('button-text').value,
+          buttonUrl: document.getElementById('button-url').value,
+          imageUrl: document.getElementById('image-url').value,
+          additionalInfo: document.getElementById('additional-info').value
+        };
+
+        const response = await fetch(`${API_BASE}/template/preview`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ templateData })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          document.getElementById('preview-panel').innerHTML = result.data.htmlContent;
+        } else {
+          showError('Failed to generate preview: ' + result.message);
+        }
+      } catch (error) {
+        showError('Error: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    // Send Bulk Mail
+    async function sendBulkMail() {
+      if (!confirm('Are you sure you want to send this email to all selected recipients?')) {
+        return;
+      }
+
+      showLoading(true);
+      try {
+        const mode = document.getElementById('recipient-mode').value;
+        let requestBody = {};
+
+        const templateData = {
+          type: selectedTemplate,
+          title: document.getElementById('email-title').value,
+          message: quill.root.innerHTML,
+          buttonText: document.getElementById('button-text').value,
+          buttonUrl: document.getElementById('button-url').value,
+          imageUrl: document.getElementById('image-url').value,
+          additionalInfo: document.getElementById('additional-info').value
+        };
+
+        // Override subject if custom
+        if (selectedTemplate === 'custom') {
+          templateData.title = document.getElementById('email-subject').value;
+        }
+
+        // Determine which API endpoint to use
+        let endpoint = `${API_BASE}/send-predefined`;
+
+        if (mode === 'custom') {
+          // Send to custom emails only
+          const customRecipients = getCustomRecipients();
+
+          if (customRecipients.length === 0) {
+            alert('Please add at least one email address!');
+            showLoading(false);
+            return;
+          }
+
+          requestBody = {
+            recipients: customRecipients,
+            templateData,
+            options: {
+              batchSize: 50,
+              delayBetweenBatches: 1000,
+              trackOpens: true,
+              trackClicks: true,
+              tags: ['bulk-mail', selectedTemplate, 'custom-emails']
+            }
+          };
+        } else if (mode === 'both') {
+          // Combine custom emails with filtered users
+          const customRecipients = getCustomRecipients();
+          const filters = getFilters();
+
+          requestBody = {
+            recipients: customRecipients,
+            filters,
+            templateData,
+            options: {
+              batchSize: 50,
+              delayBetweenBatches: 1000,
+              trackOpens: true,
+              trackClicks: true,
+              tags: ['bulk-mail', selectedTemplate, 'mixed']
+            }
+          };
+        } else {
+          // Filters only (existing behavior)
+          const filters = getFilters();
+
+          requestBody = {
+            filters,
+            templateData,
+            options: {
+              batchSize: 50,
+              delayBetweenBatches: 1000,
+              trackOpens: true,
+              trackClicks: true,
+              tags: ['bulk-mail', selectedTemplate]
+            }
+          };
+        }
+
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          showSuccess(result);
+        } else {
+          showError('Failed to send: ' + result.message);
+        }
+      } catch (error) {
+        showError('Error: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    // Show Success
+    function showSuccess(result) {
+      const data = result.data;
+      const successRate = ((data.successfulSends / data.totalRecipients) * 100).toFixed(1);
+
+      let html = `
+        <div class="alert alert-success">
+          <h5><i class="bi bi-check-circle"></i> Email Campaign Sent Successfully!</h5>
+        </div>
+        <div class="row">
+          <div class="col-md-3 text-center mb-3">
+            <div class="stats-number">${data.totalRecipients}</div>
+            <div class="stats-label">Total Recipients</div>
+          </div>
+          <div class="col-md-3 text-center mb-3">
+            <div class="stats-number" style="color: #22c55e;">${data.successfulSends}</div>
+            <div class="stats-label">Successful</div>
+          </div>
+          <div class="col-md-3 text-center mb-3">
+            <div class="stats-number" style="color: #ef4444;">${data.failedSends}</div>
+            <div class="stats-label">Failed</div>
+          </div>
+          <div class="col-md-3 text-center mb-3">
+            <div class="stats-number">${successRate}%</div>
+            <div class="stats-label">Success Rate</div>
+          </div>
+        </div>
+        <p><strong>Duration:</strong> ${(data.duration / 1000).toFixed(2)} seconds</p>
+      `;
+
+      if (data.errors.length > 0) {
+        html += '<div class="alert alert-warning mt-3"><h6>Failed Emails:</h6><ul>';
+        data.errors.forEach(err => {
+          html += `<li>${err.email}: ${err.error}</li>`;
+        });
+        html += '</ul></div>';
+      }
+
+      document.getElementById('result-body').innerHTML = html;
+      new bootstrap.Modal(document.getElementById('resultModal')).show();
+
+      // Update stats
+      document.getElementById('emails-sent').textContent = data.successfulSends;
+      document.getElementById('success-rate').textContent = successRate + '%';
+    }
+
+    // Show Error
+    function showError(message) {
+      document.getElementById('result-body').innerHTML = `
+        <div class="alert alert-danger">
+          <h5><i class="bi bi-exclamation-triangle"></i> Error</h5>
+          <p>${message}</p>
+        </div>
+      `;
+      new bootstrap.Modal(document.getElementById('resultModal')).show();
+    }
+
+    // Show Loading
+    function showLoading(show) {
+      document.getElementById('loading-spinner').classList.toggle('active', show);
+      document.getElementById('compose-section').style.display = show ? 'none' : 'block';
+    }
+
+    // Show Section
+    function showSection(section) {
+      // Update nav
+      document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+      });
+      event.target.classList.add('active');
+
+      // For now, only compose is implemented
+      if (section !== 'compose') {
+        alert('This section is coming soon!');
+      }
+    }
+
+    // Auto-generate preview on load
+    setTimeout(generatePreview, 1000);
+  </script>
+</body>
+</html>

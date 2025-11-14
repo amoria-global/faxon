@@ -189,15 +189,37 @@ export class UnifiedTransactionController {
 
       logger.info('Initiating unified deposit', 'UnifiedTransactionController', {
         paymentMethod,
-        amount: depositData.amount
+        amount: depositData.amount,
+        country: depositData.country,
+        provider: depositData.provider
       });
 
       // Route based on payment method:
-      // - "momo" (mobile money) -> PawaPay
-      // - "card" -> XentriPay
+      // - "momo" (mobile money):
+      //   → Rwanda (MTN, Airtel) -> XentriPay
+      //   → Other African countries -> PawaPay
+      // - "card" -> XentriPay (all cards)
       // - "property" -> Cash payment at property (no provider)
       if (paymentMethod === 'momo') {
-        await this.handlePawaPayDeposit(req, res, depositData);
+        // Check if it's Rwanda mobile money (use Xentripay) or other countries (use PawaPay)
+        const country = depositData.country || 'RW'; // Default to Rwanda
+        const isRwanda = country === 'RW' || country === 'RWA' || country === 'Rwanda';
+
+        if (isRwanda) {
+          // Rwanda mobile money -> Xentripay
+          logger.info('Routing Rwanda mobile money to Xentripay', 'UnifiedTransactionController', {
+            country,
+            provider: depositData.provider
+          });
+          await this.handleXentriPayMobileMoneyDeposit(req, res, depositData);
+        } else {
+          // Other African countries -> PawaPay
+          logger.info('Routing mobile money to PawaPay', 'UnifiedTransactionController', {
+            country,
+            provider: depositData.provider
+          });
+          await this.handlePawaPayDeposit(req, res, depositData);
+        }
       } else if (paymentMethod === 'card') {
         await this.handleXentriPayCardDeposit(req, res, depositData);
       } else if (paymentMethod === 'property') {
@@ -608,6 +630,243 @@ export class UnifiedTransactionController {
         paymentUrl: collectionResponse.url,
         reply: collectionResponse.reply,
         instructions: 'Redirect user to paymentUrl to complete card payment'
+      }
+    });
+  }
+
+  /**
+   * Handle Rwanda mobile money deposit via XentriPay (MTN, Airtel)
+   */
+  private async handleXentriPayMobileMoneyDeposit(req: Request, res: Response, depositData: any): Promise<void> {
+    const userId = req.user?.userId ? parseInt(req.user.userId) : undefined;
+    const { amount, phoneNumber, provider: mobileProvider, country, description, internalReference, metadata, redirecturl } = depositData;
+
+    // CRITICAL: Validate userId exists before creating transaction
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required. User must be logged in to initiate deposit.'
+      });
+      return;
+    }
+
+    if (!amount || !phoneNumber) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields for Rwanda mobile money: amount, phoneNumber'
+      });
+      return;
+    }
+
+    // Frontend sends amount in USD
+    const usdAmount = parseFloat(amount);
+
+    // Get exchange rate for response (XentriPayService will do conversion internally)
+    const { rwfAmount, rate: depositRate, exchangeRate } = await currencyExchangeService.convertUSDToRWF_Deposit(usdAmount);
+
+    // Fetch user info if not provided
+    const user = userId ? await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, firstName: true, lastName: true, phone: true }
+    }) : null;
+
+    const customerReference = internalReference || xentriPayService.generateCustomerReference('MOMO');
+
+    // Check if transaction with this reference already exists
+    const existingTransaction = await prisma.transaction.findUnique({
+      where: { reference: customerReference }
+    });
+
+    if (existingTransaction) {
+      // If transaction exists and was created recently (within last 10 minutes), return it
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+      if (existingTransaction.createdAt > tenMinutesAgo) {
+        logger.info('Returning existing transaction for duplicate reference', 'UnifiedTransactionController', {
+          reference: customerReference,
+          existingStatus: existingTransaction.status
+        });
+
+        res.status(200).json({
+          success: true,
+          message: 'Transaction already exists',
+          data: {
+            transaction: existingTransaction,
+            exchangeRate: {
+              rate: depositRate,
+              amountUSD: usdAmount,
+              amountRWF: rwfAmount
+            }
+          }
+        });
+        return;
+      } else {
+        // If old transaction exists, generate a new reference
+        const newReference = xentriPayService.generateCustomerReference('MOMO');
+        logger.warn('Old transaction with reference exists, generating new reference', 'UnifiedTransactionController', {
+          oldReference: customerReference,
+          newReference: newReference
+        });
+        // Update customerReference to use the new one
+        depositData.internalReference = newReference;
+        // Recursively call with new reference
+        return this.handleXentriPayMobileMoneyDeposit(req, res, depositData);
+      }
+    }
+
+    // Get phone number from request or user session - REQUIRED for payment processing
+    const contactNumber = phoneNumber || user?.phone;
+
+    // Phone number is required for mobile money payments
+    if (!contactNumber) {
+      res.status(400).json({
+        success: false,
+        message: 'Phone number is required. Please provide a valid Rwanda phone number or update your profile.'
+      });
+      return;
+    }
+
+    // Validate and format phone number
+    const phoneValidation = PhoneUtils.validateRwandaPhone(contactNumber);
+    if (!phoneValidation.isValid) {
+      res.status(400).json({
+        success: false,
+        message: `Invalid phone number: ${phoneValidation.error}. Please provide a valid Rwanda phone number (e.g., 0780000000).`
+      });
+      return;
+    }
+
+    const cnumberFormatted = PhoneUtils.formatPhone(contactNumber, false); // e.g., "0780371519"
+    const msisdnFormatted = PhoneUtils.formatPhone(contactNumber, true); // e.g., "250780371519"
+
+    // Validate cnumber is 10 digits
+    if (!/^\d{10}$/.test(cnumberFormatted)) {
+      res.status(400).json({
+        success: false,
+        message: 'Phone number must be exactly 10 digits (e.g., 0780371519)'
+      });
+      return;
+    }
+
+    // Validate email is available
+    const userEmail = user?.email;
+    if (!userEmail) {
+      res.status(400).json({
+        success: false,
+        message: 'Email is required. Please update your profile with a valid email address.'
+      });
+      return;
+    }
+
+    // Validate customer name
+    const fullName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
+    if (!fullName) {
+      res.status(400).json({
+        success: false,
+        message: 'Customer name is required. Please update your profile with your full name.'
+      });
+      return;
+    }
+
+    // Initiate mobile money collection via XentriPay
+    // NOTE: XentriPayService.initiateCollection() expects USD amount and converts to RWF internally
+    // Send 'momo' as pmethod to provider, but save 'mobile_money' in database
+    // XentriPay expects: cnumber with leading 0, msisdn without +, chargesIncluded as boolean
+    const collectionResponse = await xentriPayService.initiateCollection({
+      email: userEmail,
+      cname: fullName,
+      amount: usdAmount, // Send USD - service will convert to RWF
+      cnumber: cnumberFormatted, // 10 digits with leading 0: "0780371519"
+      msisdn: msisdnFormatted.replace(/^\+/, ''), // Full without +: "250780371519"
+      currency: 'USD', // Service will convert to RWF
+      pmethod: 'momo', // Mobile money payment method
+      chargesIncluded: true, // Boolean, not string
+      description: description || `Rwanda mobile money deposit for ${internalReference}`,
+      internalReference: internalReference,
+      redirecturl: redirecturl || 'https://app.jambolush.com/all/guest/bookings' // Fallback redirect URL
+    });
+
+    // Store in unified Transaction table
+    await prisma.transaction.create({
+      data: {
+        reference: customerReference,
+        provider: 'XENTRIPAY',
+        transactionType: 'DEPOSIT',
+        paymentMethod: 'mobile_money',
+        userId,
+        amount: rwfAmount,
+        currency: 'RWF',
+        requestedAmount: rwfAmount,
+        status: 'PENDING',
+        externalId: collectionResponse.refid || customerReference,
+        payerPhone: msisdnFormatted,
+        description: description,
+        bookingId: internalReference,
+        metadata: {
+          ...(metadata || {}),
+          originalAmountUSD: usdAmount,
+          exchangeRate: depositRate,
+          baseRate: exchangeRate.base,
+          depositRate: exchangeRate.depositRate,
+          payoutRate: exchangeRate.payoutRate,
+          spread: exchangeRate.spread,
+          amountRWF: rwfAmount,
+          xentriPayRefId: collectionResponse.refid,
+          xentriPayTid: collectionResponse.tid,
+          xentriPayAuthkey: collectionResponse.authkey,
+          xentriPayReply: collectionResponse.reply,
+          paymentMethod: 'mobile_money',
+          mobileProvider: mobileProvider,
+          country: country || 'RW',
+          userEmail: userEmail,
+          customerName: fullName,
+          cnumber: cnumberFormatted,
+          msisdn: msisdnFormatted,
+          userFirstName: user?.firstName,
+          userLastName: user?.lastName,
+          internalReference,
+          // Default split percentages from config
+          splitRules: {
+            host: config.defaultSplitRules.host,
+            agent: config.defaultSplitRules.agent,
+            platform: config.defaultSplitRules.platform
+          }
+        }
+      }
+    });
+
+    // Send notifications to user, host, and agent if this is a booking payment
+    if (internalReference) {
+      await this.sendBookingNotifications(
+        internalReference,
+        customerReference,
+        rwfAmount,
+        'Rwanda Mobile Money',
+        collectionResponse.reply || 'Please check your phone for the mobile money payment prompt. Dial *182*7*1# to confirm pending transactions.'
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      provider: 'xentripay',
+      paymentMethod: 'mobile_money',
+      message: 'Rwanda mobile money payment initiated successfully via XentriPay',
+      data: {
+        depositId: customerReference,
+        refId: collectionResponse.refid,
+        tid: collectionResponse.tid,
+        status: 'PENDING',
+        amountUSD: usdAmount,
+        amountRWF: rwfAmount,
+        currency: 'RWF',
+        exchangeRate: {
+          rate: depositRate,
+          base: exchangeRate.base,
+          depositRate: exchangeRate.depositRate,
+          payoutRate: exchangeRate.payoutRate,
+          spread: exchangeRate.spread
+        },
+        reply: collectionResponse.reply,
+        instructions: collectionResponse.reply || 'Check your phone for payment prompt. Dial *182*7*1# for pending transactions.'
       }
     });
   }

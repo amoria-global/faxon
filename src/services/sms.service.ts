@@ -1,4 +1,4 @@
-// src/services/sms.service.ts - SMS OTP Service using Brevo
+// src/services/whatsapp.service.ts - WhatsApp OTP Service using Brevo
 
 import axios from 'axios';
 import crypto from 'crypto';
@@ -17,16 +17,29 @@ interface OTPData {
   userId: number;
 }
 
-export class BrevoSMSService {
+export class BrevoWhatsAppService {
   private apiKey: string;
   private baseURL: string = 'https://api.brevo.com/v3';
+  private senderNumber: string;
   private otpStorage: Map<string, OTPData> = new Map();
 
+  // WhatsApp Template IDs - These must be created and approved in Brevo
+  private templateIds = {
+    withdrawalOTP: process.env.BREVO_WHATSAPP_WITHDRAWAL_OTP_TEMPLATE_ID || '',
+    transactionStatus: process.env.BREVO_WHATSAPP_TRANSACTION_STATUS_TEMPLATE_ID || '',
+    generalNotification: process.env.BREVO_WHATSAPP_NOTIFICATION_TEMPLATE_ID || '',
+  };
+
   constructor() {
-    this.apiKey = process.env.BREVO_SMS_API_KEY!;
-    
+    this.apiKey = process.env.BREVO_WHATSAPP_API_KEY || process.env.BREVO_SMS_API_KEY!;
+    this.senderNumber = process.env.BREVO_WHATSAPP_SENDER_NUMBER || '';
+
     if (!this.apiKey) {
-      throw new Error('BREVO_SMS_API_KEY environment variable is required');
+      throw new Error('BREVO_WHATSAPP_API_KEY or BREVO_SMS_API_KEY environment variable is required');
+    }
+
+    if (!this.senderNumber) {
+      console.warn('⚠️  BREVO_WHATSAPP_SENDER_NUMBER not set. WhatsApp messages may fail.');
     }
   }
 
@@ -38,22 +51,38 @@ export class BrevoSMSService {
   }
 
   /**
-   * Send SMS via Brevo API
+   * Send WhatsApp message via Brevo API
    */
-  private async sendSMS(phoneNumber: string, message: string): Promise<{
+  private async sendWhatsApp(
+    phoneNumber: string,
+    templateId: string,
+    params?: Record<string, string>
+  ): Promise<{
     success: boolean;
     messageId?: string;
     error?: string;
   }> {
     try {
+      const requestBody: any = {
+        contactNumbers: [phoneNumber],
+        templateId: parseInt(templateId),
+        senderNumber: this.senderNumber
+      };
+
+      // Add template parameters if provided
+      if (params && Object.keys(params).length > 0) {
+        requestBody.params = params;
+      }
+
+      console.log('📱 Sending WhatsApp message:', {
+        recipient: phoneNumber,
+        templateId,
+        params
+      });
+
       const response = await axios.post(
-        `${this.baseURL}/transactionalSMS/sms`,
-        {
-          sender: 'Jambolush', // Sender name (up to 11 chars)
-          recipient: phoneNumber,
-          content: message,
-          type: 'transactional'
-        },
+        `${this.baseURL}/whatsapp/sendMessage`,
+        requestBody,
         {
           headers: {
             'Accept': 'application/json',
@@ -63,17 +92,37 @@ export class BrevoSMSService {
         }
       );
 
+      console.log('✅ WhatsApp message sent successfully:', response.data);
+
       return {
         success: true,
-        messageId: response.data.reference || response.data.messageId
+        messageId: response.data.reference || response.data.messageId || response.data.id
       };
     } catch (error: any) {
-      console.error('Brevo SMS Error:', error.response?.data || error.message);
+      console.error('❌ Brevo WhatsApp Error:', error.response?.data || error.message);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to send SMS'
+        error: error.response?.data?.message || 'Failed to send WhatsApp message'
       };
     }
+  }
+
+  /**
+   * Fallback: Send plain message (for templates without parameters)
+   * Note: WhatsApp requires approved templates, so this is limited
+   */
+  private async sendWhatsAppFallback(phoneNumber: string, message: string): Promise<{
+    success: boolean;
+    messageId?: string;
+    error?: string;
+  }> {
+    // WhatsApp requires templates, so we use general notification template
+    // The message will be sent as a parameter to the template
+    return this.sendWhatsApp(
+      phoneNumber,
+      this.templateIds.generalNotification,
+      { message }
+    );
   }
 
 
@@ -151,14 +200,24 @@ export class BrevoSMSService {
 
       const formattedPhone = phoneValidation.formattedPhone!;
 
-      // Create SMS message with user's name for personalization
+      // Prepare WhatsApp template parameters
       const userName = userFromDB.firstName || 'User';
-      const message = `Hi ${userName}, your Jambolush withdrawal verification code is ${otp}. Amount: ${amount} ${currency}. Code expires in 5 minutes. Do not share this code.`;
+      const templateParams = {
+        FNAME: userName,
+        OTP: otp,
+        AMOUNT: amount.toString(),
+        CURRENCY: currency,
+        EXPIRY: '5 minutes'
+      };
 
-      // Send SMS to REGISTERED phone number only
-      const smsResult = await this.sendSMS(formattedPhone, message);
+      // Send WhatsApp message to REGISTERED phone number only using template
+      const whatsappResult = await this.sendWhatsApp(
+        formattedPhone,
+        this.templateIds.withdrawalOTP,
+        templateParams
+      );
 
-      if (smsResult.success) {
+      if (whatsappResult.success) {
         // Store OTP
         const otpKey = `withdrawal_${userId}`;
         this.otpStorage.set(otpKey, {
@@ -167,7 +226,7 @@ export class BrevoSMSService {
           attempts: 0,
           phoneNumber: formattedPhone,
           amount,
-          messageId: smsResult.messageId,
+          messageId: whatsappResult.messageId,
           userId
         });
 
@@ -185,26 +244,27 @@ export class BrevoSMSService {
         try {
           await prisma.$executeRaw`
             INSERT INTO sms_logs ("userId", "phoneNumber", "messageType", status, metadata, "createdAt")
-            VALUES (${userId}, ${formattedPhone}, 'withdrawal_otp', 'sent', ${JSON.stringify({
+            VALUES (${userId}, ${formattedPhone}, 'withdrawal_otp_whatsapp', 'sent', ${JSON.stringify({
               amount,
               currency,
-              phoneVerified: 'database_registered'
+              phoneVerified: 'database_registered',
+              channel: 'whatsapp'
             })}, NOW())
           `;
         } catch (dbError) {
-          console.error('Failed to log SMS:', dbError);
+          console.error('Failed to log WhatsApp message:', dbError);
           // Don't fail the main operation
         }
 
         return {
           success: true,
-          message: 'OTP sent to your registered phone number',
-          messageId: smsResult.messageId,
+          message: 'OTP sent to your registered WhatsApp number',
+          messageId: whatsappResult.messageId,
           expiresIn: 300, // 5 minutes in seconds
           otp: otp // INTERNAL USE ONLY - for sending to email
         };
       } else {
-        // SMS failed, but still store OTP for email fallback
+        // WhatsApp failed, but still store OTP for email fallback
         const otpKey = `withdrawal_${userId}`;
         this.otpStorage.set(otpKey, {
           otp,
@@ -225,24 +285,25 @@ export class BrevoSMSService {
           userId
         });
 
-        // Log failed SMS attempt
+        // Log failed WhatsApp attempt
         try {
           await prisma.$executeRaw`
             INSERT INTO sms_logs ("userId", "phoneNumber", "messageType", status, metadata, "createdAt")
-            VALUES (${userId}, ${formattedPhone}, 'withdrawal_otp', 'failed', ${JSON.stringify({
+            VALUES (${userId}, ${formattedPhone}, 'withdrawal_otp_whatsapp', 'failed', ${JSON.stringify({
               amount,
               currency,
-              error: smsResult.error,
-              fallbackToEmail: true
+              error: whatsappResult.error,
+              fallbackToEmail: true,
+              channel: 'whatsapp'
             })}, NOW())
           `;
         } catch (dbError) {
-          console.error('Failed to log SMS:', dbError);
+          console.error('Failed to log WhatsApp message:', dbError);
         }
 
         return {
           success: false,
-          message: smsResult.error || 'Failed to send OTP to registered phone number',
+          message: whatsappResult.error || 'Failed to send OTP to registered WhatsApp number',
           otp: otp, // Return OTP for email fallback
           expiresIn: 300
         };
@@ -372,7 +433,7 @@ export class BrevoSMSService {
   }
 
   /**
-   * Send general notification SMS
+   * Send general notification WhatsApp message
    */
   async sendNotificationSMS(
     phoneNumber: string,
@@ -392,11 +453,16 @@ export class BrevoSMSService {
       };
     }
 
-    return this.sendSMS(phoneValidation.formattedPhone!, `Jambolush: ${message}`);
+    // Use general notification template with message parameter
+    return this.sendWhatsApp(
+      phoneValidation.formattedPhone!,
+      this.templateIds.generalNotification,
+      { MESSAGE: message }
+    );
   }
 
   /**
-   * Send transaction status SMS
+   * Send transaction status WhatsApp message
    */
   async sendTransactionStatusSMS(
     userId: number,
@@ -407,26 +473,28 @@ export class BrevoSMSService {
     status: string
   ): Promise<void> {
     try {
-      let message = '';
-      
-      switch (status.toLowerCase()) {
-        case 'completed':
-        case 'success':
-          message = `Your ${transactionType} of ${amount} ${currency} has been completed successfully.`;
-          break;
-        case 'failed':
-          message = `Your ${transactionType} of ${amount} ${currency} has failed. Please contact support.`;
-          break;
-        case 'pending':
-          message = `Your ${transactionType} of ${amount} ${currency} is being processed.`;
-          break;
-        default:
-          message = `Your ${transactionType} of ${amount} ${currency} status: ${status}`;
+      const phoneValidation = PhoneUtils.validateRwandaPhone(phoneNumber);
+
+      if (!phoneValidation.isValid) {
+        console.error(`Invalid phone number: ${phoneNumber}`);
+        return;
       }
 
-      await this.sendNotificationSMS(phoneNumber, message);
+      // Use transaction status template with parameters
+      const templateParams = {
+        TRANSACTION_TYPE: transactionType.charAt(0).toUpperCase() + transactionType.slice(1),
+        AMOUNT: amount.toString(),
+        CURRENCY: currency,
+        STATUS: status.toUpperCase()
+      };
+
+      await this.sendWhatsApp(
+        phoneValidation.formattedPhone!,
+        this.templateIds.transactionStatus,
+        templateParams
+      );
     } catch (error) {
-      console.error('Failed to send transaction status SMS:', error);
+      console.error('Failed to send transaction status WhatsApp message:', error);
     }
   }
 
@@ -445,9 +513,11 @@ export class BrevoSMSService {
 }
 
 // Cleanup expired OTPs every 10 minutes
-const smsService = new BrevoSMSService();
+const whatsappService = new BrevoWhatsAppService();
 setInterval(() => {
-  smsService.cleanExpiredOTPs();
+  whatsappService.cleanExpiredOTPs();
 }, 10 * 60 * 1000);
 
-export default smsService;
+// Export as smsService for backward compatibility
+export default whatsappService;
+export const smsService = whatsappService;

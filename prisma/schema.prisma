@@ -70,8 +70,8 @@ model User {
   referralStatus            String                   @default("Pending")
   referredAt                DateTime?
   referredBy                Int?
-  passportPhotoUrl          String?
-  activityLogs              ActivityLog[]
+  pass  addressUnlockRefunds      AddressUnlockRefund[]
+  agentAssessment           AgentAssessment?         @relation("AgentAssessment")
   agentBookings             AgentBooking[]           @relation("AgentBookings")
   clientBookings            AgentBooking[]           @relation("ClientBookings")
   agentCommissions          AgentCommission[]        @relation("AgentCommissions")
@@ -79,11 +79,16 @@ model User {
   agentReviews              AgentReview[]            @relation("AgentReviews")
   clientReviews             AgentReview[]            @relation("ClientReviews")
   bankAccounts              BankAccount[]
+  bonuses                   Bonus[]                  @relation("UserBonuses")
   bookingsAsGuest           Booking[]                @relation("GuestBookings")
   agentInteractions         ClientInteraction[]      @relation("AgentInteractions")
   clientInteractions        ClientInteraction[]      @relation("ClientInteractions")
   connected_accounts        connected_accounts[]
   contactMessages           ContactMessage[]
+  dealCodeUsage             DealCodeUsage[]
+  dealCodes                 DealCode[]
+  duplicatesAsOriginalOwner DuplicateDetectionLog[]  @relation("DuplicateOriginalOwner")
+  duplicateUploads          DuplicateDetectionLog[]  @relation("DuplicateUploader")
   hostEarnings              HostEarning[]            @relation("HostEarnings")
   hostPayments              HostPayment[]            @relation("HostPayments")
   agentInquiries            Inquiry[]                @relation("AgentInquiries")
@@ -97,6 +102,7 @@ model User {
   hostPayouts               Payout[]                 @relation("HostPayouts")
   agentManagedProperties    Property[]               @relation("AgentProperties")
   ownedProperties           Property[]               @relation("OwnedProperties")
+  propertyAddressUnlocks    PropertyAddressUnlock[]
   propertyViews             PropertyView[]           @relation("UserPropertyViews")
   reviews                   Review[]
   tourBookingsAsGuest       TourBooking[]            @relation("GuestTourBookings")
@@ -117,14 +123,6 @@ model User {
   wishlists                 Wishlist[]
   withdrawalMethods         WithdrawalMethod[]
   withdrawalRequests        WithdrawalRequest[]
-  propertyAddressUnlocks    PropertyAddressUnlock[]
-  dealCodes                 DealCode[]
-  dealCodeUsage             DealCodeUsage[]
-  addressUnlockRefunds      AddressUnlockRefund[]
-  duplicateUploads          DuplicateDetectionLog[]  @relation("DuplicateUploader")
-  duplicatesAsOriginalOwner DuplicateDetectionLog[]  @relation("DuplicateOriginalOwner")
-  bonuses                   Bonus[]                  @relation("UserBonuses")
-  agentAssessment           AgentAssessment?         @relation("AgentAssessment")
 
   @@map("users")
 }
@@ -153,9 +151,6 @@ model WithdrawalRequest {
   id                 String            @id @default(cuid())
   userId             Int
   amount             Float
-  feeAmount          Float             @default(0)
-  netAmount          Float?
-  feeTier            String?
   currency           String            @default("USD")
   method             String
   status             String            @default("PENDING")
@@ -172,6 +167,9 @@ model WithdrawalRequest {
   rejectedAt         DateTime?
   rejectedBy         Int?
   withdrawalMethodId String?
+  feeAmount          Float             @default(0)
+  feeTier            String?
+  netAmount          Float?
   user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   withdrawalMethod   WithdrawalMethod? @relation(fields: [withdrawalMethodId], references: [id])
 
@@ -246,9 +244,7 @@ model Property {
   type                   String
   category               String
   description            String?
-  pricingType            String                  @default("night")
   pricePerNight          Float?
-  pricePerMonth          Float?
   pricePerTwoNights      Float?
   beds                   Int
   baths                  Int
@@ -271,30 +267,32 @@ model Property {
   updatedAt              DateTime                @updatedAt
   propertyAddress        String?
   upiNumber              String?
-  coordinates            Json?
   agentId                Int?
   commissionRate         Float?                  @default(0.10)
   hostId                 Int?
   fullAddress            String?
-  hostPhone              String?
   hostEmail              String?
+  hostPhone              String?
   preferredContactMethod String?
+  coordinates            Json?
+  pricePerMonth          Float?
+  pricingType            String                  @default("night")
   agentCommissions       AgentCommission[]
   blockedDates           BlockedDate[]
+  bonuses                Bonus[]                 @relation("PropertyBonuses")
   bookings               Booking[]
+  dealCodeUsage          DealCodeUsage[]
+  dealCodes              DealCode[]
   legacyHostEarnings     HostEarning[]           @relation("LegacyPropertyEarnings")
   ownerEarnings          OwnerEarning[]          @relation("PropertyEarnings")
   ownerPayments          OwnerPayment[]
   pricingRules           PricingRule[]
   agent                  User?                   @relation("AgentProperties", fields: [agentId], references: [id])
   host                   User?                   @relation("OwnedProperties", fields: [hostId], references: [id], onDelete: Cascade)
+  addressUnlocks         PropertyAddressUnlock[]
   propertyViews          PropertyView[]          @relation("PropertyViews")
   reviews                Review[]
   wishlistedBy           Wishlist[]
-  addressUnlocks         PropertyAddressUnlock[]
-  dealCodes              DealCode[]
-  dealCodeUsage          DealCodeUsage[]
-  bonuses                Bonus[]                 @relation("PropertyBonuses")
 
   @@index([hostId])
   @@index([agentId])
@@ -310,9 +308,6 @@ model Booking {
   checkOut                   DateTime
   guests                     Int
   totalPrice                 Float
-  pricingType                String?
-  nightsCount                Int?
-  monthsCount                Int?
   message                    String?
   status                     String            @default("pending")
   paymentStatus              String            @default("pending")
@@ -327,7 +322,6 @@ model Booking {
   updatedAt                  DateTime          @updatedAt
   cancellationReason         String?
   cancelledAt                DateTime?
-  bookingCode                String?           @unique
   checkInCode                String?
   checkInValidated           Boolean           @default(false)
   checkInValidatedAt         DateTime?
@@ -346,24 +340,28 @@ model Booking {
   propertyPaymentCollected   Boolean           @default(false)
   propertyPaymentCollectedAt DateTime?
   propertyPaymentCollectedBy Int?
-  refundRequested            Boolean           @default(false)
-  refundRequestedAt          DateTime?
-  refundRequestedBy          Int?
+  bookingCode                String?           @unique
+  refundAmount               Float?
   refundApproved             Boolean?
   refundApprovedAt           DateTime?
   refundApprovedBy           Int?
+  refundChannel              String?
+  refundCompletedAt          DateTime?
+  refundPlatformFee          Float?
   refundRejected             Boolean?
   refundRejectedAt           DateTime?
   refundRejectedBy           Int?
   refundRejectionReason      String?
-  refundAmount               Float?
-  refundPlatformFee          Float?
-  refundChannel              String?
-  refundTransactionId        String?
-  refundCompletedAt          DateTime?
+  refundRequested            Boolean           @default(false)
+  refundRequestedAt          DateTime?
+  refundRequestedBy          Int?
   refundToWallet             Boolean           @default(true)
+  refundTransactionId        String?
   refundWalletCredited       Boolean           @default(false)
   refundWalletCreditedAt     DateTime?
+  monthsCount                Int?
+  nightsCount                Int?
+  pricingType                String?
   agentCommissions           AgentCommission[]
   guest                      User              @relation("GuestBookings", fields: [guestId], references: [id], onDelete: Cascade)
   property                   Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
@@ -560,32 +558,11 @@ model TourBooking {
   status                 String         @default("pending")
   paymentStatus          String         @default("pending")
   paymentId              String?
-  bookingCode            String?        @unique
-  checkInCode            String?
-  checkInValidated       Boolean        @default(false)
-  checkInValidatedAt     DateTime?
   checkInStatus          String         @default("not_checked_in")
   checkInTime            DateTime?
   checkOutTime           DateTime?
   refundAmount           Float?
   refundReason           String?
-  refundRequested        Boolean        @default(false)
-  refundRequestedAt      DateTime?
-  refundRequestedBy      Int?
-  refundApproved         Boolean?
-  refundApprovedAt       DateTime?
-  refundApprovedBy       Int?
-  refundRejected         Boolean?
-  refundRejectedAt       DateTime?
-  refundRejectedBy       Int?
-  refundRejectionReason  String?
-  refundPlatformFee      Float?
-  refundChannel          String?
-  refundTransactionId    String?
-  refundCompletedAt      DateTime?
-  refundToWallet         Boolean        @default(true)
-  refundWalletCredited   Boolean        @default(false)
-  refundWalletCreditedAt DateTime?
   guestNotes             String?
   bookingDate            DateTime       @default(now())
   createdAt              DateTime       @default(now())
@@ -594,6 +571,27 @@ model TourBooking {
   distributionError      String?
   walletDistributed      Boolean        @default(false)
   walletDistributedAt    DateTime?
+  bookingCode            String?        @unique
+  checkInCode            String?
+  checkInValidated       Boolean        @default(false)
+  checkInValidatedAt     DateTime?
+  refundApproved         Boolean?
+  refundApprovedAt       DateTime?
+  refundApprovedBy       Int?
+  refundChannel          String?
+  refundCompletedAt      DateTime?
+  refundPlatformFee      Float?
+  refundRejected         Boolean?
+  refundRejectedAt       DateTime?
+  refundRejectedBy       Int?
+  refundRejectionReason  String?
+  refundRequested        Boolean        @default(false)
+  refundRequestedAt      DateTime?
+  refundRequestedBy      Int?
+  refundToWallet         Boolean        @default(true)
+  refundTransactionId    String?
+  refundWalletCredited   Boolean        @default(false)
+  refundWalletCreditedAt DateTime?
   schedule               TourSchedule   @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
   tour                   Tour           @relation(fields: [tourId], references: [id], onDelete: Cascade)
   user                   User           @relation("GuestTourBookings", fields: [userId], references: [id], onDelete: Cascade)
@@ -1551,29 +1549,29 @@ model TourBookingArchive {
 model PropertyAddressUnlock {
   id                      Int                   @id @default(autoincrement())
   unlockId                String                @unique
-  propertyId              Int
-  userId                  Int
-  paymentMethod           String
-  paymentAmountRwf        Decimal               @db.Decimal(10, 2)
-  paymentAmountUsd        Decimal?              @db.Decimal(10, 2)
-  exchangeRate            Decimal               @db.Decimal(10, 4)
-  dealCodeId              Int?
-  transactionReference    String?               @unique
-  paymentStatus           String                @default("pending")
-  paymentProvider         String?
-  paymentUrl              String? // XentriPay payment URL for card payments
-  unlockedAt              DateTime?
-  appreciationSubmitted   Boolean               @default(false)
-  appreciationLevel       String?
   appreciationFeedback    String?
+  appreciationLevel       String?
+  appreciationSubmitted   Boolean               @default(false)
   appreciationSubmittedAt DateTime?
   createdAt               DateTime              @default(now())
+  dealCodeId              Int?
+  exchangeRate            Decimal               @db.Decimal(10, 4)
+  paymentAmountRwf        Decimal               @db.Decimal(10, 2)
+  paymentAmountUsd        Decimal?              @db.Decimal(10, 2)
+  paymentMethod           String
+  paymentProvider         String?
+  paymentStatus           String                @default("pending")
+  propertyId              Int
+  transactionReference    String?               @unique
+  unlockedAt              DateTime?
   updatedAt               DateTime              @default(now()) @updatedAt
-  dealCode                DealCode?             @relation(fields: [dealCodeId], references: [id], onDelete: SetNull)
+  userId                  Int
+  paymentUrl              String?
+  refunds                 AddressUnlockRefund[]
+  dealCodeUsage           DealCodeUsage[]
+  dealCode                DealCode?             @relation(fields: [dealCodeId], references: [id])
   property                Property              @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   user                    User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  dealCodeUsage           DealCodeUsage[]
-  refunds                 AddressUnlockRefund[]
 
   @@unique([userId, propertyId])
   @@index([unlockId])
@@ -1587,18 +1585,18 @@ model PropertyAddressUnlock {
 model DealCode {
   id               Int                     @id @default(autoincrement())
   code             String                  @unique
-  userId           Int
-  sourcePropertyId Int
-  generatedAt      DateTime                @default(now())
-  expiresAt        DateTime
-  remainingUnlocks Int                     @default(5)
-  isActive         Boolean                 @default(true)
   createdAt        DateTime                @default(now())
+  expiresAt        DateTime
+  generatedAt      DateTime                @default(now())
+  isActive         Boolean                 @default(true)
+  remainingUnlocks Int                     @default(5)
+  sourcePropertyId Int
   updatedAt        DateTime                @default(now()) @updatedAt
+  userId           Int
+  usage            DealCodeUsage[]
   sourceProperty   Property                @relation(fields: [sourcePropertyId], references: [id], onDelete: Cascade)
   user             User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   addressUnlocks   PropertyAddressUnlock[]
-  usage            DealCodeUsage[]
 
   @@index([code])
   @@index([userId, isActive])
@@ -1609,10 +1607,10 @@ model DealCode {
 model DealCodeUsage {
   id         Int                   @id @default(autoincrement())
   dealCodeId Int
-  unlockId   String
   propertyId Int
-  userId     Int
+  unlockId   String
   usedAt     DateTime              @default(now())
+  userId     Int
   dealCode   DealCode              @relation(fields: [dealCodeId], references: [id], onDelete: Cascade)
   property   Property              @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   unlock     PropertyAddressUnlock @relation(fields: [unlockId], references: [unlockId], onDelete: Cascade)
@@ -1625,15 +1623,15 @@ model DealCodeUsage {
 
 model AddressUnlockRefund {
   id              Int                   @id @default(autoincrement())
-  unlockId        String
-  userId          Int
+  createdAt       DateTime              @default(now())
+  processedAt     DateTime?
   refundAmountRwf Decimal               @db.Decimal(10, 2)
-  refundStatus    String                @default("pending")
   refundMethod    String?
   refundReference String?
+  refundStatus    String                @default("pending")
   requestedAt     DateTime              @default(now())
-  processedAt     DateTime?
-  createdAt       DateTime              @default(now())
+  unlockId        String
+  userId          Int
   unlock          PropertyAddressUnlock @relation(fields: [unlockId], references: [unlockId], onDelete: Cascade)
   user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1643,20 +1641,20 @@ model AddressUnlockRefund {
 
 model Bonus {
   id          String    @id @default(cuid())
-  userId      Int // Agent who receives the bonus
-  amount      Float // Bonus amount in the same currency as wallet
+  userId      Int
+  amount      Float
   currency    String    @default("RWF")
-  sourceType  String // Type of source: "address_unlock", "booking", "referral", etc.
-  sourceId    String // ID of the source (unlockId, bookingId, etc.)
-  propertyId  Int? // Property related to the bonus (if applicable)
-  description String? // Human-readable description
-  status      String    @default("pending") // "pending", "claimed", "expired"
+  sourceType  String
+  sourceId    String
+  propertyId  Int?
+  description String?
+  status      String    @default("pending")
   claimedAt   DateTime?
-  expiresAt   DateTime? // Optional expiry date
-  metadata    Json? // Additional metadata
+  expiresAt   DateTime?
+  metadata    Json?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-  property    Property? @relation("PropertyBonuses", fields: [propertyId], references: [id], onDelete: SetNull)
+  property    Property? @relation("PropertyBonuses", fields: [propertyId], references: [id])
   user        User      @relation("UserBonuses", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -1668,15 +1666,193 @@ model Bonus {
 
 model DuplicateDetectionLog {
   id                Int      @id @default(autoincrement())
-  entityType        String // 'property' or 'tour'
-  entityId          String // ID of the new entity being created
-  duplicateOfId     String // ID of the existing duplicate entity
-  similarityScore   Decimal  @db.Decimal(5, 2) // Overall similarity score (0-100)
-  similarityDetails Json // JSON containing detailed similarity breakdown
-  uploaderId        Int // User who uploaded the duplicate
-  originalOwnerId   Int? // Owner of the original entity
-  status            String   @default("pending") // 'pending', 'reviewed', 'dismissed'
+  entityType        String
+  entityId          String
+  duplicateOfId     String
+  similarityScore   Decimal  @db.Decimal(5, 2)
+  similarityDetails Json
+  uploaderId        Int
+  originalOwnerId   Int?
+  status            String   @default("pending")
   adminNotified     Boolean  @default(false)
+  uploaderNotified  Boolean  @default(false)
+  ownerNotified     Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  originalOwner     User?    @relation("DuplicateOriginalOwner", fields: [originalOwnerId], references: [id], onDelete: Cascade)
+  uploader          User     @relation("DuplicateUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([entityType])
+  @@index([status])
+  @@index([createdAt])
+  @@index([uploaderId])
+  @@index([originalOwnerId])
+  @@map("duplicate_detection_logs")
+}
+
+model AgentAssessment {
+  id                  String    @id @default(cuid())
+  agentId             Int       @unique
+  questionsAndAnswers Json
+  totalQuestions      Int       @default(40)
+  correctAnswers      Int       @default(0)
+  score               Float     @default(0)
+  isPassed            Boolean   @default(false)
+  status              String    @default("pending")
+  submittedAt         DateTime?
+  reviewedAt          DateTime?
+  reviewedBy          Int?
+  reviewerNotes       String?
+  attemptNumber       Int       @default(1)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  agent               User      @relation("AgentAssessment", fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([status])
+  @@index([isPassed])
+  @@index([submittedAt])
+  @@map("agent_assessments")
+}
+
+model audit_logs {
+  id        String   @id
+  userId    Int?
+  action    String
+  category  String?
+  ipAddress String?
+  userAgent String?
+  status    String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([action])
+  @@index([category])
+  @@index([createdAt])
+  @@index([userId])
+}
+
+model automated_jobs {
+  id             String    @id
+  jobType        String
+  schedule       String
+  timezone       String    @default("Africa/Kigali")
+  enabled        Boolean   @default(true)
+  config         Json?
+  lastRun        DateTime?
+  lastRunStatus  String?
+  nextRun        DateTime?
+  executionCount Int       @default(0)
+  successCount   Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime
+
+  @@index([enabled])
+  @@index([jobType])
+  @@index([nextRun])
+}
+
+model business_rules {
+  id        String   @id
+  category  String
+  rules     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+
+  @@index([category])
+}
+
+model communication_settings {
+  id           String    @id
+  enabled      Boolean   @default(false)
+  provider     String
+  config       Json
+  dailyLimit   Int?
+  currentUsage Int       @default(0)
+  usageResetAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime
+}
+
+model notification_templates {
+  id        String   @id
+  name      String
+  channel   String
+  category  String?
+  subject   String?
+  content   String
+  variables Json?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+
+  @@index([active])
+  @@index([category])
+  @@index([channel])
+}
+
+model payment_operators {
+  id                                                                           String             @id
+  name                                                                         String
+  code                                                                         String             @unique
+  country                                                                      String
+  type                                                                         String
+  enabled                                                                      Boolean            @default(false)
+  primaryProviderId                                                            String?
+  alternativeProviderId                                                        String?
+  supportedOperations                                                          Json
+  limits                                                                       Json?
+  fees                                                                         Json?
+  createdAt                                                                    DateTime           @default(now())
+  updatedAt                                                                    DateTime
+  payment_providers_payment_operators_alternativeProviderIdTopayment_providers payment_providers? @relation("payment_operators_alternativeProviderIdTopayment_providers", fields: [alternativeProviderId], references: [id])
+  payment_providers_payment_operators_primaryProviderIdTopayment_providers     payment_providers? @relation("payment_operators_primaryProviderIdTopayment_providers", fields: [primaryProviderId], references: [id])
+
+  @@index([country])
+  @@index([enabled])
+  @@index([type])
+}
+
+model payment_providers {
+  id                                                                           String              @id
+  name                                                                         String
+  type                                                                         String
+  region                                                                       String?
+  enabled                                                                      Boolean             @default(false)
+  testMode                                                                     Boolean             @default(true)
+  credentials                                                                  Json
+  config                                                                       Json?
+  createdAt                                                                    DateTime            @default(now())
+  updatedAt                                                                    DateTime
+  payment_operators_payment_operators_alternativeProviderIdTopayment_providers payment_operators[] @relation("payment_operators_alternativeProviderIdTopayment_providers")
+  payment_operators_payment_operators_primaryProviderIdTopayment_providers     payment_operators[] @relation("payment_operators_primaryProviderIdTopayment_providers")
+}
+
+model security_settings {
+  id        String   @id
+  category  String
+  settings  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+
+  @@index([category])
+}
+
+model webhooks {
+  id          String    @id
+  url         String
+  events      Json
+  secret      String?
+  active      Boolean   @default(true)
+  headers     Json?
+  retryCount  Int       @default(0)
+  lastSuccess DateTime?
+  lastFailure DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime
+
+  @@index([active])
+false)
   uploaderNotified  Boolean  @default(false)
   ownerNotified     Boolean  @default(false)
   createdAt         DateTime @default(now())
@@ -1717,4 +1893,80 @@ model AgentAssessment {
   @@index([isPassed])
   @@index([submittedAt])
   @@map("agent_assessments")
+ Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  uploader      User  @relation("DuplicateUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+  originalOwner User? @relation("DuplicateOriginalOwner", fields: [originalOwnerId], references: [id], onDelete: Cascade)
+
+  @@index([entityType])
+  @@index([status])
+  @@index([createdAt])
+  @@index([uploaderId])
+  @@index([originalOwnerId])
+  @@map("duplicate_detection_logs")
 }
+
+model AgentAssessment {
+  id                 String   @id @default(cuid())
+  agentId            Int      @unique
+  questionsAndAnswers Json    // Stores array of 40 questions with their answers: [{ questionId: 1, question: "...", answer: "...", isCorrect: true/false }]
+  totalQuestions     Int      @default(40)
+  correctAnswers     Int      @default(0)
+  score              Float    @default(0) // Percentage score (0-100)
+  isPassed           Boolean  @default(false) // true if score >= 80
+  status             String   @default("pending") // pending, submitted, passed, failed
+  submittedAt        DateTime?
+  reviewedAt         DateTime?
+  reviewedBy         Int?
+  reviewerNotes      String?
+  attemptNumber      Int      @default(1) // Track multiple attempts if allowed
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  agent              User     @relation("AgentAssessment", fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([status])
+  @@index([isPassed])
+  @@index([submittedAt])
+  @@map("agent_assessments")
+}
+
+// ============================================
+// JAMBOLUSH ADMIN SETTINGS SYSTEM
+// ============================================
+
+// Payment Providers Configuration
+model PaymentProvider {
+  id                     String             @id @default(cuid())
+  name                   String
+  type                   String             // mobile_money, bank, card
+  region                 String?
+  enabled                Boolean            @default(false)
+  testMode               Boolean            @default(true)
+  credentials            Json               // Encrypted API keys, secrets, merchant IDs
+  config                 Json?              // baseUrl, webhookUrl, timeout, retryAttempts, etc.
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  primaryOperators       PaymentOperator[]  @relation("PrimaryProvider")
+  alternativeOperators   PaymentOperator[]  @relation("AlternativeProvider")
+
+  @@map("payment_providers")
+}
+
+// Payment Operators (Mobile Money & Banks)
+model PaymentOperator {
+  id                    String            @id @default(cuid())
+  name                  String
+  code                  String            @unique // MTN_RW, AIRTEL_RW, etc.
+  country               String
+  type                  String            // mobile_money, bank
+  enabled               Boolean           @default(false)
+  primaryProviderId     String?
+  alternativeProviderId String?
+  supportedOperations   Json              // { deposit: true, withdrawal: true, refund: true, disburse: true }
+  limits                Json?             // { minAmount, maxAmount, dailyLimit }
+  fees                  Json?             // { depositFee, withdrawalFee,
