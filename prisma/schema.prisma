@@ -1718,7 +1718,7 @@ model AgentAssessment {
 }
 
 model audit_logs {
-  id        String   @id
+  id        String   @id @default(cuid())
   userId    Int?
   action    String
   category  String?
@@ -1735,7 +1735,7 @@ model audit_logs {
 }
 
 model automated_jobs {
-  id             String    @id
+  id             String    @id @default(cuid())
   jobType        String
   schedule       String
   timezone       String    @default("Africa/Kigali")
@@ -1747,7 +1747,7 @@ model automated_jobs {
   executionCount Int       @default(0)
   successCount   Int       @default(0)
   createdAt      DateTime  @default(now())
-  updatedAt      DateTime
+  updatedAt      DateTime  @updatedAt
 
   @@index([enabled])
   @@index([jobType])
@@ -1755,17 +1755,17 @@ model automated_jobs {
 }
 
 model business_rules {
-  id        String   @id
+  id        String   @id @default(cuid())
   category  String
   rules     Json
   createdAt DateTime @default(now())
-  updatedAt DateTime
+  updatedAt DateTime @updatedAt
 
   @@index([category])
 }
 
 model communication_settings {
-  id           String    @id
+  id           String    @id @default(cuid())
   enabled      Boolean   @default(false)
   provider     String
   config       Json
@@ -1773,11 +1773,11 @@ model communication_settings {
   currentUsage Int       @default(0)
   usageResetAt DateTime?
   createdAt    DateTime  @default(now())
-  updatedAt    DateTime
+  updatedAt    DateTime  @updatedAt
 }
 
 model notification_templates {
-  id        String   @id
+  id        String   @id @default(cuid())
   name      String
   channel   String
   category  String?
@@ -1786,7 +1786,7 @@ model notification_templates {
   variables Json?
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
-  updatedAt DateTime
+  updatedAt DateTime @updatedAt
 
   @@index([active])
   @@index([category])
@@ -1794,17 +1794,17 @@ model notification_templates {
 }
 
 model security_settings {
-  id        String   @id
+  id        String   @id @default(cuid())
   category  String
   settings  Json
   createdAt DateTime @default(now())
-  updatedAt DateTime
+  updatedAt DateTime @updatedAt
 
   @@index([category])
 }
 
 model webhooks {
-  id          String    @id
+  id          String    @id @default(cuid())
   url         String
   events      Json
   secret      String?
@@ -1814,7 +1814,7 @@ model webhooks {
   lastSuccess DateTime?
   lastFailure DateTime?
   createdAt   DateTime  @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime  @updatedAt
 
   @@index([active])
 }
