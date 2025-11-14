@@ -62,6 +62,7 @@ model User {
   tourGuideType             String?
   verificationDocument      String?
   addressDocument           String?
+  passportPhotoUrl          String?
   kycCompleted              Boolean                  @default(false)
   kycStatus                 String                   @default("pending")
   kycSubmittedAt            DateTime?
