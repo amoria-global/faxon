@@ -2650,10 +2650,28 @@ export class AdminController {
 
       const result = await this.adminService.subscribeNewsletter(email);
 
+      // Handle already subscribed case
+      if (result.alreadySubscribed) {
+        return res.status(200).json({
+          success: true,
+          data: result.subscription,
+          message: 'You are already subscribed to our newsletter',
+          alreadySubscribed: true,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Handle successful subscription
+      const responseMessage = result.emailSent
+        ? 'Successfully subscribed to newsletter. Check your email for confirmation!'
+        : 'Successfully subscribed to newsletter. However, we could not send the confirmation email.';
+
       res.status(201).json({
         success: true,
-        data: result,
-        message: 'Successfully subscribed to newsletter',
+        data: result.subscription,
+        message: responseMessage,
+        emailSent: result.emailSent,
+        ...(result.emailError && { emailError: result.emailError }),
         timestamp: new Date().toISOString()
       });
     } catch (error: any) {
@@ -2701,10 +2719,17 @@ export class AdminController {
 
       const result = await this.adminService.createContactMessage(contactData);
 
+      // Handle successful contact message submission
+      const responseMessage = result.emailSent
+        ? 'Contact message submitted successfully. Check your email for confirmation!'
+        : 'Contact message submitted successfully. However, we could not send the confirmation email.';
+
       res.status(201).json({
         success: true,
-        data: result,
-        message: 'Contact message submitted successfully',
+        data: result.contact,
+        message: responseMessage,
+        emailSent: result.emailSent,
+        ...(result.emailError && { emailError: result.emailError }),
         timestamp: new Date().toISOString()
       });
     } catch (error: any) {

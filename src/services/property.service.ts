@@ -420,7 +420,7 @@ export class PropertyService {
   }
 
   // --- PROPERTY QUERIES ---
-  async getPropertyById(propertyId: number): Promise<PropertyInfo | null> {
+  async getPropertyById(propertyId: number, userType?: string): Promise<PropertyInfo | null> {
     const property = await prisma.property.findUnique({
       where: { id: propertyId },
       include: {
@@ -444,8 +444,15 @@ export class PropertyService {
       data: { views: { increment: 1 } }
     });
 
-    // Apply 14% markup for guest view
-    return this.transformToPropertyInfoForGuest(property);
+    // Check if user is host, agent, or tourguide - if so, skip markup
+    // Apply 14% markup only for guest view (not for hosts, agents, or tour guides)
+    const shouldApplyMarkup = !userType || !['host', 'agent', 'tourguide'].includes(userType);
+
+    if (shouldApplyMarkup) {
+      return this.transformToPropertyInfoForGuest(property);
+    } else {
+      return this.transformToPropertyInfo(property);
+    }
   }
 
   async searchProperties(filters: PropertySearchFilters, page: number = 1, limit: number = 20) {

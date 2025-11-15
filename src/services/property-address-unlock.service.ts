@@ -519,73 +519,178 @@ export class PropertyAddressUnlockService {
             }
           };
         } else {
-          // MOBILE MONEY via PawaPay
+          // MOBILE MONEY - Route based on country
           if (!request.phoneNumber) {
             throw new Error('Phone number is required for mobile money payments');
           }
 
-          // Map provider to PawaPay format
-          const pawapayProvider = this.mapToPawapayProvider(
-            request.momoProvider || 'MTN',
-            request.countryCode || 'RW'
-          );
+          const country = request.countryCode || 'RW';
+          const isRwanda = country === 'RW' || country === 'RWA' || country === 'Rwanda';
 
-          // Statement description must be 4-22 characters for PawaPay
-          // "Unlock: " = 8 chars, so we have 14 chars left for property name
-          const maxPropertyNameLength = 14;
-          const propertyNameTruncated = property.name.length > maxPropertyNameLength
-            ? property.name.substring(0, maxPropertyNameLength)
-            : property.name;
-
-          const depositRequest: DepositRequest = {
-            depositId: transactionReference,
-            amount: paymentAmountRWF.toString(),
-            currency: 'RWF',
-            payer: {
-              type: 'MMO',
-              accountDetails: {
-                phoneNumber: request.phoneNumber,
-                provider: pawapayProvider
+          if (isRwanda) {
+            // RWANDA MOBILE MONEY via XentriPay
+            // Fetch user details from database
+            const user = await prisma.user.findUnique({
+              where: { id: request.userId },
+              select: {
+                email: true,
+                firstName: true,
+                lastName: true,
+                phone: true
               }
-            },
-            customerTimestamp: new Date().toISOString(),
-            statementDescription: `Unlock: ${propertyNameTruncated}`, // Max 22 chars total
-            metadata: [
-              { fieldName: 'unlockId', fieldValue: unlockId, isPII: false },
-              { fieldName: 'propertyId', fieldValue: request.propertyId.toString(), isPII: false },
-              { fieldName: 'userId', fieldValue: request.userId.toString(), isPII: true }
-            ]
-          };
+            });
 
-          const paymentResponse = await this.pawapayService.initiateDeposit(depositRequest);
-
-          // Update unlock with payment response
-          await prisma.propertyAddressUnlock.update({
-            where: { unlockId },
-            data: {
-              paymentStatus: paymentResponse.status || 'SUBMITTED'
+            if (!user || !user.email) {
+              throw new Error('User not found or email not available');
             }
-          });
 
-          logger.info('Mobile money payment initiated via PawaPay', 'PropertyAddressUnlock', {
-            unlockId,
-            transactionReference,
-            paymentStatus: paymentResponse.status,
-            provider: pawapayProvider
-          });
+            const customerName = `${user.firstName} ${user.lastName}`;
+            const customerEmail = user.email;
 
-          return {
-            success: true,
-            message: 'Mobile money payment initiated successfully',
-            data: {
+            // Use phone number from request or user profile
+            let phoneNumber = request.phoneNumber || user.phone;
+            if (!phoneNumber) {
+              throw new Error('Phone number is required for mobile money payments');
+            }
+
+            // Ensure cnumber is exactly 10 digits starting with 0
+            let cnumber = phoneNumber;
+            if (!cnumber.startsWith('0')) {
+              cnumber = '0' + cnumber.slice(-9);
+            }
+            if (cnumber.length !== 10) {
+              throw new Error('Phone number must be exactly 10 digits (e.g., 0780000000)');
+            }
+
+            // Ensure msisdn has country code (no +)
+            let msisdn = phoneNumber;
+            if (msisdn.startsWith('0')) {
+              msisdn = '250' + msisdn.substring(1);
+            } else if (msisdn.startsWith('+')) {
+              msisdn = msisdn.substring(1);
+            } else if (!msisdn.startsWith('250')) {
+              msisdn = '250' + msisdn;
+            }
+
+            logger.debug('Rwanda mobile money phone number formatting', 'PropertyAddressUnlock', {
+              originalPhone: request.phoneNumber,
+              cnumber,
+              msisdn,
+              customerEmail,
+              customerName
+            });
+
+            const collectionRequest = {
+              email: customerEmail,
+              cname: customerName,
+              amount: request.paymentAmountUSD, // XentriPay service will convert USD to RWF internally
+              cnumber, // 10 digits with leading 0 (e.g., "0788123456")
+              msisdn, // Full international format without + (e.g., "250788123456")
+              currency: 'USD', // XentriPay service handles conversion to RWF
+              pmethod: 'momo',
+              chargesIncluded: true,
+              description: `Property unlock: ${property.name}`,
+              internalReference: transactionReference,
+              redirecturl: request.redirectUrl || `${process.env.FRONTEND_URL}/properties/${property.id}/unlock-success`
+            };
+
+            const xentripayResponse = await this.xentripayService.initiateCollection(collectionRequest);
+
+            // Update unlock with XentriPay response
+            await prisma.propertyAddressUnlock.update({
+              where: { unlockId },
+              data: {
+                paymentStatus: 'PENDING',
+                transactionReference: xentripayResponse.refid, // Use XentriPay refid
+                paymentUrl: xentripayResponse.url, // Store payment URL
+                paymentProvider: 'XENTRIPAY_MOMO'
+              }
+            });
+
+            logger.info('Rwanda mobile money payment initiated via XentriPay', 'PropertyAddressUnlock', {
+              unlockId,
+              refid: xentripayResponse.refid,
+              paymentUrl: xentripayResponse.url
+            });
+
+            return {
+              success: true,
+              message: 'Rwanda mobile money payment initiated - redirect user to payment URL',
+              data: {
+                unlockId,
+                transactionReference: xentripayResponse.refid,
+                paymentStatus: 'PENDING',
+                amountRWF: paymentAmountRWF,
+                amountUSD: request.paymentAmountUSD,
+                paymentType: 'momo',
+                paymentUrl: xentripayResponse.url // User must visit this URL to complete payment
+              }
+            };
+          } else {
+            // OTHER AFRICAN COUNTRIES - MOBILE MONEY via PawaPay
+            // Map provider to PawaPay format
+            const pawapayProvider = this.mapToPawapayProvider(
+              request.momoProvider || 'MTN',
+              country
+            );
+
+            // Statement description must be 4-22 characters for PawaPay
+            // "Unlock: " = 8 chars, so we have 14 chars left for property name
+            const maxPropertyNameLength = 14;
+            const propertyNameTruncated = property.name.length > maxPropertyNameLength
+              ? property.name.substring(0, maxPropertyNameLength)
+              : property.name;
+
+            const depositRequest: DepositRequest = {
+              depositId: transactionReference,
+              amount: paymentAmountRWF.toString(),
+              currency: 'RWF',
+              payer: {
+                type: 'MMO',
+                accountDetails: {
+                  phoneNumber: request.phoneNumber,
+                  provider: pawapayProvider
+                }
+              },
+              customerTimestamp: new Date().toISOString(),
+              statementDescription: `Unlock: ${propertyNameTruncated}`, // Max 22 chars total
+              metadata: [
+                { fieldName: 'unlockId', fieldValue: unlockId, isPII: false },
+                { fieldName: 'propertyId', fieldValue: request.propertyId.toString(), isPII: false },
+                { fieldName: 'userId', fieldValue: request.userId.toString(), isPII: true }
+              ]
+            };
+
+            const paymentResponse = await this.pawapayService.initiateDeposit(depositRequest);
+
+            // Update unlock with payment response
+            await prisma.propertyAddressUnlock.update({
+              where: { unlockId },
+              data: {
+                paymentStatus: paymentResponse.status || 'SUBMITTED'
+              }
+            });
+
+            logger.info('Mobile money payment initiated via PawaPay', 'PropertyAddressUnlock', {
               unlockId,
               transactionReference,
-              paymentStatus: paymentResponse.status || 'SUBMITTED',
-              amountRWF: paymentAmountRWF,
-              amountUSD: request.paymentAmountUSD,
-              paymentType: 'momo'
-            }
-          };
+              paymentStatus: paymentResponse.status,
+              provider: pawapayProvider
+            });
+
+            return {
+              success: true,
+              message: 'Mobile money payment initiated successfully',
+              data: {
+                unlockId,
+                transactionReference,
+                paymentStatus: paymentResponse.status || 'SUBMITTED',
+                amountRWF: paymentAmountRWF,
+                amountUSD: request.paymentAmountUSD,
+                paymentType: 'momo'
+              }
+            };
+          }
         }
       } catch (paymentError) {
         logger.error('Payment initiation failed', 'PropertyAddressUnlock', {

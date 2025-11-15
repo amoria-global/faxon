@@ -11,7 +11,7 @@ import notificationRoutes from './routes/notification.routes';
 import helpRoutes from './routes/help.routes';
 import settingsRoutes from './routes/settings.routes';
 import adminRoutes from './routes/admin.routes';
-// import publicRoutes from './routes/public.routes'; // TODO: Create this file if needed
+import publicRoutes from './routes/public.routes';
 import XentriPayRoutes from './routes/xentripay.routes';
 import pawaPayRoutes from './routes/pawapay.routes'; // PawaPay routes
 import pawaPayCallbackRoutes from './routes/pawapay.callback'; // PawaPay callback
@@ -138,7 +138,7 @@ if (process.env.ENABLE_KYC_REMINDERS !== 'false') reminderScheduler.start();
 if (process.env.ENABLE_BOOKING_CLEANUP !== 'false') bookingCleanupScheduler.start();
 
 // Routes
-// app.use('/api/public', publicRoutes); // Public routes (no auth required) - TODO: Uncomment when public.routes.ts is created
+app.use('/api/public', publicRoutes); // Public routes (no auth required)
 app.use('/api/auth', authRoutes);
 app.use('/api/payments/withdrawal', withdrawalRoutes);
 app.use('/api/properties', propertyRoutes);

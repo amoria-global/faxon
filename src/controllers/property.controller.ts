@@ -19,6 +19,7 @@ interface AuthenticatedRequest extends Request {
   user?: {
     userId: string;
     email: string;
+    userType?: string;
   };
 }
 
@@ -187,7 +188,7 @@ export class PropertyController {
   };
 
   // --- PROPERTY QUERIES ---
-  getPropertyById = async (req: Request, res: Response): Promise<void> => {
+  getPropertyById = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const propertyId = parseInt(req.params.id);
 
@@ -199,8 +200,11 @@ export class PropertyController {
         return;
       }
 
-      const property = await this.propertyService.getPropertyById(propertyId);
-      
+      // Get user type from authenticated request (if available)
+      const userType = req.user?.userType;
+
+      const property = await this.propertyService.getPropertyById(propertyId, userType);
+
       if (!property) {
         res.status(404).json({
           success: false,

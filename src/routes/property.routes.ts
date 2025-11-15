@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { PropertyController } from '../controllers/property.controller';
 import { EnhancedPropertyController } from '../controllers/enhanced-property.controller';
 import { AgentPerformanceController } from '../controllers/agent-performance.controller';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware';
 import {
   validateProperty,
   validateBookingUpdate,
@@ -25,7 +25,8 @@ router.get('/search', propertyController.searchProperties);
 router.get('/featured', propertyController.getFeaturedProperties);
 router.get('/monthly-rentals', propertyController.getMonthlyRentals);
 router.get('/suggestions/location', propertyController.getLocationSuggestions);
-router.get('/:id', propertyController.getPropertyById);
+// Get property by ID - uses optional auth to detect user type and skip tax markup for hosts/agents/tourguides
+router.get('/:id', optionalAuthenticate, propertyController.getPropertyById);
 router.get('/:id/similar', propertyController.getSimilarProperties);
 router.get('/:id/reviews', propertyController.getPropertyReviews);
 

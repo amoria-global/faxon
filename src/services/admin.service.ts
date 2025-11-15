@@ -6382,6 +6382,10 @@ export class AdminService {
         where: { email }
       });
 
+      let emailSent = false;
+      let emailError = null;
+      let alreadySubscribed = false;
+
       if (existing) {
         // If unsubscribed, resubscribe
         if (!existing.isSubscribed) {
@@ -6393,11 +6397,42 @@ export class AdminService {
               unsubscribedAt: null
             }
           });
-          return updated;
+
+          // Send notification to admin
+          try {
+            await this.sendNewSubscriberNotification(email);
+            console.log('✅ Admin notification sent successfully');
+          } catch (err: any) {
+            console.error('❌ Failed to send admin notification:', err);
+            emailError = err.message;
+          }
+
+          // Send confirmation email to subscriber
+          try {
+            await this.sendSubscriberConfirmationEmail(email);
+            console.log('✅ Subscriber confirmation sent successfully');
+            emailSent = true;
+          } catch (err: any) {
+            console.error('❌ Failed to send subscriber confirmation:', err);
+            emailError = emailError ? `${emailError}; ${err.message}` : err.message;
+          }
+
+          return {
+            subscription: updated,
+            emailSent,
+            emailError,
+            alreadySubscribed: false
+          };
         }
 
         // Already subscribed
-        return existing;
+        alreadySubscribed = true;
+        return {
+          subscription: existing,
+          emailSent: false,
+          emailError: null,
+          alreadySubscribed: true
+        };
       }
 
       // Create new subscription
@@ -6408,7 +6443,31 @@ export class AdminService {
         }
       });
 
-      return subscription;
+      // Send notification to admin
+      try {
+        await this.sendNewSubscriberNotification(email);
+        console.log('✅ Admin notification sent successfully');
+      } catch (err: any) {
+        console.error('❌ Failed to send admin notification:', err);
+        emailError = err.message;
+      }
+
+      // Send confirmation email to subscriber
+      try {
+        await this.sendSubscriberConfirmationEmail(email);
+        console.log('✅ Subscriber confirmation sent successfully');
+        emailSent = true;
+      } catch (err: any) {
+        console.error('❌ Failed to send subscriber confirmation:', err);
+        emailError = emailError ? `${emailError}; ${err.message}` : err.message;
+      }
+
+      return {
+        subscription,
+        emailSent,
+        emailError,
+        alreadySubscribed: false
+      };
     } catch (error: any) {
       console.error('Error subscribing to newsletter:', error);
       throw new Error(`Failed to subscribe to newsletter: ${error.message}`);
@@ -6432,10 +6491,438 @@ export class AdminService {
         }
       });
 
-      return contact;
+      let emailSent = false;
+      let emailError = null;
+
+      // Send notification to admin
+      try {
+        await this.sendNewContactNotification(contact);
+        console.log('✅ Admin notification sent successfully');
+      } catch (err: any) {
+        console.error('❌ Failed to send admin notification:', err);
+        emailError = err.message;
+      }
+
+      // Send confirmation email to contact
+      try {
+        await this.sendContactConfirmationEmail(contact);
+        console.log('✅ Contact confirmation sent successfully');
+        emailSent = true;
+      } catch (err: any) {
+        console.error('❌ Failed to send contact confirmation:', err);
+        emailError = emailError ? `${emailError}; ${err.message}` : err.message;
+      }
+
+      return {
+        contact,
+        emailSent,
+        emailError
+      };
     } catch (error: any) {
       console.error('Error creating contact message:', error);
       throw new Error(`Failed to create contact message: ${error.message}`);
+    }
+  }
+
+  /**
+   * Send notification to admin for new newsletter subscriber
+   */
+  private async sendNewSubscriberNotification(email: string): Promise<void> {
+    try {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #083A85 0%, #0a4499 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: white; padding: 30px; border: 1px solid #ddd; border-top: none; }
+            .info-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px; margin: 20px 0; }
+            .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+            .info-row:last-child { border-bottom: none; }
+            .info-label { font-weight: 600; color: #374151; }
+            .info-value { color: #6b7280; }
+            .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1 style="margin: 0; font-size: 24px;">New Newsletter Subscription</h1>
+          </div>
+          <div class="content">
+            <p>A new user has subscribed to your newsletter.</p>
+            <div class="info-box">
+              <div class="info-row">
+                <span class="info-label">Email:</span>
+                <span class="info-value">${email}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Subscribed at:</span>
+                <span class="info-value">${new Date().toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+          <div class="footer">
+            <p>&copy; ${new Date().getFullYear()} Amoria Global. All rights reserved.</p>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const text = `
+New Newsletter Subscription
+
+Email: ${email}
+Subscribed at: ${new Date().toLocaleString()}
+      `;
+
+      await this.mailingService.sendTransactionalEmail({
+        sender: { name: 'Amoria Global System', email: 'noreply@amoriaglobal.com' },
+        to: [{ email: this.adminEmail, name: 'Admin' }],
+        subject: 'New Newsletter Subscription',
+        htmlContent: html,
+        textContent: text
+      });
+
+      console.log(`Newsletter subscription notification sent to ${this.adminEmail}`);
+    } catch (error: any) {
+      console.error('Failed to send newsletter subscription notification:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Send notification to admin for new contact message
+   */
+  private async sendNewContactNotification(contact: any): Promise<void> {
+    try {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #083A85 0%, #0a4499 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: white; padding: 30px; border: 1px solid #ddd; border-top: none; }
+            .info-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px; margin: 20px 0; }
+            .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+            .info-row:last-child { border-bottom: none; }
+            .info-label { font-weight: 600; color: #374151; min-width: 120px; }
+            .info-value { color: #6b7280; text-align: right; flex: 1; }
+            .message-box { background: #fffbeb; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 5px; }
+            .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1 style="margin: 0; font-size: 24px;">New Contact Message</h1>
+          </div>
+          <div class="content">
+            <p>You have received a new contact message from your website.</p>
+            <div class="info-box">
+              <div class="info-row">
+                <span class="info-label">Name:</span>
+                <span class="info-value">${contact.name}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Email:</span>
+                <span class="info-value">${contact.email}</span>
+              </div>
+              ${contact.phoneNumber ? `
+              <div class="info-row">
+                <span class="info-label">Phone:</span>
+                <span class="info-value">${contact.phoneNumber}</span>
+              </div>
+              ` : ''}
+              ${contact.subject ? `
+              <div class="info-row">
+                <span class="info-label">Subject:</span>
+                <span class="info-value">${contact.subject}</span>
+              </div>
+              ` : ''}
+              <div class="info-row">
+                <span class="info-label">Received at:</span>
+                <span class="info-value">${new Date().toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div class="message-box">
+              <strong>Message:</strong><br><br>
+              ${contact.message}
+            </div>
+          </div>
+          <div class="footer">
+            <p>&copy; ${new Date().getFullYear()} Amoria Global. All rights reserved.</p>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const text = `
+New Contact Message
+
+Name: ${contact.name}
+Email: ${contact.email}
+${contact.phoneNumber ? `Phone: ${contact.phoneNumber}` : ''}
+${contact.subject ? `Subject: ${contact.subject}` : ''}
+Received at: ${new Date().toLocaleString()}
+
+Message:
+${contact.message}
+      `;
+
+      await this.mailingService.sendTransactionalEmail({
+        sender: { name: 'Amoria Global System', email: 'noreply@amoriaglobal.com' },
+        to: [{ email: this.adminEmail, name: 'Admin' }],
+        subject: `New Contact Message from ${contact.name}`,
+        htmlContent: html,
+        textContent: text
+      });
+
+      console.log(`Contact message notification sent to ${this.adminEmail}`);
+    } catch (error: any) {
+      console.error('Failed to send contact message notification:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Send confirmation email to newsletter subscriber
+   */
+  private async sendSubscriberConfirmationEmail(email: string): Promise<void> {
+    try {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #083A85 0%, #0a4499 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: white; padding: 30px; border: 1px solid #ddd; border-top: none; }
+            .welcome-box { background: #f0fdf4; border-left: 4px solid #22c55e; padding: 15px; margin: 20px 0; border-radius: 5px; }
+            .info-box { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; border-radius: 5px; }
+            .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; font-size: 12px; color: #666; }
+            .button { display: inline-block; background: #083A85; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 15px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1 style="margin: 0; font-size: 24px;">Welcome to Amoria Global!</h1>
+          </div>
+          <div class="content">
+            <div class="welcome-box">
+              <p style="margin: 0;"><strong>✅ Subscription Confirmed!</strong></p>
+              <p style="margin: 5px 0 0 0;">Thank you for subscribing to our newsletter.</p>
+            </div>
+
+            <p>You'll receive updates about:</p>
+            <ul>
+              <li>Latest property listings and investment opportunities</li>
+              <li>Market insights and industry trends</li>
+              <li>Exclusive offers and promotions</li>
+              <li>Company news and announcements</li>
+            </ul>
+
+            <div class="info-box">
+              <p style="margin: 0;"><strong>Stay Connected</strong></p>
+              <p style="margin: 5px 0 0 0;">Visit our website anytime to explore properties, browse tours, and learn more about our services.</p>
+            </div>
+
+            <div style="text-align: center;">
+              <a href="https://amoriaglobal.com" class="button">Visit Amoria Global</a>
+            </div>
+
+            <p style="margin-top: 30px; font-size: 13px; color: #666;">
+              If you received this email by mistake or wish to unsubscribe, please contact us at <a href="mailto:support@amoriaglobal.com">support@amoriaglobal.com</a>
+            </p>
+          </div>
+          <div class="footer">
+            <p>&copy; ${new Date().getFullYear()} Amoria Global. All rights reserved.</p>
+            <p style="margin: 5px 0;">Building the future of real estate investment</p>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const text = `
+Welcome to Amoria Global!
+
+✅ SUBSCRIPTION CONFIRMED!
+
+Thank you for subscribing to our newsletter.
+
+You'll receive updates about:
+- Latest property listings and investment opportunities
+- Market insights and industry trends
+- Exclusive offers and promotions
+- Company news and announcements
+
+Visit our website: https://amoriaglobal.com
+
+If you received this email by mistake or wish to unsubscribe, please contact us at support@amoriaglobal.com
+
+© ${new Date().getFullYear()} Amoria Global. All rights reserved.
+Building the future of real estate investment
+      `;
+
+      await this.mailingService.sendTransactionalEmail({
+        sender: { name: 'Amoria Global', email: 'noreply@amoriaglobal.com' },
+        to: [{ email, name: 'Subscriber' }],
+        subject: 'Welcome to Amoria Global Newsletter! 🎉',
+        htmlContent: html,
+        textContent: text
+      });
+
+      console.log(`Subscription confirmation email sent to ${email}`);
+    } catch (error: any) {
+      console.error('Failed to send subscription confirmation:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Send confirmation email to contact form submitter
+   */
+  private async sendContactConfirmationEmail(contact: any): Promise<void> {
+    try {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #083A85 0%, #0a4499 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: white; padding: 30px; border: 1px solid #ddd; border-top: none; }
+            .success-box { background: #f0fdf4; border-left: 4px solid #22c55e; padding: 15px; margin: 20px 0; border-radius: 5px; }
+            .info-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px; margin: 20px 0; }
+            .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+            .info-row:last-child { border-bottom: none; }
+            .info-label { font-weight: 600; color: #374151; min-width: 120px; }
+            .info-value { color: #6b7280; text-align: right; flex: 1; }
+            .message-box { background: #fffbeb; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 5px; }
+            .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1 style="margin: 0; font-size: 24px;">Message Received</h1>
+          </div>
+          <div class="content">
+            <p>Hi ${contact.name},</p>
+
+            <div class="success-box">
+              <p style="margin: 0;"><strong>✅ Thank you for contacting us!</strong></p>
+              <p style="margin: 5px 0 0 0;">We've received your message and our team will get back to you shortly.</p>
+            </div>
+
+            <p>Here's a copy of your message:</p>
+
+            <div class="info-box">
+              <div class="info-row">
+                <span class="info-label">Name:</span>
+                <span class="info-value">${contact.name}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Email:</span>
+                <span class="info-value">${contact.email}</span>
+              </div>
+              ${contact.phoneNumber ? `
+              <div class="info-row">
+                <span class="info-label">Phone:</span>
+                <span class="info-value">${contact.phoneNumber}</span>
+              </div>
+              ` : ''}
+              ${contact.subject ? `
+              <div class="info-row">
+                <span class="info-label">Subject:</span>
+                <span class="info-value">${contact.subject}</span>
+              </div>
+              ` : ''}
+              <div class="info-row">
+                <span class="info-label">Submitted:</span>
+                <span class="info-value">${new Date().toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div class="message-box">
+              <strong>Your Message:</strong><br><br>
+              ${contact.message}
+            </div>
+
+            <p><strong>What happens next?</strong></p>
+            <ul>
+              <li>Our team will review your message within 24 hours</li>
+              <li>We'll respond to you at <strong>${contact.email}</strong></li>
+              <li>For urgent matters, you can call us directly</li>
+            </ul>
+
+            <p style="margin-top: 30px; font-size: 13px; color: #666;">
+              Need immediate assistance? Contact us at:<br>
+              Email: <a href="mailto:admin@amoriaglobal.com">admin@amoriaglobal.com</a><br>
+              Website: <a href="https://amoriaglobal.com">amoriaglobal.com</a>
+            </p>
+          </div>
+          <div class="footer">
+            <p>&copy; ${new Date().getFullYear()} Amoria Global. All rights reserved.</p>
+            <p style="margin: 5px 0;">Building the future of real estate investment</p>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const text = `
+Message Received - Amoria Global
+
+Hi ${contact.name},
+
+✅ THANK YOU FOR CONTACTING US!
+
+We've received your message and our team will get back to you shortly.
+
+Here's a copy of your message:
+
+Name: ${contact.name}
+Email: ${contact.email}
+${contact.phoneNumber ? `Phone: ${contact.phoneNumber}` : ''}
+${contact.subject ? `Subject: ${contact.subject}` : ''}
+Submitted: ${new Date().toLocaleString()}
+
+Your Message:
+${contact.message}
+
+What happens next?
+- Our team will review your message within 24 hours
+- We'll respond to you at ${contact.email}
+- For urgent matters, you can call us directly
+
+Need immediate assistance? Contact us at:
+Email: admin@amoriaglobal.com
+Website: amoriaglobal.com
+
+© ${new Date().getFullYear()} Amoria Global. All rights reserved.
+Building the future of real estate investment
+      `;
+
+      await this.mailingService.sendTransactionalEmail({
+        sender: { name: 'Amoria Global', email: 'noreply@amoriaglobal.com' },
+        to: [{ email: contact.email, name: contact.name }],
+        subject: 'We received your message - Amoria Global',
+        htmlContent: html,
+        textContent: text
+      });
+
+      console.log(`Contact confirmation email sent to ${contact.email}`);
+    } catch (error: any) {
+      console.error('Failed to send contact confirmation:', error);
+      throw error;
     }
   }
 }
