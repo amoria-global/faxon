@@ -993,7 +993,12 @@ export class TourService {
       // NEW: Earnings breakdown by status
       earningsBreakdown,
       // NEW: Schedule utilization
-      scheduleData
+      scheduleData,
+      // FIX: Add missing revenue sources
+      paymentTransactions,
+      walletTransactions,
+      completedBookings,
+      bonuses
     ] = await Promise.all([
       // Existing queries
       prisma.tour.count({
@@ -1054,6 +1059,77 @@ export class TourService {
         where: { tourGuideId },
         _sum: { availableSlots: true, bookedSlots: true },
         _count: true
+      }),
+      // FIX: Query PaymentTransaction for actual payouts
+      prisma.paymentTransaction.findMany({
+        where: {
+          userId: tourGuideId,
+          type: { in: ['payout', 'earning'] },
+          status: 'completed'
+        },
+        select: {
+          id: true,
+          type: true,
+          amount: true,
+          currency: true,
+          status: true,
+          netAmount: true,
+          charges: true,
+          createdAt: true,
+          completedAt: true
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20
+      }),
+      // FIX: Query WalletTransaction for earnings
+      prisma.walletTransaction.findMany({
+        where: {
+          wallet: { userId: tourGuideId },
+          type: 'credit',
+          OR: [
+            { description: { contains: 'tour', mode: 'insensitive' } },
+            { description: { contains: 'booking', mode: 'insensitive' } },
+            { description: { contains: 'earning', mode: 'insensitive' } }
+          ]
+        },
+        select: {
+          id: true,
+          amount: true,
+          type: true,
+          description: true,
+          createdAt: true
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20
+      }),
+      // FIX: Get all completed tour bookings for revenue calculation
+      prisma.tourBooking.findMany({
+        where: {
+          tourGuideId,
+          paymentStatus: 'completed'
+        },
+        select: {
+          id: true,
+          totalAmount: true,
+          status: true,
+          paymentStatus: true,
+          walletDistributed: true,
+          createdAt: true
+        }
+      }),
+      // FIX: Query Bonus table for referral/performance bonuses
+      prisma.bonus.findMany({
+        where: { userId: tourGuideId },
+        select: {
+          id: true,
+          sourceType: true,
+          amount: true,
+          currency: true,
+          status: true,
+          description: true,
+          createdAt: true
+        },
+        orderBy: { createdAt: 'desc' }
       })
     ]);
 
@@ -1087,11 +1163,26 @@ export class TourService {
     const bookedSlots = scheduleData._sum.bookedSlots || 0;
     const capacityUtilization = totalSlots > 0 ? ((bookedSlots / totalSlots) * 100).toFixed(2) : '0';
 
+    // FIX: Calculate revenue from multiple sources for accuracy
+    const revenueFromCompletedBookings = completedBookings.reduce((sum, b) => sum + b.totalAmount, 0);
+    const revenueFromEarningsTable = totalRevenue._sum.netAmount || 0;
+    const revenueFromPaymentTransactions = paymentTransactions.reduce((sum: number, t: any) => sum + (t.netAmount || t.amount), 0);
+    const revenueFromWalletTransactions = (walletTransactions as any[]).reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+    const bonusEarnings = bonuses.reduce((sum, b) => sum + b.amount, 0);
+
+    // Calculate distributed vs pending earnings
+    const distributedBookings = completedBookings.filter(b => b.walletDistributed);
+    const pendingDistributionBookings = completedBookings.filter(b => !b.walletDistributed);
+    const pendingDistributionAmount = pendingDistributionBookings.reduce((sum, b) => sum + b.totalAmount, 0);
+
+    // Use the most comprehensive revenue calculation
+    const calculatedTotalRevenue = Math.max(revenueFromCompletedBookings, revenueFromEarningsTable);
+
     return {
       totalTours,
       activeTours,
       totalBookings,
-      totalRevenue: totalRevenue._sum.netAmount || 0,
+      totalRevenue: calculatedTotalRevenue,
       averageRating: averageRating?.rating || 0,
       totalParticipants: totalParticipants._sum.numberOfParticipants || 0,
       recentBookings,
@@ -1121,15 +1212,43 @@ export class TourService {
           : '0'
       },
       earnings: {
-        total: totalRevenue._sum.netAmount || 0,
+        total: calculatedTotalRevenue,
         byStatus: earningsBreakdown.map((e: any) => ({
           status: e.status,
           netAmount: e._sum.netAmount || 0,
           grossAmount: e._sum.amount || 0,
           commission: e._sum.commission || 0,
           count: e._count
+        })),
+        // FIX: Add comprehensive revenue breakdown
+        fromBookings: revenueFromCompletedBookings,
+        fromWallet: revenueFromWalletTransactions,
+        fromPayouts: revenueFromPaymentTransactions,
+        bonuses: bonusEarnings,
+        // Pending earnings (bookings completed but not distributed)
+        pendingDistribution: pendingDistributionAmount,
+        pendingDistributionCount: pendingDistributionBookings.length,
+        // Recent transactions for transparency
+        recentPayouts: paymentTransactions.slice(0, 10).map((t: any) => ({
+          id: t.id,
+          type: t.type,
+          amount: t.amount,
+          netAmount: t.netAmount || t.amount,
+          charges: t.charges || 0,
+          status: t.status,
+          createdAt: t.createdAt.toISOString(),
+          completedAt: t.completedAt?.toISOString() || null
+        })),
+        recentBonuses: bonuses.slice(0, 5).map(b => ({
+          id: b.id,
+          type: b.sourceType,
+          amount: b.amount,
+          currency: b.currency,
+          status: b.status,
+          description: b.description,
+          createdAt: b.createdAt.toISOString()
         }))
-      },
+      } as TourGuideDashboard['earnings'],
       scheduleUtilization: {
         totalSchedules: scheduleData._count || 0,
         totalSlots: totalSlots,
@@ -2025,7 +2144,16 @@ export class TourService {
       totalBookings,
       periodBookings,
       averagePrice,
-      conversionRate
+      conversionRate,
+      // Multi-source earnings
+      completedBookings,
+      periodCompletedBookings,
+      paymentTransactions,
+      periodPaymentTransactions,
+      walletTransactions,
+      periodWalletTransactions,
+      bonuses,
+      periodBonuses
     ] = await Promise.all([
       prisma.tourEarnings.aggregate({
         where: { tourGuideId },
@@ -2051,15 +2179,107 @@ export class TourService {
         where: { tourGuideId },
         _avg: { price: true }
       }),
-      0.25 // Mock conversion rate - would calculate from actual data
+      0.25, // Mock conversion rate - would calculate from actual data
+      // Completed tour bookings
+      prisma.tourBooking.findMany({
+        where: {
+          tourGuideId,
+          status: 'completed'
+        },
+        select: { totalAmount: true }
+      }),
+      // Period completed bookings
+      prisma.tourBooking.findMany({
+        where: {
+          tourGuideId,
+          status: 'completed',
+          createdAt: { gte: startDate }
+        },
+        select: { totalAmount: true }
+      }),
+      // Payment transactions (payouts)
+      prisma.paymentTransaction.findMany({
+        where: {
+          userId: tourGuideId,
+          type: 'payout',
+          status: 'completed'
+        },
+        select: { netAmount: true, amount: true }
+      }),
+      // Period payment transactions
+      prisma.paymentTransaction.findMany({
+        where: {
+          userId: tourGuideId,
+          type: 'payout',
+          status: 'completed',
+          createdAt: { gte: startDate }
+        },
+        select: { netAmount: true, amount: true }
+      }),
+      // Wallet transactions
+      prisma.walletTransaction.findMany({
+        where: {
+          wallet: { userId: tourGuideId },
+          type: 'credit',
+          OR: [
+            { description: { contains: 'tour', mode: 'insensitive' } },
+            { description: { contains: 'booking', mode: 'insensitive' } },
+            { description: { contains: 'earning', mode: 'insensitive' } }
+          ]
+        },
+        select: { amount: true }
+      }),
+      // Period wallet transactions
+      prisma.walletTransaction.findMany({
+        where: {
+          wallet: { userId: tourGuideId },
+          type: 'credit',
+          createdAt: { gte: startDate },
+          OR: [
+            { description: { contains: 'tour', mode: 'insensitive' } },
+            { description: { contains: 'booking', mode: 'insensitive' } },
+            { description: { contains: 'earning', mode: 'insensitive' } }
+          ]
+        },
+        select: { amount: true }
+      }),
+      // Bonuses
+      prisma.bonus.findMany({
+        where: { userId: tourGuideId },
+        select: { amount: true }
+      }),
+      // Period bonuses
+      prisma.bonus.findMany({
+        where: {
+          userId: tourGuideId,
+          createdAt: { gte: startDate }
+        },
+        select: { amount: true }
+      })
     ]);
 
+    // Calculate total earnings from multiple sources
+    const earningsFromTable = Number(totalEarnings._sum.netAmount || 0);
+    const earningsFromBookings = completedBookings.reduce((sum, b) => sum + Number(b.totalAmount), 0);
+    const earningsFromPayouts = paymentTransactions.reduce((sum, t) => sum + Number(t.netAmount || t.amount), 0);
+    const earningsFromWallet = walletTransactions.reduce((sum, t) => sum + Number(t.amount), 0);
+    const earningsFromBonuses = bonuses.reduce((sum, b) => sum + Number(b.amount), 0);
+    const totalEarningsAmount = Math.max(earningsFromTable, earningsFromBookings, earningsFromPayouts, earningsFromWallet) + earningsFromBonuses;
+
+    // Calculate period earnings from multiple sources
+    const periodFromTable = Number(periodEarnings._sum.netAmount || 0);
+    const periodFromBookings = periodCompletedBookings.reduce((sum, b) => sum + Number(b.totalAmount), 0);
+    const periodFromPayouts = periodPaymentTransactions.reduce((sum, t) => sum + Number(t.netAmount || t.amount), 0);
+    const periodFromWallet = periodWalletTransactions.reduce((sum, t) => sum + Number(t.amount), 0);
+    const periodFromBonuses = periodBonuses.reduce((sum, b) => sum + Number(b.amount), 0);
+    const periodEarningsAmount = Math.max(periodFromTable, periodFromBookings, periodFromPayouts, periodFromWallet) + periodFromBonuses;
+
     return {
-      totalEarnings: totalEarnings._sum.netAmount || 0,
-      monthlyEarnings: periodEarnings._sum.netAmount || 0,
+      totalEarnings: totalEarningsAmount,
+      monthlyEarnings: periodEarningsAmount,
       yearlyEarnings: 0, // Would calculate
       pendingPayouts: 0, // Would calculate
-      completedPayouts: 0, // Would calculate
+      completedPayouts: earningsFromPayouts,
       averageTourPrice: averagePrice._avg.price || 0,
       conversionRate,
       revenueGrowth: 0 // Would calculate

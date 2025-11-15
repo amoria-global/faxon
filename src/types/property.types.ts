@@ -355,6 +355,35 @@ export interface HostDashboard {
     totalNet: number;
     transactionsCount: number;
     byStatus: { status: string; amount: number; count: number }[];
+    // FIX: Added comprehensive revenue breakdown fields
+    fromBookings?: number;
+    fromWallet?: number;
+    fromPayouts?: number;
+    bonuses?: number;
+    pendingDistribution?: number;
+    pendingDistributionCount?: number;
+    totalPaidOut?: number;
+    pendingPayout?: number;
+    pendingPayoutCount?: number;
+    recentPayouts?: Array<{
+      id: string;
+      type: string;
+      amount: number;
+      netAmount: number;
+      charges: number;
+      status: string;
+      createdAt: string;
+      completedAt: string | null;
+    }>;
+    recentBonuses?: Array<{
+      id: string;
+      type: string;
+      amount: number;
+      currency: string;
+      status: string;
+      description: string | null;
+      createdAt: string;
+    }>;
   };
   analytics?: {
     totalViews: number;
@@ -754,7 +783,41 @@ export interface AgentDashboard {
   commissions?: {
     total: number;
     pending: number;
+    earned?: number;
+    paid?: number;
     byStatus: { status: string; amount: number; count: number }[];
+    // FIX: Added comprehensive commission breakdown fields
+    fromPayouts?: number;
+    fromWallet?: number;
+    bonuses?: number;
+    recentPayouts?: Array<{
+      id: string;
+      type: string;
+      amount: number;
+      netAmount: number;
+      charges: number;
+      status: string;
+      createdAt: string;
+      completedAt: string | null;
+    }>;
+    recentCommissions?: Array<{
+      id: string;
+      amount: number;
+      commissionRate: number;
+      status: string;
+      earnedAt: string | null;
+      paidAt: string | null;
+      createdAt: string;
+    }>;
+    recentBonuses?: Array<{
+      id: string;
+      type: string;
+      amount: number;
+      currency: string;
+      status: string;
+      description: string | null;
+      createdAt: string;
+    }>;
   };
   propertyViews?: {
     total: number;

@@ -6,6 +6,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { config } from '../config/config';
 import { BrevoMailingService } from '../utils/brevo.auth';
 import { BrevoWhatsAppAuthService } from '../utils/brevo.sms.auth';
+import { adminNotifications } from '../utils/admin-notifications';
 import {
   RegisterDto,
   LoginDto,
@@ -342,6 +343,31 @@ export class AuthService {
 
     // Send welcome notifications
     await this.sendNotifications(user, 'welcome', req);
+
+    // Send admin notification for new service provider registration
+    if (isServiceProvider) {
+      try {
+        await adminNotifications.sendNewUserRegistrationNotification({
+          userId: user.id,
+          user: {
+            id: user.id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName
+          },
+          userType: user.userType as 'host' | 'tourguide' | 'agent',
+          phone: user.phone,
+          applicationId,
+          additionalInfo: {
+            country: user.country || 'N/A',
+            city: user.city || 'N/A'
+          }
+        });
+      } catch (error) {
+        console.error('[ADMIN_NOTIFICATION] Failed to send new user registration notification:', error);
+        // Don't fail the registration if admin notification fails
+      }
+    }
 
     return {
       user: await this.transformToUserInfo(user),
@@ -1389,6 +1415,34 @@ export class AuthService {
     });
 
     await this.sendNotifications(user, 'welcome', req);
+
+    // Send admin notification for new service provider created by admin
+    const isServiceProvider = ['host', 'tourguide', 'agent'].includes(user.userType);
+    if (isServiceProvider) {
+      try {
+        await adminNotifications.sendNewUserRegistrationNotification({
+          userId: user.id,
+          user: {
+            id: user.id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName
+          },
+          userType: user.userType as 'host' | 'tourguide' | 'agent',
+          phone: user.phone,
+          applicationId: `APP-${user.id}-${Date.now()}`,
+          additionalInfo: {
+            country: user.country || 'N/A',
+            city: user.city || 'N/A',
+            createdBy: 'Admin'
+          }
+        });
+      } catch (error) {
+        console.error('[ADMIN_NOTIFICATION] Failed to send new user registration notification:', error);
+        // Don't fail the user creation if admin notification fails
+      }
+    }
+
     return await this.transformToUserInfo(user);
   }
 

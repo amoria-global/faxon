@@ -307,9 +307,49 @@ export interface GuestBookingStats {
   payments?: {
     transactionCount: number;
     byStatus: { status: string; count: number; totalAmount: number }[];
+    recentTransactions?: {
+      id: string;
+      type: string;
+      method: string;
+      amount: number;
+      currency: string;
+      status: string;
+      reference: string;
+      description: string | null;
+      charges: number;
+      netAmount: number;
+      createdAt: string;
+      completedAt: string | null;
+    }[];
+    totalDeposited?: number;
+    totalPaid?: number;
+    totalCharges?: number;
   };
   withdrawals?: {
     active: number;
+    totalWithdrawn?: number;
+    pendingAmount?: number;
+    totalFees?: number;
+    recentWithdrawals?: {
+      id: string;
+      amount: number;
+      currency: string;
+      method: string;
+      status: string;
+      reference: string;
+      feeAmount: number;
+      netAmount: number;
+      createdAt: string;
+      completedAt: string | null;
+      failureReason: string | null;
+    }[];
+    byStatus?: {
+      status: string;
+      count: number;
+      totalAmount: number;
+      totalFees: number;
+      totalNet: number;
+    }[];
   };
 }
 

@@ -482,6 +482,32 @@ export interface TourGuideDashboard {
   earnings?: {
     total: number;
     byStatus: { status: string; netAmount: number; grossAmount: number; commission: number; count: number }[];
+    // FIX: Added comprehensive revenue breakdown fields
+    fromBookings?: number;
+    fromWallet?: number;
+    fromPayouts?: number;
+    bonuses?: number;
+    pendingDistribution?: number;
+    pendingDistributionCount?: number;
+    recentPayouts?: Array<{
+      id: string;
+      type: string;
+      amount: number;
+      netAmount: number;
+      charges: number;
+      status: string;
+      createdAt: string;
+      completedAt: string | null;
+    }>;
+    recentBonuses?: Array<{
+      id: string;
+      type: string;
+      amount: number;
+      currency: string;
+      status: string;
+      description: string | null;
+      createdAt: string;
+    }>;
   };
   scheduleUtilization?: {
     totalSchedules: number;
