@@ -1162,7 +1162,13 @@ export class BookingService {
       // NEW: Notifications
       notifications,
       // NEW: Payment transactions
-      paymentTransactions
+      paymentTransactions,
+      // NEW: All payment transactions for detailed summary
+      allPaymentTransactions,
+      // NEW: Withdrawal requests
+      withdrawalRequests,
+      // NEW: Withdrawal summary
+      withdrawalSummary
     ] = await Promise.all([
       prisma.booking.findMany({
         where: { guestId: userId },
@@ -1232,12 +1238,62 @@ export class BookingService {
         where: { userId },
         _count: true
       }),
-      // NEW: Fetch payment transactions
+      // NEW: Fetch payment transactions summary
       prisma.paymentTransaction.groupBy({
         by: ['status'],
         where: { userId },
         _count: true,
         _sum: { amount: true }
+      }),
+      // NEW: Fetch ALL payment transactions for detailed summary
+      prisma.paymentTransaction.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          type: true,
+          method: true,
+          amount: true,
+          currency: true,
+          status: true,
+          reference: true,
+          description: true,
+          charges: true,
+          netAmount: true,
+          createdAt: true,
+          completedAt: true
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50 // Limit to last 50 transactions
+      }),
+      // NEW: Fetch withdrawal requests
+      prisma.withdrawalRequest.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          amount: true,
+          currency: true,
+          method: true,
+          status: true,
+          reference: true,
+          feeAmount: true,
+          netAmount: true,
+          createdAt: true,
+          completedAt: true,
+          failureReason: true
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20 // Limit to last 20 withdrawals
+      }),
+      // NEW: Aggregate withdrawal data
+      prisma.withdrawalRequest.groupBy({
+        by: ['status'],
+        where: { userId },
+        _count: true,
+        _sum: {
+          amount: true,
+          feeAmount: true,
+          netAmount: true
+        }
       })
     ]);
 
@@ -1247,10 +1303,41 @@ export class BookingService {
     const cancelledBookings = propertyBookings.filter(b => b.status === 'cancelled').length +
       tourBookings.filter(b => b.status === 'cancelled').length;
 
-    const totalSpent = propertyBookings.reduce((sum, b) => sum + (b.status === 'checkout' ? b.totalPrice : 0), 0) +
-      tourBookings.reduce((sum, b) => sum + (b.status === 'completed' ? b.totalAmount : 0), 0);
+    // Calculate total spent - using payment transactions for accuracy
+    const totalSpentFromBookings = propertyBookings.reduce((sum, b) => {
+      // Count all bookings where payment was completed
+      if (b.paymentStatus === 'completed') {
+        return sum + b.totalPrice;
+      }
+      return sum;
+    }, 0) + tourBookings.reduce((sum, b) => {
+      if (b.paymentStatus === 'completed') {
+        return sum + b.totalAmount;
+      }
+      return sum;
+    }, 0);
+
+    // Calculate total spent from payment transactions (more comprehensive)
+    const totalSpentFromTransactions = allPaymentTransactions
+      .filter(t => t.status === 'completed' && (t.type === 'booking' || t.type === 'payment' || t.type === 'deposit'))
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    // Use the maximum of both calculations for accuracy
+    const totalSpent = Math.max(totalSpentFromBookings, totalSpentFromTransactions);
 
     const averageBookingValue = completedBookings > 0 ? totalSpent / completedBookings : 0;
+
+    // Calculate withdrawal totals
+    const totalWithdrawn = withdrawalSummary
+      .filter((w: any) => w.status === 'COMPLETED')
+      .reduce((sum: number, w: any) => sum + (w._sum.netAmount || 0), 0);
+
+    const pendingWithdrawals = withdrawalSummary
+      .filter((w: any) => w.status === 'PENDING' || w.status === 'PROCESSING')
+      .reduce((sum: number, w: any) => sum + (w._sum.amount || 0), 0);
+
+    const totalWithdrawalFees = withdrawalSummary
+      .reduce((sum: number, w: any) => sum + (w._sum.feeAmount || 0), 0);
 
     // Get favorite destinations
     const destinations: { [key: string]: number } = {};
@@ -1359,10 +1446,61 @@ export class BookingService {
           status: t.status,
           count: t._count,
           totalAmount: t._sum.amount || 0
-        }))
+        })),
+        // NEW: Recent transactions for user visibility
+        recentTransactions: allPaymentTransactions.slice(0, 10).map(t => ({
+          id: t.id,
+          type: t.type,
+          method: t.method,
+          amount: t.amount,
+          currency: t.currency,
+          status: t.status,
+          reference: t.reference,
+          description: t.description,
+          charges: t.charges || 0,
+          netAmount: t.netAmount || t.amount,
+          createdAt: t.createdAt.toISOString(),
+          completedAt: t.completedAt?.toISOString() || null
+        })),
+        // NEW: Total amounts by transaction type
+        totalDeposited: allPaymentTransactions
+          .filter(t => t.status === 'completed' && t.type === 'deposit')
+          .reduce((sum, t) => sum + t.amount, 0),
+        totalPaid: allPaymentTransactions
+          .filter(t => t.status === 'completed' && (t.type === 'booking' || t.type === 'payment'))
+          .reduce((sum, t) => sum + t.amount, 0),
+        totalCharges: allPaymentTransactions
+          .filter(t => t.status === 'completed')
+          .reduce((sum, t) => sum + (t.charges || 0), 0)
       },
       withdrawals: {
-        active: activeWithdrawals
+        active: activeWithdrawals,
+        // NEW: Withdrawal summary data
+        totalWithdrawn,
+        pendingAmount: pendingWithdrawals,
+        totalFees: totalWithdrawalFees,
+        // NEW: Recent withdrawal requests
+        recentWithdrawals: withdrawalRequests.slice(0, 10).map(w => ({
+          id: w.id,
+          amount: w.amount,
+          currency: w.currency,
+          method: w.method,
+          status: w.status,
+          reference: w.reference,
+          feeAmount: w.feeAmount,
+          netAmount: w.netAmount || (w.amount - w.feeAmount),
+          createdAt: w.createdAt.toISOString(),
+          completedAt: w.completedAt?.toISOString() || null,
+          failureReason: w.failureReason || null
+        })),
+        // NEW: Breakdown by status
+        byStatus: withdrawalSummary.map((w: any) => ({
+          status: w.status,
+          count: w._count,
+          totalAmount: w._sum.amount || 0,
+          totalFees: w._sum.feeAmount || 0,
+          totalNet: w._sum.netAmount || 0
+        }))
       }
     };
   }

@@ -11,7 +11,7 @@ interface CompanyInfo {
 }
 
 interface AdminNotificationData {
-  type: 'checkin' | 'checkout' | 'withdrawal_method' | 'withdrawal_request' | 'completed_payment' | 'duplicate_detection' | 'property_submission' | 'tour_booking' | 'unlock_payment';
+  type: 'checkin' | 'checkout' | 'withdrawal_method' | 'withdrawal_request' | 'completed_payment' | 'duplicate_detection' | 'property_submission' | 'tour_booking' | 'unlock_payment' | 'new_user_registration';
   title: string;
   message: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
@@ -24,7 +24,7 @@ interface AdminNotificationData {
   resource: {
     id: string | number;
     name: string;
-    type: 'property' | 'tour' | 'booking' | 'withdrawal' | 'payment';
+    type: 'property' | 'tour' | 'booking' | 'withdrawal' | 'payment' | 'user';
   };
   metadata?: Record<string, any>;
   actionUrl?: string;
@@ -610,6 +610,48 @@ This is an automated admin notification from ${this.companyInfo.name}
         'Status': 'Blocked - Requires Review'
       },
       actionUrl: `${this.companyInfo.website}/admin/duplicates`
+    });
+  }
+
+  /**
+   * Send notification for new user registration (Host, Tour Guide, or Agent)
+   */
+  async sendNewUserRegistrationNotification(data: {
+    userId: number;
+    user: { id: number; email: string; firstName: string; lastName: string };
+    userType: 'host' | 'tourguide' | 'agent';
+    phone?: string | null;
+    applicationId?: string;
+    additionalInfo?: any;
+  }): Promise<void> {
+    const userTypeLabels = {
+      host: 'Host',
+      tourguide: 'Tour Guide',
+      agent: 'Agent'
+    };
+
+    await this.sendNotification({
+      type: 'new_user_registration',
+      title: `New ${userTypeLabels[data.userType]} Registration`,
+      message: `${data.user.firstName} ${data.user.lastName} has registered as a ${userTypeLabels[data.userType]}`,
+      severity: 'medium',
+      user: data.user,
+      resource: {
+        id: data.userId,
+        name: `${data.user.firstName} ${data.user.lastName} - ${userTypeLabels[data.userType]}`,
+        type: 'user'
+      },
+      metadata: {
+        userId: data.userId,
+        userType: userTypeLabels[data.userType],
+        email: data.user.email,
+        phone: data.phone || 'Not provided',
+        applicationId: data.applicationId || 'N/A',
+        registeredAt: new Date().toISOString(),
+        status: 'Pending Review',
+        ...data.additionalInfo
+      },
+      actionUrl: `${this.companyInfo.website}/admin/users/${data.userId}`
     });
   }
 }

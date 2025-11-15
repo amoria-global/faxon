@@ -41,6 +41,15 @@ export class BrevoWhatsAppService {
     if (!this.senderNumber) {
       console.warn('⚠️  BREVO_WHATSAPP_SENDER_NUMBER not set. WhatsApp messages may fail.');
     }
+
+    // Validate WhatsApp template IDs
+    if (!this.templateIds.withdrawalOTP) {
+      console.warn('⚠️  BREVO_WHATSAPP_WITHDRAWAL_OTP_TEMPLATE_ID is not set!');
+      console.warn('   WhatsApp OTP messages will fail until this is configured.');
+      console.warn('   Please add this environment variable to your .env file.');
+      console.warn('   You can find your template ID in: Brevo Dashboard → Campaigns → WhatsApp → Templates');
+      console.warn('   Example: BREVO_WHATSAPP_WITHDRAWAL_OTP_TEMPLATE_ID=123456789');
+    }
   }
 
   /**
@@ -242,15 +251,21 @@ export class BrevoWhatsAppService {
 
         // Log OTP attempt in database with registered phone confirmation
         try {
-          await prisma.$executeRaw`
-            INSERT INTO sms_logs ("userId", "phoneNumber", "messageType", status, metadata, "createdAt")
-            VALUES (${userId}, ${formattedPhone}, 'withdrawal_otp_whatsapp', 'sent', ${JSON.stringify({
-              amount,
-              currency,
-              phoneVerified: 'database_registered',
-              channel: 'whatsapp'
-            })}, NOW())
-          `;
+          await prisma.smsLog.create({
+            data: {
+              userId,
+              phoneNumber: formattedPhone,
+              messageType: 'withdrawal_otp_whatsapp',
+              status: 'sent',
+              messageId: whatsappResult.messageId,
+              metadata: {
+                amount,
+                currency,
+                phoneVerified: 'database_registered',
+                channel: 'whatsapp'
+              }
+            }
+          });
         } catch (dbError) {
           console.error('Failed to log WhatsApp message:', dbError);
           // Don't fail the main operation
@@ -287,16 +302,22 @@ export class BrevoWhatsAppService {
 
         // Log failed WhatsApp attempt
         try {
-          await prisma.$executeRaw`
-            INSERT INTO sms_logs ("userId", "phoneNumber", "messageType", status, metadata, "createdAt")
-            VALUES (${userId}, ${formattedPhone}, 'withdrawal_otp_whatsapp', 'failed', ${JSON.stringify({
-              amount,
-              currency,
+          await prisma.smsLog.create({
+            data: {
+              userId,
+              phoneNumber: formattedPhone,
+              messageType: 'withdrawal_otp_whatsapp',
+              status: 'failed',
               error: whatsappResult.error,
-              fallbackToEmail: true,
-              channel: 'whatsapp'
-            })}, NOW())
-          `;
+              metadata: {
+                amount,
+                currency,
+                error: whatsappResult.error,
+                fallbackToEmail: true,
+                channel: 'whatsapp'
+              }
+            }
+          });
         } catch (dbError) {
           console.error('Failed to log WhatsApp message:', dbError);
         }

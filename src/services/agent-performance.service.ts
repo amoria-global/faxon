@@ -232,8 +232,8 @@ export class AgentPerformanceService {
     const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
-    const [currentIncome, lastMonthIncome] = await Promise.all([
-      // Current month commissions
+    const [currentIncome, lastMonthIncome, currentPending, lastMonthPending] = await Promise.all([
+      // Current month commissions (earned + paid)
       prisma.agentCommission.aggregate({
         where: {
           agentId,
@@ -242,7 +242,7 @@ export class AgentPerformanceService {
         },
         _sum: { amount: true }
       }),
-      // Last month commissions
+      // Last month commissions (earned + paid)
       prisma.agentCommission.aggregate({
         where: {
           agentId,
@@ -250,15 +250,40 @@ export class AgentPerformanceService {
           status: { in: ['earned', 'paid'] }
         },
         _sum: { amount: true }
+      }),
+      // FIX: Also get pending commissions for current month
+      prisma.agentCommission.aggregate({
+        where: {
+          agentId,
+          createdAt: { gte: currentMonth },
+          status: 'pending'
+        },
+        _sum: { amount: true }
+      }),
+      // Pending commissions from last month
+      prisma.agentCommission.aggregate({
+        where: {
+          agentId,
+          createdAt: { gte: lastMonth, lt: currentMonth },
+          status: 'pending'
+        },
+        _sum: { amount: true }
       })
     ]);
 
     const currentValue = currentIncome._sum.amount || 0;
     const lastMonthValue = lastMonthIncome._sum.amount || 0;
+    const currentPendingValue = currentPending._sum.amount || 0;
+    const lastMonthPendingValue = lastMonthPending._sum.amount || 0;
+
+    // FIX: Include pending in total for more accurate representation
+    const totalCurrentValue = currentValue + currentPendingValue;
     const change = lastMonthValue > 0 ? ((currentValue - lastMonthValue) / lastMonthValue) * 100 : 0;
 
     return {
-      value: Math.round(currentValue),
+      value: Math.round(currentValue), // Confirmed earnings
+      pending: Math.round(currentPendingValue), // Pending earnings
+      total: Math.round(totalCurrentValue), // Total (confirmed + pending)
       change: Math.round(change)
     };
   }
