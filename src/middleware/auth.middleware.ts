@@ -28,6 +28,25 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
   }
 };
 
+// Optional authentication - adds user to request if token is provided, but allows access without token
+export const optionalAuthenticate = (req: Request, res: Response, next: NextFunction) => {
+  const token = req.headers.authorization?.split(' ')[1];
+
+  // If no token provided, continue without authentication
+  if (!token) {
+    return next();
+  }
+
+  try {
+    const decoded = jwt.verify(token, config.jwtSecret) as JwtPayload;
+    req.user = decoded;
+    next();
+  } catch (error) {
+    // If token is invalid, continue without authentication instead of throwing error
+    next();
+  }
+};
+
 // Role-based authentication middleware
 export const authorize = (...allowedRoles: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {

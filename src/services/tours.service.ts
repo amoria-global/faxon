@@ -231,7 +231,7 @@ export class TourService {
     };
   }
 
-  async getTourById(tourId: string): Promise<TourInfo | null> {
+  async getTourById(tourId: string, userType?: string): Promise<TourInfo | null> {
     const tour = await prisma.tour.findFirst({
       where: { id: tourId, isActive: true },
       include: {
@@ -268,8 +268,15 @@ export class TourService {
       data: { views: { increment: 1 } }
     });
 
-    // Apply 14% markup for guest view
-    return this.formatTourInfoForGuest(tour);
+    // Check if user is host, agent, or tourguide - if so, skip markup
+    // Apply 14% markup only for guest view (not for hosts, agents, or tour guides)
+    const shouldApplyMarkup = !userType || !['host', 'agent', 'tourguide'].includes(userType);
+
+    if (shouldApplyMarkup) {
+      return this.formatTourInfoForGuest(tour);
+    } else {
+      return this.formatTourInfo(tour);
+    }
   }
 
   async getFeaturedTours(limit: number = 8): Promise<TourSummary[]> {

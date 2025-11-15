@@ -80,7 +80,7 @@ export class TourController {
     }
   };
 
-  getTourById = async (req: Request, res: Response): Promise<void> => {
+  getTourById = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const tourId = req.params.id;
 
@@ -92,8 +92,11 @@ export class TourController {
         return;
       }
 
-      const tour = await this.tourService.getTourById(tourId);
-      
+      // Get user type from authenticated request (if available)
+      const userType = req.user?.userType;
+
+      const tour = await this.tourService.getTourById(tourId, userType);
+
       if (!tour) {
         res.status(404).json({
           success: false,

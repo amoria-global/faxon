@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { TourController } from '../controllers/tours.controller';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware';
 import {
   validateTour,
   validateTourGuide,
@@ -29,7 +29,8 @@ router.get('/featured', cacheMiddleware(600), tourController.getFeaturedTours);
 router.get('/categories', cacheMiddleware(3600), tourController.getTourCategories);
 router.get('/suggestions/location', cacheMiddleware(1800), tourController.getLocationSuggestions);
 router.get('/guides/search', cacheMiddleware(300), tourController.searchTourGuides);
-router.get('/:id', cacheMiddleware(300), tourController.getTourById);
+// Get tour by ID - uses optional auth to detect user type and skip tax markup for hosts/agents/tourguides
+router.get('/:id', optionalAuthenticate, cacheMiddleware(300), tourController.getTourById);
 router.get('/:id/reviews', cacheMiddleware(300), tourController.getTourReviews);
 router.get('/:id/schedules', cacheMiddleware(300), tourController.getTourSchedules);
 
